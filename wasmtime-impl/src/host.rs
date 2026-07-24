@@ -149,17 +149,35 @@ fn to_message(inbound: InboundMessage) -> WebrtcResult<Message> {
     }
 }
 
-/// A [`StreamConsumer`] that drains every byte of a `stream<u8>` into a buffer,
-/// handing the completed buffer back through `done_tx` when the stream ends.
+/// A drained `stream-message` payload: the bytes stored up to the declared
+/// length, plus a count of any bytes the stream carried past it (consumed but
+/// not buffered, so a mis-declared length cannot grow host memory unbounded).
+#[derive(Default)]
+struct CollectedPayload {
+    data: Vec<u8>,
+    excess: u64,
+}
+
+/// A [`StreamConsumer`] that drains every byte of a `stream<u8>` into a
+/// buffer bounded by the message's declared `length` (bytes past it are
+/// counted, not stored), handing the result back through `done_tx` when the
+/// stream ends.
 struct ByteCollector {
     buf: Vec<u8>,
-    done_tx: Option<oneshot::Sender<Vec<u8>>>,
+    /// The message's declared `length`: the buffering bound.
+    limit: usize,
+    /// Bytes received past `limit`, consumed and discarded.
+    excess: u64,
+    done_tx: Option<oneshot::Sender<CollectedPayload>>,
 }
 
 impl ByteCollector {
     fn finish(&mut self) {
         if let Some(tx) = self.done_tx.take() {
-            let _ = tx.send(std::mem::take(&mut self.buf));
+            let _ = tx.send(CollectedPayload {
+                data: std::mem::take(&mut self.buf),
+                excess: self.excess,
+            });
         }
     }
 }
@@ -180,6 +198,11 @@ impl<D: Send + 'static> StreamConsumer<D> for ByteCollector {
         if available > 0 {
             let mut chunk = Vec::with_capacity(available);
             source.read(&mut store, &mut chunk)?;
+            let room = this.limit.saturating_sub(this.buf.len());
+            if chunk.len() > room {
+                this.excess += (chunk.len() - room) as u64;
+                chunk.truncate(room);
+            }
             this.buf.extend_from_slice(&chunk);
             return Poll::Ready(Ok(StreamResult::Completed));
         }
@@ -279,11 +302,11 @@ impl<D: Send + 'static> StreamProducer<D> for InboundStreamMessages {
 }
 
 /// One outbound message parsed from a `stream<stream-message>` element: its kind,
-/// declared length, and a receiver for its fully-drained payload bytes.
+/// declared length, and a receiver for its fully-drained payload.
 struct PendingSend {
     is_string: bool,
     length: usize,
-    done_rx: oneshot::Receiver<Vec<u8>>,
+    done_rx: oneshot::Receiver<CollectedPayload>,
 }
 
 /// A [`StreamConsumer`] that reads each `stream-message` from a
@@ -331,8 +354,12 @@ impl<D: Send + 'static> StreamConsumer<D> for OutboundStreamMessages {
             let (done_tx, done_rx) = oneshot::channel();
             message.data.pipe(
                 store.as_context_mut(),
+                // Grow the buffer as bytes arrive (bounded by the declared
+                // length) rather than pre-allocating the guest-declared size.
                 ByteCollector {
-                    buf: Vec::with_capacity(length),
+                    buf: Vec::new(),
+                    limit: length,
+                    excess: 0,
                     done_tx: Some(done_tx),
                 },
             )?;
@@ -374,13 +401,22 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
             Message::String(text) => (true, text.into_bytes()),
         };
 
-        let wired = match wired.await {
-            Ok(wired) => wired,
-            Err(err) => return Ok(Err(err.into())),
-        };
-        Ok(send_channel_message(&wired.channel, is_string, data)
-            .await
-            .map_err(Error::from))
+        // Race the send against the owning connection closing, mirroring
+        // `receive`: the `webrtc` 0.20 wrapper neither errors sends nor wakes
+        // `wired` after `PeerConnection::close`, so without the race a send on
+        // a never-opened channel could pend forever and a send landing just
+        // after close could report success for a silently dropped message.
+        // Biased order: a send that completes wins over the close signal.
+        let mut op = std::pin::pin!(async move {
+            let wired = wired.await?;
+            send_channel_message(&wired.channel, is_string, data).await
+        }
+        .fuse());
+        let mut closed = std::pin::pin!(conn_closed.fired().fuse());
+        Ok(futures::select_biased! {
+            result = op => result.map_err(Error::from),
+            _ = closed => Err(Error::Closed),
+        })
     }
 
     async fn receive(
@@ -441,16 +477,34 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         self_: Resource<DataChannel>,
         messages: StreamReader<StreamMessage>,
     ) -> Result<std::result::Result<(), SendViaStreamError>> {
-        let wired = accessor
-            .with(|mut access| Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.wired()))?;
-        let channel = match wired.await {
-            Ok(wired) => wired.channel,
-            Err(err) => {
-                return Ok(Err(SendViaStreamError {
-                    error: err.into(),
-                    sent: 0,
-                }))
-            }
+        let (wired, conn_closed) = accessor.with(|mut access| {
+            let channel = access.get().table.get(&self_)?;
+            Ok::<_, wasmtime::Error>((channel.wired(), channel.conn_closed()))
+        })?;
+        let closed_err = |sent| {
+            Ok(Err(SendViaStreamError {
+                error: Error::Closed,
+                sent,
+            }))
+        };
+
+        // Every await below races the owning connection's close signal (see
+        // `send` for why the wrapper reports nothing itself), biased toward
+        // completing the real work when both are ready.
+        let mut closed = std::pin::pin!(conn_closed.fired().fuse());
+
+        let mut wired = std::pin::pin!(wired.fuse());
+        let channel = futures::select_biased! {
+            wired = wired => match wired {
+                Ok(wired) => wired.channel,
+                Err(err) => {
+                    return Ok(Err(SendViaStreamError {
+                        error: err.into(),
+                        sent: 0,
+                    }))
+                }
+            },
+            _ = closed => return closed_err(0),
         };
 
         // Drain each element's payload concurrently (via `OutboundStreamMessages`)
@@ -459,34 +513,45 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         let (tx, mut rx) = mpsc::unbounded::<PendingSend>();
         accessor.with(|access| messages.pipe(access, OutboundStreamMessages { tx }))?;
 
-        let conn_closed = accessor.with(|mut access| {
-            Ok::<_, wasmtime::Error>(access.get().table.get(&self_)?.conn_closed())
-        })?;
         let mut sent: u64 = 0;
-        while let Some(pending) = rx.next().await {
-            if conn_closed.is_closed() {
-                return Ok(Err(SendViaStreamError {
-                    error: Error::Closed,
-                    sent,
-                }));
-            }
-            let data = pending.done_rx.await.unwrap_or_default();
-            if data.len() != pending.length {
+        loop {
+            let pending = futures::select_biased! {
+                pending = rx.next() => match pending {
+                    Some(pending) => pending,
+                    None => break,
+                },
+                _ = closed => return closed_err(sent),
+            };
+            let mut done_rx = std::pin::pin!(pending.done_rx.fuse());
+            let payload = futures::select_biased! {
+                payload = done_rx => payload.unwrap_or_default(),
+                _ = closed => return closed_err(sent),
+            };
+            if payload.excess > 0 || payload.data.len() != pending.length {
                 return Ok(Err(SendViaStreamError {
                     error: WebrtcError::msg(format!(
                         "stream-message payload was {} bytes but length declared {}",
-                        data.len(),
+                        payload.data.len() as u64 + payload.excess,
                         pending.length
                     ))
                     .into(),
                     sent,
                 }));
             }
-            if let Err(error) = send_channel_message(&channel, pending.is_string, data).await {
-                return Ok(Err(SendViaStreamError {
-                    error: error.into(),
-                    sent,
-                }));
+            let mut send =
+                std::pin::pin!(
+                    send_channel_message(&channel, pending.is_string, payload.data).fuse()
+                );
+            futures::select_biased! {
+                result = send => {
+                    if let Err(error) = result {
+                        return Ok(Err(SendViaStreamError {
+                            error: error.into(),
+                            sent,
+                        }));
+                    }
+                }
+                _ = closed => return closed_err(sent),
             }
             sent += 1;
         }

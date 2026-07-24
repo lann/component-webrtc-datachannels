@@ -27,6 +27,7 @@ use std::time::Duration;
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot;
 use futures::future::{FutureExt, Shared};
+use futures::StreamExt as _;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 use webrtc::data_channel::RTCDataChannelInit;
@@ -497,14 +498,30 @@ fn connection_handler(
             .on_gathering_complete(move || {
                 gather_cand_tx.lock().unwrap().take();
             })
-            .on_data_channel(move |channel| {
-                let inc_tx = inc_tx.clone();
-                let signal = close_sig.clone();
-                tokio::spawn(async move {
-                    let label = channel.label().await.unwrap_or_default();
-                    let wired = wire_open_channel(channel);
-                    let _ = inc_tx.unbounded_send(DataChannel::deferred(label, wired, signal));
-                });
+            .on_data_channel({
+                // Deliver incoming channels in the order they open (the WIT
+                // contract): the callback forwards each channel synchronously
+                // onto an ordered queue, and one dispatcher task per
+                // connection awaits the async `label()` and wires them
+                // sequentially — a per-channel task here could reorder two
+                // channels opened in quick succession.
+                let (raw_tx, mut raw_rx) = mpsc::unbounded::<Arc<dyn WebrtcDataChannel>>();
+                if Handle::try_current().is_ok() {
+                    tokio::spawn(async move {
+                        while let Some(channel) = raw_rx.next().await {
+                            let label = channel.label().await.unwrap_or_default();
+                            let wired = wire_open_channel(channel);
+                            let _ = inc_tx.unbounded_send(DataChannel::deferred(
+                                label,
+                                wired,
+                                close_sig.clone(),
+                            ));
+                        }
+                    });
+                }
+                move |channel| {
+                    let _ = raw_tx.unbounded_send(channel);
+                }
             })
             .on_connection_state(move |s| {
                 match s {
