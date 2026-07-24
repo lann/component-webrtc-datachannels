@@ -256,6 +256,14 @@ in doubt about whether a recipe's scope is touched, run it.
 running either rebuilds the component first. Keep the implementations producing
 the same result — the conformance suite is what asserts it.
 
+### Awaiting PR checks
+
+To wait for a pull request's CI checks, use `gh pr checks`' own watch mode
+bounded by a timeout — e.g. `timeout 900 gh pr checks <pr> --watch` — rather
+than polling with `sleep … && gh pr checks`. Watch mode returns as soon as the
+checks settle (a fixed sleep either wastes the difference or wakes up too
+early), and the `timeout` bound keeps a wedged run from hanging the session.
+
 ## Code comments
 
 Code comments describe **what** something is or does, not the process by which
