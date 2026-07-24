@@ -30,6 +30,8 @@
 //!   multicast-socket options (`SO_REUSEADDR`/`SO_REUSEPORT`) that multicast-DNS
 //!   candidate gathering binds with, and the peers connect over their explicit
 //!   host candidates rather than `.local` names, so mDNS is unnecessary here.
+//!   The executor also arms the peer's Shadow syscall shim by setting
+//!   [`SHADOW_SYSCALL_SHIM_ENV`] in each simulated peer's environment.
 //! - `wasip3-guest` runs the fully composed wasip3 conformance component under
 //!   `wasmtime run` (the same invocation as the loopback adapter), pointing the
 //!   in-guest provider at the host's simulated address through the
@@ -46,7 +48,7 @@ use clap::Parser;
 use conformance_adapter_common::peer_command::{PeerCommand, PeerKind, PeerRun};
 use conformance_adapter_common::{
     fold_two, outcome_to_raw, params_for, parse_result_line, write_report, AdapterReport,
-    RawResult, TestOutcome, TWO_PEER_TESTS,
+    RawResult, TestOutcome, SHADOW_SYSCALL_SHIM_ENV, TWO_PEER_TESTS,
 };
 
 #[derive(Debug, Parser)]
@@ -254,6 +256,7 @@ fn render_config(
                 json_str("--port"),
                 json_str(&cli.signaling_port.to_string()),
             ],
+            &[],
             "0s",
             Some("running"),
         );
@@ -277,11 +280,20 @@ fn render_config(
             // Each argv element is quoted at emit time as a double-quoted
             // YAML/JSON scalar.
             let argv: Vec<String> = argv.iter().map(|a| json_str(a)).collect();
+            // Arm the native peer's Shadow syscall shim: it bridges Shadow's
+            // syscall surface to the webrtc driver's quinn-udp UDP layer and
+            // engages only when this variable is set (the wasip3-guest peer
+            // has no shim; its UDP goes through wasi:sockets).
+            let env: &[(&str, &str)] = match cli.peer_kind {
+                PeerKind::Wasmtime => &[(SHADOW_SYSCALL_SHIM_ENV, "1")],
+                PeerKind::Wasip3Guest => &[],
+            };
             emit_host(
                 &mut s,
                 &format!("{role}{}", p.index),
                 ip,
                 &argv,
+                env,
                 // Give the signaling server a moment to bind; peer-side long-poll
                 // retries cover any residual race.
                 "2s",
@@ -292,12 +304,13 @@ fn render_config(
     Ok(s)
 }
 
-/// Emit one Shadow host running a single process.
+/// Emit one Shadow host running a single process with the given environment.
 fn emit_host(
     s: &mut String,
     name: &str,
     ip: &str,
     args: &[String],
+    env: &[(&str, &str)],
     start_time: &str,
     expected_running: Option<&str>,
 ) {
@@ -307,6 +320,13 @@ fn emit_host(
     let _ = writeln!(s, "    processes:");
     let _ = writeln!(s, "    - path: {}", args[0]);
     let _ = writeln!(s, "      args: [{}]", args[1..].join(", "));
+    if !env.is_empty() {
+        let pairs: Vec<String> = env
+            .iter()
+            .map(|(k, v)| format!("{k}: {}", json_str(v)))
+            .collect();
+        let _ = writeln!(s, "      environment: {{ {} }}", pairs.join(", "));
+    }
     let _ = writeln!(s, "      start_time: {start_time}");
     if let Some(state) = expected_running {
         let _ = writeln!(s, "      expected_final_state: {state}");

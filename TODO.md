@@ -75,10 +75,11 @@ needs syscalls the Shadow simulator does not implement — Shadow rejects the
 does not implement `recvmmsg` (`ENOSYS`), which quinn-udp's Linux receive
 path calls with no fallback. The conformance Shadow lab bridges this with
 an in-binary syscall shim compiled into its `conformance-peer` build
-(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, cargo feature
-`shadow-syscall-shim`): each override forwards the call and stubs only
+(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, armed by the
+`CONFORMANCE_SHADOW_SYSCALL_SHIM` environment variable the Shadow executor
+sets on its simulated peers): each override forwards the call and stubs only
 Shadow's documented failure; anything unexpected aborts the peer. Loopback
-and netns paths are unaffected and run shim-free.
+and netns paths never set the variable and get pure pass-through.
 
 The shim is a bridge, not a fix. Retire it when any upstream lands and
 reaches a published release:
