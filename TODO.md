@@ -107,6 +107,23 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
+## F. Conformance suite
+
+### F5. Interop barrier sentinel can be lost to the winner's immediate close
+
+The interop "attempt timed-out" flake family is now diagnosed (via the
+phase-marker logs): in a two-peer test the side that finishes its barrier
+first closes immediately, and the wasmtime host's `close()` tears the
+connection down without draining — the just-sent barrier sentinel can be
+discarded before it reaches the wire, leaving the slower peer (observed:
+the jco-browser offerer, its wasmtime partner passing in ~2s) waiting for
+a sentinel that never arrives; the browser does not surface the dirty
+teardown as a channel close within the 90s guard. Fix candidates: a
+bounded close-drain in the wasmtime host mirroring `wasip3-impl`'s
+`CLOSE_DRAIN` (flush queued sends before tearing down), or making the
+conformance barrier ack-acked so neither side closes before both
+sentinels are confirmed received.
+
 ## G. Development environment / CI
 
 ### G1. jco transpile flags are not checked against the WIT
