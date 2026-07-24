@@ -279,6 +279,8 @@ export class PeerConnection {
   #everConnected = false;
   /** True once `close()` has been called. */
   #closed = false;
+  /** True once the connection reached the terminal `failed` state. */
+  #failed = false;
   /** Take-once claims for the resource's two streams (see the WIT contract). */
   #candidatesTaken = false;
   #channelsTaken = false;
@@ -295,8 +297,18 @@ export class PeerConnection {
     // Latch `connected` as soon as it is reached, independent of any
     // `waitConnected` caller: the WIT contract keeps reporting a
     // once-connected connection as connected even after a later close.
+    // Latch `failed` the same way: a failed connection is terminally over
+    // per the WIT contract, so it makes the same observations `close()`
+    // makes — pending waiters are woken and the resource's streams end.
     const latch = () => {
       if (this.#isConnectedNow()) this.#everConnected = true;
+      if (!this.#failed && this.#isFailedNow()) {
+        this.#failed = true;
+        for (const hook of this.#closeHooks) hook();
+        this.#closeHooks.clear();
+        this.#candidates.end();
+        this.#channels.end();
+      }
     };
     this.#pc.addEventListener("connectionstatechange", latch);
     this.#pc.addEventListener("iceconnectionstatechange", latch);
@@ -330,7 +342,7 @@ export class PeerConnection {
    * input handling, so a malformed argument after close is still `closed`).
    */
   #requireOpen() {
-    if (this.#closed || this.#pc.connectionState === "closed") {
+    if (this.#closed || this.#failed || this.#isFailedNow() || this.#pc.connectionState === "closed") {
       throw { tag: "closed" };
     }
   }
@@ -340,6 +352,12 @@ export class PeerConnection {
       this.#pc.connectionState === "connected" ||
       this.#pc.iceConnectionState === "connected" ||
       this.#pc.iceConnectionState === "completed"
+    );
+  }
+
+  #isFailedNow() {
+    return (
+      this.#pc.connectionState === "failed" || this.#pc.iceConnectionState === "failed"
     );
   }
 
@@ -459,10 +477,7 @@ export class PeerConnection {
    */
   async waitConnected() {
     const pc = this.#pc;
-    const isFailed = () =>
-      pc.connectionState === "failed" ||
-      pc.iceConnectionState === "failed" ||
-      pc.connectionState === "closed";
+    const isFailed = () => this.#isFailedNow() || pc.connectionState === "closed";
 
     if (this.#isConnectedNow()) this.#everConnected = true;
     if (this.#everConnected) return;

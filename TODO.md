@@ -146,29 +146,6 @@ All in `wasmtime-impl/src/host.rs` unless noted:
    afterwards (the `DataChannel::deferred` machinery already supports
    deferred wiring).
 
-### E9. jco host: a failed connection never terminates per the WIT
-
-In `jco-impl/webrtc.js` and its conformance twin
-`conformance/adapters/jco/webrtc.js` (see F6):
-
-- `#requireOpen` checks `#closed || connectionState === "closed"` but not
-  `"failed"` (`jco-impl/webrtc.js:331-335`), so methods on a
-  failed-but-not-closed connection proceed into the browser API and surface
-  as `other`/`invalid-signaling` instead of `error.closed`
-  (`wit/webrtc.wit:258-260`: the connection is terminally over when "closed
-  by `close` **or has failed**").
-- The `#channels` incoming stream is ended only from `close()`
-  (`jco-impl/webrtc.js:512`); a connection *failure* never ends it, so a
-  guest reading `incoming-data-channels` after a failure hangs forever —
-  the WIT promises the stream "ends when the connection closes or fails"
-  (`wit/webrtc.wit:269-270`). Same for the candidates stream.
-
-`waitConnected` already detects `failed` (`jco-impl/webrtc.js:461-464`), so
-the fix is to hoist that detection into a `connectionstatechange` handler
-that latches failure and runs the same stream-ending/`#closeHooks` teardown
-as `close()`. Coordinate with F5's deferred-teardown work, which touches the
-same close path.
-
 ### E10. Consolidate scattered configuration; publish the env-var contract
 
 - Two Wasmtime-host knobs live outside `WasiWebrtcCtx` despite its docs
@@ -369,8 +346,7 @@ drifted rename fails fast with a clear message.
    `patch-generated.mjs` fail closed and pin jco (F8), the jco close-drain
    half of the barrier race (F5).
 2. Implementation contract gaps found incidentally: Wasmtime
-   close-observation and `send-via-stream` buffering (E8), jco failed-state
-   termination (E9).
+   close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
