@@ -211,6 +211,7 @@ impl GuestDataChannel for DataChannel {
                 let mut s = self.shared.borrow_mut();
                 seen = s.watch.version();
                 let dead = s.closed || s.failed;
+                let pending_claim = s.pending_stream_claims.contains(&self.id);
                 match s.channel_mut(self.id) {
                     Some(channel) => {
                         // `receive-via-stream` has claimed the inbound
@@ -233,6 +234,9 @@ impl GuestDataChannel for DataChannel {
                             return Err(Error::Closed);
                         }
                     }
+                    // `receive-via-stream` claimed the channel while it was
+                    // still opening.
+                    None if pending_claim => return Err(Error::ReceivingViaStream),
                     // Not yet tracked: still opening unless the connection died.
                     None if dead => return Err(Error::Closed),
                     None => {}
@@ -283,20 +287,28 @@ impl GuestDataChannel for DataChannel {
         {
             let mut s = self.shared.borrow_mut();
             // Once-only: the first call claims the channel's inbound messages.
-            if let Some(channel) = s.channel_mut(self.id) {
-                if channel.stream_claimed {
-                    return Err(Error::ReceivingViaStream);
+            // A channel the pump has not yet tracked (state `Opening`) records
+            // the claim in `pending_stream_claims`, applied when its open
+            // event drains.
+            match channel_state(&mut s, self.id) {
+                ChannelState::Closed => return Err(Error::Closed),
+                ChannelState::Open => {
+                    let channel = s.channel_mut(self.id).expect("open channel is tracked");
+                    if channel.stream_claimed {
+                        return Err(Error::ReceivingViaStream);
+                    }
+                    channel.stream_claimed = true;
+                }
+                ChannelState::Opening => {
+                    if s.pending_stream_claims.contains(&self.id) {
+                        return Err(Error::ReceivingViaStream);
+                    }
+                    s.pending_stream_claims.push(self.id);
                 }
             }
-            if matches!(channel_state(&mut s, self.id), ChannelState::Closed) {
-                return Err(Error::Closed);
-            }
-            if let Some(channel) = s.channel_mut(self.id) {
-                channel.stream_claimed = true;
-                // Wake pending `receive`s so they resolve with
-                // `receiving-via-stream`.
-                s.watch.notify();
-            }
+            // Wake pending `receive`s so they resolve with
+            // `receiving-via-stream`.
+            s.watch.notify();
         }
         let shared = self.shared.clone();
         let id = self.id;
@@ -320,8 +332,6 @@ struct PeerState {
     shared: Rc<RefCell<Shared>>,
     nudge: mpsc::UnboundedSender<()>,
     local_candidate: String,
-    /// The id of the channel created locally via `create-data-channel`, if any.
-    local_channel: Option<rtc::data_channel::RTCDataChannelId>,
     /// The local host candidate, delivered once through `local-ice-candidates`.
     candidate_taken: bool,
     /// Whether `incoming-data-channels` has been taken: the stream is
@@ -364,7 +374,6 @@ impl GuestPeerConnection for PeerConnection {
                 shared: runtime.shared(),
                 nudge: runtime.pump_nudge(),
                 local_candidate: candidate,
-                local_channel: None,
                 candidate_taken: false,
                 incoming_taken: false,
                 started_pump: false,
@@ -378,7 +387,7 @@ impl GuestPeerConnection for PeerConnection {
         options: crate::exports::lann::webrtc_datachannels::connections::DataChannelOptions,
     ) -> Result<crate::exports::lann::webrtc_datachannels::connections::DataChannel, Error> {
         let config = options.get::<DataChannelOptions>().snapshot();
-        let mut state = self.live()?;
+        let state = self.live()?;
         let id = {
             let mut s = state.shared.borrow_mut();
             // Per the WIT contract, methods on a closed connection fail
@@ -386,11 +395,15 @@ impl GuestPeerConnection for PeerConnection {
             if s.closed || s.failed {
                 return Err(Error::Closed);
             }
-            s.peer
+            let id = s
+                .peer
                 .create_data_channel(&config.label, config.ordered, config.max_retransmits)
-                .map_err(|e| Error::Other(e.to_string()))?
+                .map_err(|e| Error::Other(e.to_string()))?;
+            // Record the id as locally created so `incoming-data-channels`
+            // never delivers it.
+            s.local_channels.push(id);
+            id
         };
-        state.local_channel = Some(id);
         let dc = DataChannel {
             shared: state.shared.clone(),
             nudge: state.nudge.clone(),
@@ -417,8 +430,7 @@ impl GuestPeerConnection for PeerConnection {
         state.incoming_taken = true;
         let shared = state.shared.clone();
         let nudge = state.nudge.clone();
-        let local_channel = state.local_channel;
-        wit_bindgen::spawn_local(pump_incoming(shared, nudge, local_channel, tx));
+        wit_bindgen::spawn_local(pump_incoming(shared, nudge, tx));
         rx
     }
 
@@ -580,8 +592,7 @@ impl GuestPeerConnection for PeerConnection {
 /// side did not create locally, until the connection closes.
 async fn pump_incoming(
     shared: Rc<RefCell<Shared>>,
-    _nudge: mpsc::UnboundedSender<()>,
-    local_channel: Option<rtc::data_channel::RTCDataChannelId>,
+    nudge: mpsc::UnboundedSender<()>,
     mut tx: wit_bindgen::StreamWriter<
         crate::exports::lann::webrtc_datachannels::connections::DataChannel,
     >,
@@ -597,7 +608,7 @@ async fn pump_incoming(
                 let id = s.channels[cursor].id;
                 let label = s.channels[cursor].label.clone();
                 cursor += 1;
-                if Some(id) != local_channel {
+                if !s.local_channels.contains(&id) {
                     found = Some((id, label));
                     break;
                 }
@@ -612,7 +623,7 @@ async fn pump_incoming(
         if let Some((id, label)) = next {
             let dc = DataChannel {
                 shared: shared.clone(),
-                nudge: mpsc::unbounded().0,
+                nudge: nudge.clone(),
                 id,
                 label,
             };

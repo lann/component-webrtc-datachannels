@@ -108,43 +108,6 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E7. wasip3-impl provider: three related channel-plumbing bugs
-
-All in `wasip3-impl/src/provider.rs`:
-
-1. **Incoming channels get a disconnected pump waker.** `pump_incoming`
-   receives the real waker but binds it as `_waker` and never uses it
-   (`provider.rs:581`); each remote-initiated `DataChannel` handle is built
-   with `waker: mpsc::unbounded().0` — a sender whose receiver is dropped
-   immediately (`provider.rs:613`). `send()` on such a channel nudges nobody,
-   so the outbound flush waits for the 50 ms tick (`runtime.rs:40`) or an
-   unrelated inbound datagram: up to 50 ms latency per send on answered
-   channels. Fix: pass the real waker through (the parameter is already
-   threaded; this looks like unfinished wiring). The dead-peer placeholder at
-   `provider.rs:370` is a separate, legitimate use of a disconnected sender.
-2. **`receive-via-stream` claims are lost while a channel is still
-   `Opening`.** The claim logic (`provider.rs:282-306`) does three separate
-   `channel_mut` lookups; when the channel is not yet tracked (state
-   `Opening` — the normal case right after `create-data-channel`), the
-   `stream_claimed` check is skipped *and* the flag is never set, yet a pump
-   is spawned and a stream returned. A second call in that window spawns a
-   competing pump (messages split arbitrarily between two streams), and later
-   `receive()` calls never get `error.receiving-via-stream` — violating the
-   once-only contract (`wit/webrtc.wit:237-241`). Fix: record pending claims
-   somewhere that survives the channel not being tracked yet (e.g. a
-   pending-claims set on `Shared`, applied in `apply_event`'s `ChannelOpen`).
-3. **`local_channel` is a single overwritten `Option`.**
-   `create_data_channel` overwrites it (`provider.rs:322, 399`) and
-   `incoming_data_channels` snapshots it once when the stream is taken
-   (`provider.rs:425`, filtered at `provider.rs:598`). With two locally
-   created channels the first is no longer filtered and is delivered on
-   `incoming-data-channels` as if remote-opened; taking the stream before
-   creating a channel mis-delivers the local channel too
-   (`wit/webrtc.wit:269-270` promises "channels opened by the remote peer").
-   Fix: a live set of locally created ids on `Shared`, consulted by
-   `pump_incoming`. The shipped consumer creates-then-takes with one channel,
-   which is what masks all three bugs today.
-
 ### E8. Wasmtime host: close observation and `send-via-stream` buffering
 
 All in `wasmtime-impl/src/host.rs` unless noted:
@@ -405,9 +368,9 @@ drifted rename fails fast with a clear message.
    dispose hooks (F6), wire `list-tests` + loud missing results (F7), make
    `patch-generated.mjs` fail closed and pin jco (F8), the jco close-drain
    half of the barrier race (F5).
-2. Implementation contract gaps found incidentally: the wasip3 provider trio
-   (E7), Wasmtime close-observation and `send-via-stream` buffering (E8),
-   jco failed-state termination (E9).
+2. Implementation contract gaps found incidentally: Wasmtime
+   close-observation and `send-via-stream` buffering (E8), jco failed-state
+   termination (E9).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
