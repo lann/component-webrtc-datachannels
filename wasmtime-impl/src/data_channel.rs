@@ -61,16 +61,22 @@ pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 /// bound so its overflow probe needs only a small flood.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
-/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set to
-/// a positive integer, else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`].
+/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set,
+/// else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. A set-but-invalid value (not a
+/// positive integer) panics rather than silently reverting to the default:
+/// the variable is primarily a test knob, and a typo that silently restores
+/// the 8 MiB bound would invalidate exactly the test that set it.
 pub(crate) fn max_inbound_buffer_bytes() -> usize {
     static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        std::env::var(MAX_INBOUND_BUFFER_ENV)
+    *LIMIT.get_or_init(|| match std::env::var(MAX_INBOUND_BUFFER_ENV) {
+        Ok(value) if !value.is_empty() => value
+            .parse()
             .ok()
-            .and_then(|value| value.parse().ok())
             .filter(|&bytes| bytes > 0)
-            .unwrap_or(DEFAULT_MAX_INBOUND_BUFFER_BYTES)
+            .unwrap_or_else(|| {
+                panic!("invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count")
+            }),
+        _ => DEFAULT_MAX_INBOUND_BUFFER_BYTES,
     })
 }
 
@@ -87,17 +93,16 @@ pub(crate) struct InboundBudget {
     overflowed: AtomicBool,
 }
 
-impl Default for InboundBudget {
-    fn default() -> Self {
+impl InboundBudget {
+    /// A budget bounded at `limit` payload bytes.
+    pub(crate) fn new(limit: usize) -> Self {
         Self {
-            limit: max_inbound_buffer_bytes(),
+            limit,
             buffered: AtomicUsize::new(0),
             overflowed: AtomicBool::new(false),
         }
     }
-}
 
-impl InboundBudget {
     /// Reserve `len` buffered bytes. Returns `false` — latching the overflow —
     /// if the reservation would exceed the bound or an overflow was already
     /// latched.
@@ -236,7 +241,7 @@ pub(crate) fn close_signal() -> (CloseTrigger, CloseSignal) {
 /// The open signal and inbound-message stream produced by a channel's pump task.
 pub(crate) struct ChannelPump {
     /// Inbound messages drained from the channel, in arrival order, bounded by
-    /// the configured [`max_inbound_buffer_bytes`] bound.
+    /// the connection's configured inbound-buffer bound.
     pub(crate) incoming: InboundQueue,
     /// Resolves once the channel reports `open`.
     pub(crate) open: oneshot::Receiver<()>,
@@ -250,14 +255,17 @@ pub(crate) struct ChannelPump {
 /// `OnClose` (or a `None` poll) ends the pump, dropping the inbound sender so
 /// receivers observe end-of-stream.
 ///
-/// Inbound buffering is bounded by [`max_inbound_buffer_bytes`]: a message that
+/// Inbound buffering is bounded by `max_inbound_buffer_bytes`: a message that
 /// would exceed it latches the overflow on the shared [`InboundBudget`], closes
 /// the channel, and discards that and any later messages; readers drain the
 /// pre-overflow backlog and then surface `error.receive-buffer-overflow`.
-pub(crate) fn spawn_channel_pump(channel: Arc<dyn WebrtcDataChannel>) -> ChannelPump {
+pub(crate) fn spawn_channel_pump(
+    channel: Arc<dyn WebrtcDataChannel>,
+    max_inbound_buffer_bytes: usize,
+) -> ChannelPump {
     let (in_tx, in_rx) = mpsc::unbounded::<InboundMessage>();
     let (open_tx, open_rx) = oneshot::channel::<()>();
-    let budget = Arc::new(InboundBudget::default());
+    let budget = Arc::new(InboundBudget::new(max_inbound_buffer_bytes));
     let pump_budget = budget.clone();
     tokio::spawn(async move {
         let mut open_tx = Some(open_tx);
@@ -297,8 +305,9 @@ pub(crate) fn spawn_channel_pump(channel: Arc<dyn WebrtcDataChannel>) -> Channel
 pub(crate) fn spawn_channel_wiring(
     channel: Arc<dyn WebrtcDataChannel>,
     wire_tx: oneshot::Sender<WebrtcResult<Wired>>,
+    max_inbound_buffer_bytes: usize,
 ) {
-    let pump = spawn_channel_pump(channel.clone());
+    let pump = spawn_channel_pump(channel.clone(), max_inbound_buffer_bytes);
     let incoming = Arc::new(AsyncMutex::new(pump.incoming));
     tokio::spawn(async move {
         match pump.open.await {
@@ -316,9 +325,12 @@ pub(crate) fn spawn_channel_wiring(
 /// with the channel's transport parts once it opens, or [`WebrtcError::Closed`]
 /// if it closes first. Used by the `peer-connection` resource's deferred and
 /// remote-opened channel paths.
-pub(crate) fn wire_open_channel(channel: Arc<dyn WebrtcDataChannel>) -> WiredFuture {
+pub(crate) fn wire_open_channel(
+    channel: Arc<dyn WebrtcDataChannel>,
+    max_inbound_buffer_bytes: usize,
+) -> WiredFuture {
     let (wire_tx, wired) = wiring_channel();
-    spawn_channel_wiring(channel, wire_tx);
+    spawn_channel_wiring(channel, wire_tx, max_inbound_buffer_bytes);
     wired
 }
 

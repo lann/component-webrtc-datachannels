@@ -289,6 +289,23 @@ the conformance suite — enforces the claim: nothing keeps an unenforced
 cross-file claim true, and a reader who trusts it first is misdirected
 exactly when it matters.
 
+## Environment variables
+
+The cross-process environment surface, in one place (each variable is also
+documented at its use site):
+
+| Variable | Read by | Effect |
+| --- | --- | --- |
+| `WEBRTC_UDP_BIND_ADDR` | `wasip3-impl` provider | IP address the in-guest `peer-connection` binds its UDP socket to (and derives its host candidate from); default IPv4 loopback. An unparsable value constructs dead connections (methods fail `closed`; the cause is printed to stderr). |
+| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations (env var in the Rust impls and under Node; a `globalThis` global of the same name in browsers) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. Latched at first read in the Rust impls. |
+| `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
+| `CONFORMANCE_WASMTIME` | conformance wasip3 adapter, interop, netns/Shadow executors | Path of the `wasmtime` binary used to run composed components (default: `wasmtime` on `PATH`). |
+| `CONFORMANCE_NODE` | conformance interop binary | Path of the Node binary for jco peers (default: `node`). |
+| `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `conformance-peer` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated peers. |
+| `CHROME_PATH` / `CHROME_BIN` / `PUPPETEER_EXECUTABLE_PATH` | the browser test and browser conformance adapter | Chrome/Chromium binary override (first set one wins; else auto-detected). |
+| `WASMTIME_LOG` | conformance wasip3 adapter | Forwarded to the spawned `wasmtime` peers (defaulted to surface `wasmtime-wasi-http` warnings). |
+| `SKIP_NODE`, `SKIP_NETNS_LAB` | `scripts/setup.sh` | Skip the npm installs / the netns-lab tooling install. |
+
 ## Real signaling (`rendezvous`): the two-process echo demo
 
 The `webrtc-echo-demo` world stands up *both* peers inside one component

@@ -613,7 +613,14 @@ impl HostPeerConnection for WasiWebrtcCtxView<'_> {
     fn new(&mut self) -> Result<Resource<PeerConnection>> {
         let hook = self.ctx.setting_engine_hook();
         let ice = self.ctx.ice_config();
-        Ok(self.table.push(PeerConnection::new_with(hook, ice))?)
+        let connect_timeout = self.ctx.connect_timeout();
+        let max_inbound = self.ctx.max_inbound_buffer_bytes();
+        Ok(self.table.push(PeerConnection::new_with(
+            hook,
+            ice,
+            connect_timeout,
+            max_inbound,
+        ))?)
     }
 
     fn create_data_channel(

@@ -78,37 +78,6 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E10. Consolidate scattered configuration; publish the env-var contract
-
-- Two Wasmtime-host knobs live outside `WasiWebrtcCtx` despite its docs
-  calling it the stable place to grow configuration: the hardcoded 30 s
-  `CONNECT_TIMEOUT` (`wasmtime-impl/src/peer_connection.rs:46`; WIT makes the
-  bound implementation-defined, so it should be configurable) and the
-  process-global `OnceLock` env read of the inbound buffer bound
-  (`wasmtime-impl/src/data_channel.rs:68-81`), which latches its first read
-  and forbids per-store configuration. Move both onto `WasiWebrtcCtx`
-  (keeping the env var as a default source).
-- The same knob has different failure semantics per implementation:
-  `WEBRTC_MAX_INBOUND_BUFFER_BYTES` silently falls back to the default on a
-  parse failure in wasip3 (`wasip3-impl/src/runtime.rs:141`, `.parse().ok()`)
-  while `WEBRTC_UDP_BIND_ADDR` fails loud (`wasip3-impl/src/provider.rs:44-54`
-  — though the error text is then swallowed by the `Err(_)` dead-peer arm at
-  `provider.rs:367`; surface the message). Align on fail-loud. Also note the
-  connect timeouts diverge across implementations (30 s wasmtime vs 20 s
-  wasip3, `provider.rs:60`) — permitted by the WIT, but make it a decision.
-- The JS host counts string payloads in UTF-16 code units, not bytes
-  (`jco-impl/webrtc.js:705`, `data.length`), so the "8 MiB of payload bytes"
-  bound (`wit/webrtc.wit:186-187`) diverges up to 2× for non-ASCII text —
-  use `Buffer.byteLength`/`TextEncoder` for strings.
-- There is no single index of the cross-process environment surface
-  (`WEBRTC_UDP_BIND_ADDR`, `WEBRTC_MAX_INBOUND_BUFFER_BYTES`,
-  `WEBRTC_INCLUDE_LOOPBACK`, `CONFORMANCE_SHADOW_SYSCALL_SHIM`,
-  `CONFORMANCE_WASMTIME`, `CONFORMANCE_NODE`,
-  `CHROME_PATH`/`CHROME_BIN`/`PUPPETEER_EXECUTABLE_PATH`, `SKIP_NODE`,
-  `SKIP_NETNS_LAB`). Each is documented only at its use site; chasing a knob
-  through four codebases is today's discovery path. Add one table (AGENTS.md
-  or a doc both it and README link).
-
 ### E12. `rtc` sender breaks ordered delivery observed by libwebrtc receivers
 
 The non-wasm reference peer (libwebrtc via `@roamhq/wrtc`) intermittently
@@ -197,31 +166,9 @@ later tests with no attribution (contrast: the wasmtime adapter drops the
 processes for jco-node (matching the other adapters' isolation) or at least
 noting the contamination risk in the result document.
 
-## G. Development environment / CI
-
-### G1. jco transpile flags are not checked against the WIT
-
-Any interface/method rename must be mirrored by hand in the
-`--async-exports` / `--async-imports` / `--map` strings in
-`jco-impl/package.json` (`transpile` and `transpile-remote`; AGENTS.md
-documents this), but nothing verifies it — a mismatch fails only at
-transpile or runtime. It has already drifted: the `--async-imports` lists
-omit `data-channel.send-via-stream`, which the WIT declares `async`
-(`wit/webrtc.wit:229`), so any guest built through this pipeline that calls
-it silently gets the sync ABI. The conformance pipeline avoids the whole
-class by transpiling with blanket `-I async`
-(`conformance/adapters/jco/package.json:8`) — meaning the two jco pipelines
-also exercise *different* async ABIs for the same interface, and only the
-conformance one is asserted by the suite. Fix: generate the flags from the
-WIT (or adopt blanket async in both pipelines), and add a CI check so a
-drifted rename fails fast with a clear message.
-
 ## Suggested priority
 
 1. Conformance-suite integrity: wire `list-tests` + loud missing results
    (F7), the jco close-drain half of the barrier race (F5).
-2. Cheap hygiene, high leverage for humans and agents: the transpile-flag
-   check (G1).
-3. The rest as touched: config consolidation + env-var index (E10), jco
-   in-process timeout isolation (F11), the remaining conformance-matrix
-   gaps (A3).
+2. The rest as touched: jco in-process timeout isolation (F11), the
+   remaining conformance-matrix gaps (A3).

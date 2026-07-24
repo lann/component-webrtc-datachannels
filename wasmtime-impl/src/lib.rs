@@ -67,8 +67,8 @@ pub struct WebrtcIceServer {
 ///
 /// The default value reproduces the crate's built-in behavior: bind a single
 /// ephemeral UDP socket on IPv4 loopback, no STUN/TURN servers, and the `all`
-/// ICE transport policy. The conformance netns lab (see `conformance/README.md`
-/// Phase 5) overrides these to bind a scenario-specific interface address and to
+/// ICE transport policy. The conformance netns lab (see `conformance/README.md`)
+/// overrides these to bind a scenario-specific interface address and to
 /// point at a STUN/TURN server, forcing server-reflexive or relay candidate
 /// paths.
 #[derive(Clone, Debug, Default)]
@@ -98,17 +98,34 @@ impl WebrtcIceConfig {
 /// `WasiHttpCtx`); it exists so hosts have a stable place to grow configuration
 /// without changing the [`WasiWebrtcView`] shape.
 ///
-/// The knobs so far are the [`SettingEngine`] hook (see
-/// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue of
-/// wasmtime-wasi-http's `WasiHttpHooks`, and the [`WebrtcIceConfig`] ICE
-/// server configuration (see [`set_ice_config`](Self::set_ice_config)): the
+/// The knobs so far: the [`SettingEngine`] hook (see
+/// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue
+/// of wasmtime-wasi-http's `WasiHttpHooks`; the [`WebrtcIceConfig`] ICE
+/// server configuration (see [`set_ice_config`](Self::set_ice_config)); the
+/// `wait-connected` timeout (see
+/// [`set_connect_timeout`](Self::set_connect_timeout)); and the per-channel
+/// inbound buffer bound (see
+/// [`set_max_inbound_buffer_bytes`](Self::set_max_inbound_buffer_bytes)). The
 /// crate itself hardcodes no environment-driven ICE behavior, leaving loopback
 /// and similar tweaks to demo/test hosts.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct WasiWebrtcCtx {
     setting_engine_hook: Option<SettingEngineHook>,
     ice_config: WebrtcIceConfig,
+    connect_timeout: std::time::Duration,
+    max_inbound_buffer_bytes: usize,
+}
+
+impl Default for WasiWebrtcCtx {
+    fn default() -> Self {
+        Self {
+            setting_engine_hook: None,
+            ice_config: WebrtcIceConfig::default(),
+            connect_timeout: peer_connection::DEFAULT_CONNECT_TIMEOUT,
+            max_inbound_buffer_bytes: data_channel::max_inbound_buffer_bytes(),
+        }
+    }
 }
 
 impl std::fmt::Debug for WasiWebrtcCtx {
@@ -161,8 +178,8 @@ impl WasiWebrtcCtx {
     /// context creates (bind addresses, STUN/TURN servers, relay-only policy).
     ///
     /// The default leaves the crate's built-in loopback behavior unchanged; the
-    /// conformance netns lab overrides it per scenario (see `conformance/README.md`
-    /// Phase 5).
+    /// conformance netns lab overrides it per scenario (see
+    /// `conformance/README.md`).
     pub fn set_ice_config(&mut self, config: WebrtcIceConfig) {
         self.ice_config = config;
     }
@@ -171,6 +188,31 @@ impl WasiWebrtcCtx {
     /// apply it without holding a borrow of the context.
     pub fn ice_config(&self) -> WebrtcIceConfig {
         self.ice_config.clone()
+    }
+
+    /// Set how long `peer-connection.wait-connected` waits before failing with
+    /// `error.timed-out` (the WIT leaves the bound implementation-defined).
+    /// Default: 30 seconds.
+    pub fn set_connect_timeout(&mut self, timeout: std::time::Duration) {
+        self.connect_timeout = timeout;
+    }
+
+    /// The configured `wait-connected` timeout.
+    pub fn connect_timeout(&self) -> std::time::Duration {
+        self.connect_timeout
+    }
+
+    /// Set the per-channel inbound buffer bound, in payload bytes (see the
+    /// `data-channel` WIT docs for the overflow contract). Default:
+    /// [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`], overridable process-wide through
+    /// the [`MAX_INBOUND_BUFFER_ENV`] environment variable (read once).
+    pub fn set_max_inbound_buffer_bytes(&mut self, bytes: usize) {
+        self.max_inbound_buffer_bytes = bytes;
+    }
+
+    /// The configured per-channel inbound buffer bound.
+    pub fn max_inbound_buffer_bytes(&self) -> usize {
+        self.max_inbound_buffer_bytes
     }
 }
 
