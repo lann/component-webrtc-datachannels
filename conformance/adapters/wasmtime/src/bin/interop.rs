@@ -329,7 +329,7 @@ async fn main() -> Result<()> {
                 &cli, &engine, &component, &base_url, direction, test_id, &room_seq,
             )
         })
-        .await;
+        .await?;
 
         let report = AdapterReport {
             target: direction.target.to_string(),

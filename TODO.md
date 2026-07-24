@@ -197,38 +197,26 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
-### F7. Wire up `list-tests` and make missing results loud
+### F7. Unify the remaining corpus mirrors (plan + params)
 
-The corpus is hand-mirrored with no consistency check: test ids exist in
-**four** places (`conformance/tests.toml`; guest `corpus()` at
-`conformance/guest/src/lib.rs:82-123`; `TESTS` at
-`conformance/adapters/common/src/lib.rs:164-194`; `TESTS` at
-`conformance/adapters/jco/driver.js:17-47`), the orchestration plan in three
-(guest `run()` dispatch `guest/src/lib.rs:126-154`; `plan_for()`
-`common/src/lib.rs:229-251`; `IN_PROCESS` `driver.js:50-69`), and message
-params in two plus stray re-defaults (`params_for()`
-`common/src/lib.rs:254-267`; `paramsFor()` `driver.js:80-97`; re-defaulted
-`4`/`256` in `conformance/adapters/wasmtime/src/bin/peer.rs:61-66` and
-`conformance/adapters/wasip3/driver/src/lib.rs:77-78`). The guest exports
-`list-tests` *specifically* so the registry can be cross-checked
-(`conformance/wit/world.wit:63-65`, `tests.toml:4`,
-`conformance/runner/src/registry.rs:5-7`) — and nothing ever calls it
-(`registry.get()` is `#[allow(dead_code)]` "used by later phases",
-`registry.rs:64-69`).
+The test ids are now cross-checked (each full-corpus adapter verifies its
+registered list against the guest's `list-tests` export before running; the
+runner rejects results for unregistered ids and warns on missing cells in
+report-backed rows; empty `--only` selections are errors). Still mirrored by
+hand with no consistency check:
 
-The failure mode is silent: a test missing from one mirror renders as
-`Missing`, which is neutral (`conformance/runner/src/results.rs:62-79`
-renders "—"; the runner exits 0), and a typo'd `--only` filter selects
-nothing and passes (`common/src/lib.rs:433`; only the Shadow executor rejects
-an empty selection, `common/src/bin/shadow.rs:184-186`).
+- the orchestration plan (guest `run()` dispatch, `plan_for()` in
+  `conformance/adapters/common/src/lib.rs`, `IN_PROCESS` in
+  `conformance/adapters/jco/driver.js`), and
+- the message params (`params_for()` / `paramsFor()`, plus re-defaulted
+  `4`/`256` in the peer binaries).
 
-Fix: (1) have each adapter call `list-tests` once and diff ids/tags against
-its local list (or have the runner require every adapter report to cover
-every registered test not excused by the manifest — a target that reported
-fewer results than the registry should at minimum warn, better fail);
-(2) reject empty `--only` selections in `run_corpus` like the Shadow executor
-does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
-params only.
+The natural next step is to make `list-tests` authoritative for these too:
+extend `test-descriptor` with the plan (and params), have the adapters
+consume it, and delete the mirrors. Separately, `Missing` in a full-corpus
+loopback row could be escalated from a warning to a failure once expected
+coverage is expressible per target (the interop pairs legitimately run the
+two-peer subset).
 
 ### F11. jco in-process test timeouts cannot cancel the timed-out attempt
 

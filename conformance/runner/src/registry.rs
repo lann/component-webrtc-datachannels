@@ -61,9 +61,7 @@ impl Registry {
         Ok(())
     }
 
-    /// Look up a test by id. Used by later phases to cross-check the guest's
-    /// `list-tests` output against the registry.
-    #[allow(dead_code)]
+    /// Look up a test by id (`None` for ids the registry does not contain).
     pub fn get(&self, id: &str) -> Option<&TestEntry> {
         self.test.iter().find(|t| t.id == id)
     }

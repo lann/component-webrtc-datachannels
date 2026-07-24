@@ -31,6 +31,15 @@ struct Component;
 
 impl wasip3::exports::cli::run::Guest for Component {
     async fn run() -> Result<(), ()> {
+        // `--list-tests` prints the guest's corpus (one JSON array of test ids)
+        // and exits, so the orchestrator can verify its registered test list
+        // against the guest's list-tests export before running the corpus.
+        if std::env::args().skip(1).any(|arg| arg == "--list-tests") {
+            let ids: Vec<String> = runner::list_tests().into_iter().map(|t| t.id).collect();
+            println!("{}", serde_json::json!(ids));
+            return Ok(());
+        }
+
         let (test_id, config) = match parse_args(std::env::args().skip(1)) {
             Ok(parsed) => parsed,
             Err(usage) => {

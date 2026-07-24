@@ -443,34 +443,66 @@ fn scaled_jobs(multiplier: usize, max: usize) -> usize {
 ///
 /// Tests are independent — fresh instances/processes, a fresh room per test —
 /// so they can safely overlap; `buffered` preserves the registry order of the
-/// results.
+/// results. An `only` filter that selects nothing is an error: silently
+/// running zero tests would let a typo'd id produce an empty (green) report.
 pub async fn run_corpus<F, Fut>(
     tests: &[&'static str],
     only: &[String],
     jobs: usize,
     run: F,
-) -> Vec<RawResult>
+) -> Result<Vec<RawResult>>
 where
     F: Fn(&'static str) -> Fut,
     Fut: Future<Output = RawResult>,
 {
-    futures::stream::iter(
-        tests
+    let selected: Vec<&'static str> = tests
+        .iter()
+        .copied()
+        .filter(|test_id| only.is_empty() || only.iter().any(|t| t == test_id))
+        .collect();
+    anyhow::ensure!(
+        !selected.is_empty(),
+        "--only selected no tests (registered: {})",
+        tests.join(", ")
+    );
+    Ok(futures::stream::iter(selected)
+        .map(|test_id| {
+            let fut = run(test_id);
+            async move {
+                let result = fut.await;
+                eprintln!("{test_id} … {:?}", result.status);
+                result
+            }
+        })
+        .buffered(jobs.max(1))
+        .collect()
+        .await)
+}
+
+/// Verify the guest's `list-tests` ids match this adapter's registered corpus
+/// (`tests`) exactly, so the hand-mirrored lists cannot silently drift from
+/// the corpus the guest actually implements.
+pub fn verify_corpus(guest_ids: &[String], tests: &[&'static str]) -> Result<()> {
+    let guest: std::collections::BTreeSet<&str> = guest_ids.iter().map(|s| s.as_str()).collect();
+    let local: std::collections::BTreeSet<&str> = tests.iter().copied().collect();
+    let missing_here: Vec<&&str> = guest.difference(&local).collect();
+    let missing_in_guest: Vec<&&str> = local.difference(&guest).collect();
+    anyhow::ensure!(
+        missing_here.is_empty() && missing_in_guest.is_empty(),
+        "adapter test list diverges from the guest's list-tests export: \
+         in guest but not adapter: [{}]; in adapter but not guest: [{}]",
+        missing_here
             .iter()
-            .copied()
-            .filter(|test_id| only.is_empty() || only.iter().any(|t| t == test_id)),
-    )
-    .map(|test_id| {
-        let fut = run(test_id);
-        async move {
-            let result = fut.await;
-            eprintln!("{test_id} … {:?}", result.status);
-            result
-        }
-    })
-    .buffered(jobs.max(1))
-    .collect()
-    .await
+            .map(|s| **s)
+            .collect::<Vec<_>>()
+            .join(", "),
+        missing_in_guest
+            .iter()
+            .map(|s| **s)
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    Ok(())
 }
 
 // ----- signaling server -------------------------------------------------------

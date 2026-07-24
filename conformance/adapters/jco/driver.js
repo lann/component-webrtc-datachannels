@@ -202,8 +202,30 @@ async function runTest(newInstance, base, testId, roomSeq) {
  * @returns {Promise<Array<{ test_id: string, status: string, detail?: string }>>}
  */
 export async function runCorpus({ base, newInstance, only = [], jobs = 4, log = () => {} }) {
+  // Verify the registered corpus matches the guest's list-tests export before
+  // running anything, so a drifted mirror fails fast and loudly.
+  {
+    const instance = await newInstance();
+    const guest = new Set((await instance.runner.listTests()).map((t) => t.id));
+    const local = new Set(TESTS);
+    const missingHere = [...guest].filter((id) => !local.has(id));
+    const missingInGuest = [...local].filter((id) => !guest.has(id));
+    if (missingHere.length || missingInGuest.length) {
+      throw new Error(
+        "driver test list diverges from the guest's list-tests export: " +
+          `in guest but not driver: [${missingHere.join(", ")}]; ` +
+          `in driver but not guest: [${missingInGuest.join(", ")}]`,
+      );
+    }
+  }
+
   const roomSeq = { n: 0 };
   const ids = TESTS.filter((testId) => !only.length || only.includes(testId));
+  // An `only` filter that selects nothing is an error: silently running zero
+  // tests would let a typo'd id produce an empty (green) report.
+  if (!ids.length) {
+    throw new Error(`--only selected no tests (registered: ${TESTS.join(", ")})`);
+  }
   const results = new Array(ids.length);
   let next = 0;
   const worker = async () => {

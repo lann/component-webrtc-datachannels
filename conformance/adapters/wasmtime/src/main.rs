@@ -161,11 +161,16 @@ async fn main() -> Result<()> {
     let server = conformance_adapter_common::start_signaling_server().await?;
     let base_url = server.base_url();
 
+    // Verify the registered corpus matches the guest's list-tests export
+    // before running anything, so a drifted mirror fails fast and loudly.
+    let guest_tests = conformance_adapter_wasmtime::list_guest_tests(&engine, &component).await?;
+    conformance_adapter_common::verify_corpus(&guest_tests, TESTS)?;
+
     let room_seq = AtomicU64::new(0);
     let results = run_corpus(TESTS, &cli.only, cli.jobs, |test_id| {
         run_test(&engine, &component, &base_url, test_id, &room_seq)
     })
-    .await;
+    .await?;
 
     server.shutdown().await;
 

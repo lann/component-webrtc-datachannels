@@ -54,8 +54,60 @@ fn main() -> Result<()> {
         None => Vec::new(),
     };
 
+    // Reject results for unregistered test ids: a report naming a test that
+    // `tests.toml` does not register means the registry was not updated (the
+    // matrix would otherwise silently drop the result).
+    for report in &reports {
+        let unregistered: Vec<&str> = report
+            .results
+            .iter()
+            .map(|r| r.test_id.as_str())
+            .filter(|id| registry.get(id).is_none())
+            .collect();
+        anyhow::ensure!(
+            unregistered.is_empty(),
+            "report for `{}` [{}] contains unregistered test id(s): {} — add them to tests.toml",
+            report.target,
+            report.environment,
+            unregistered.join(", ")
+        );
+    }
+
     let matrix = Matrix::classify(&registry, &manifests, &reports);
     let markdown = matrix.render_markdown();
+
+    // A registered test with no result in a report-backed row is rendered `—`
+    // and stays neutral (labs run declared subsets), but say so loudly: a
+    // full-corpus adapter with missing cells usually means a drifted mirror.
+    for row in &matrix.rows {
+        if row.environment.is_empty() {
+            continue; // planning-only row: no adapter ran this target.
+        }
+        let missing: Vec<&str> = matrix
+            .tests
+            .iter()
+            .filter(|test| {
+                matrix
+                    .cells
+                    .get(&(
+                        row.target.clone(),
+                        row.environment.clone(),
+                        test.to_string(),
+                    ))
+                    .is_some_and(|c| matches!(c.status, results::Status::Missing))
+            })
+            .map(|s| s.as_str())
+            .collect();
+        if !missing.is_empty() {
+            eprintln!(
+                "warning: {} [{}] reported no result for {} registered test(s): {}",
+                row.target,
+                row.environment,
+                missing.len(),
+                missing.join(", ")
+            );
+        }
+    }
 
     match &cli.matrix_out {
         Some(path) => {

@@ -230,7 +230,7 @@ async fn run_corpus(
         conformance_adapter_common::run_corpus(TWO_PEER_TESTS, &cli.only, cli.jobs, |test_id| {
             run_ice_test(cli, scenario, topology, peer_command, test_id, &room_seq)
         })
-        .await;
+        .await?;
 
     let report = AdapterReport {
         target: target.clone(),
@@ -377,6 +377,8 @@ async fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result
     tokio::task::spawn_blocking(move || ready_rx.recv_timeout(Duration::from_secs(10)))
         .await
         .context("joining signaling readiness wait")?
-        .map_err(|_| anyhow::anyhow!("signaling server did not report `listening on` within 10s"))?;
+        .map_err(|_| {
+            anyhow::anyhow!("signaling server did not report `listening on` within 10s")
+        })?;
     Ok(Guard { child: Some(child) })
 }
