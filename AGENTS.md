@@ -75,7 +75,9 @@ conformance/                           # cross-implementation conformance suite
   guest/                               #   the shared conformance guest component
   adapters/                            #   per-target drivers: wasmtime, jco (Node +
                                        #     browser), wasip3 (composed in-guest stack),
-                                       #     plus the interop-pair binary;
+                                       #     reference/ (the non-wasm reference peer:
+                                       #     plain Node over @roamhq/wrtc), plus the
+                                       #     interop-pair binary;
                                        #     common/ = the shared native building blocks
                                        #     (conformance-adapter-common), the netns-lab
                                        #     topology/provisioning (netns/nftables/coturn
@@ -205,7 +207,9 @@ just test
 
 # Cross-implementation conformance suite (loopback): builds the shared
 # conformance guest, runs every enabled adapter (wasmtime, jco-node,
-# jco-browser, wasip3-guest) plus the interop pairs, and renders
+# jco-browser, wasip3-guest) plus the interop pairs (every target against the
+# non-wasm reference peer in both orders, the reference self-pair, and the
+# retained implementation pairs), and renders
 # conformance/matrix.md. Needs Node 24+ and a Chrome 137+ binary:
 just conformance
 
@@ -213,9 +217,9 @@ just conformance
 # namespaces; needs sudo and coturn — see the recipe comments):
 just conformance::netns lan
 
-# Conformance Shadow lab (the two-peer corpus for the wasmtime and
-# wasip3-guest targets over a non-loopback path inside the Shadow
-# discrete-event network simulator — deterministic, no root or
+# Conformance Shadow lab (the two-peer corpus for the wasmtime,
+# wasip3-guest, and reference targets over a non-loopback path inside the
+# Shadow discrete-event network simulator — deterministic, no root or
 # network namespaces). Needs `shadow` on PATH (install with
 # scripts/download-shadow.sh or scripts/build-shadow.sh):
 just conformance::shadow

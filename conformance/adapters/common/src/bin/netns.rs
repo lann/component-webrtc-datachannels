@@ -25,6 +25,9 @@
 //!   `wasmtime run`, binding the in-guest provider to its namespace address
 //!   through `WEBRTC_UDP_BIND_ADDR`. The in-guest sans-I/O stack supports no
 //!   STUN/TURN, so only the `lan` scenario fits this kind.
+//! - `reference` runs the non-wasm reference peer (`node peer.mjs`, libwebrtc
+//!   via `@roamhq/wrtc`), supporting every scenario: its ICE flags map onto
+//!   `RTCPeerConnection`'s `iceServers` / `iceTransportPolicy`.
 //!
 //! Requires root (for `ip netns exec`); the lab topology
 //! ([`conformance_adapter_common::lab`]) is provisioned and torn down by this
@@ -102,6 +105,15 @@ struct Cli {
     /// the `wasmtime` peer kind.
     #[arg(long, default_value = "target/release/conformance-peer")]
     peer_bin: PathBuf,
+
+    /// The Node binary (a path or a bare name looked up on `PATH`) that runs
+    /// the reference peer, used by the `reference` peer kind.
+    #[arg(long, env = "CONFORMANCE_NODE", default_value = "node")]
+    node_bin: String,
+
+    /// The reference peer script, used by the `reference` peer kind.
+    #[arg(long, default_value = "conformance/adapters/reference/peer.mjs")]
+    reference_peer: PathBuf,
 
     /// Base signaling HTTP port in the signaling namespace. Each test uses its
     /// own signaling server on a distinct port (base + attempt index) so tests
@@ -186,6 +198,8 @@ async fn main() -> Result<()> {
         &cli.guest,
         &cli.wasmtime_bin,
         &cli.component,
+        &cli.node_bin,
+        &cli.reference_peer,
     )?;
 
     if cli.provision {

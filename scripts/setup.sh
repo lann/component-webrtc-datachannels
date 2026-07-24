@@ -26,8 +26,9 @@
 #     `shadow-dev` GitHub prerelease; fetch it with scripts/download-shadow.sh or
 #     build it locally with scripts/build-shadow.sh. The lab recipe prints this
 #     guidance and fails if the binary is missing when it runs.
-#   - the Node host's npm dependencies (jco + @roamhq/wrtc), and the conformance
-#     jco adapter's npm dependencies (jco + @roamhq/wrtc + playwright-core)
+#   - the Node host's npm dependencies (jco + @roamhq/wrtc), the conformance
+#     jco adapter's npm dependencies (jco + @roamhq/wrtc + playwright-core),
+#     and the conformance reference peer's npm dependencies (@roamhq/wrtc)
 #
 # wasm-tools, just, and cargo-nextest are installed with cargo-binstall, which
 # downloads the pinned prebuilt release binaries when available and automatically
@@ -161,6 +162,8 @@ else
   (cd "${REPO_ROOT}/jco-impl" && npm install)
   log "Installing conformance jco adapter dependencies (conformance/adapters/jco)"
   (cd "${REPO_ROOT}/conformance/adapters/jco" && npm install)
+  log "Installing conformance reference peer dependencies (conformance/adapters/reference)"
+  (cd "${REPO_ROOT}/conformance/adapters/reference" && npm install)
 fi
 
 # In GitHub Actions, $GITHUB_PATH is a file; appending a path to it makes that

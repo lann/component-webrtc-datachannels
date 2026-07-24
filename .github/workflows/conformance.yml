@@ -8,11 +8,11 @@ name: Conformance
 # and cached — exactly once per run.
 #
 # The `matrix` job runs the loopback scenarios across all enabled targets,
-# including the pairwise interop matrix, uploading the matrix artifact and
+# including the interop matrix, uploading the matrix artifact and
 # failing on any unexpected status. The `shadow-lab` job runs the two-peer
-# corpus for the wasmtime and wasip3-guest targets over a routed, non-loopback
-# path inside the Shadow network simulator, which needs no root or network
-# namespaces and is deterministic.
+# corpus for the wasmtime, wasip3-guest, and reference targets over a routed,
+# non-loopback path inside the Shadow network simulator, which needs no root
+# or network namespaces and is deterministic.
 #
 # The netns lab (`just conformance::netns`, `just conformance::nat`) — the
 # higher-fidelity real-kernel environment with STUN/TURN/NAT candidate paths —
@@ -25,9 +25,11 @@ name: Conformance
 # JSPI natively), wasip3-guest (the conformance guest composed via `wac plug`
 # with the wasip3-impl provider — the sans-I/O rtc stack over WASIp3
 # wasi:sockets — plus an in-guest wasi:http mailbox client and a CLI driver,
-# run under `wasmtime run`), and the cross-runtime interop pairs
-# `wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser` (one headless-Chromium
-# instance per test), and `wasmtime`<->`wasip3-guest`, each in both orders.
+# run under `wasmtime run`), and reference (the non-wasm reference peer:
+# plain Node driving RTCPeerConnection over @roamhq/wrtc). The interop matrix
+# anchors every target against the reference peer in both orders (jco-browser
+# at handshake-only smoke scope) and retains the `wasmtime`<->`jco-node` and
+# `wasmtime`<->`wasip3-guest` implementation pairs.
 
 on:
   push:
@@ -179,11 +181,16 @@ jobs:
         run: ./scripts/download-shadow.sh
 
       # Runtime dependencies only (`wasmtime` for the composed wasip3-guest
-      # peer); skip the Node and netns-lab deps. Shadow was downloaded above.
+      # peer); skip the jco Node hosts' and netns-lab deps. Shadow was
+      # downloaded above. The reference peer runs on the runner's own Node
+      # (no JSPI needed), so only its npm packages are installed.
       - name: Install dependencies
         run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Install reference peer dependencies
+        run: just conformance::npm-reference
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -196,9 +203,9 @@ jobs:
       - name: Run Shadow lab
         run: just conformance::run-shadow
 
-      # Classify the Shadow results (<target>-shadow.json for wasmtime and
-      # wasip3-guest) against the manifests and render the environment-columned
-      # matrix; exits nonzero on any failure.
+      # Classify the Shadow results (<target>-shadow.json for wasmtime,
+      # wasip3-guest, and reference) against the manifests and render the
+      # environment-columned matrix; exits nonzero on any failure.
       - name: Classify Shadow matrix
         run: just conformance::classify-shadow
 

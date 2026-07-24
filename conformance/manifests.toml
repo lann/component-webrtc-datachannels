@@ -72,14 +72,59 @@
 # so this target passes it and it is deliberately NOT an expected-fail.
 [target.wasip3-guest]
 
+# The non-wasm reference peer (adapter: conformance/adapters/reference): plain
+# Node driving RTCPeerConnection (libwebrtc via @roamhq/wrtc) directly — no
+# wasm component, no WIT bindings. It is the suite's wire-level anchor: the
+# reference pairs below prove each target against the ecosystem-defining
+# WebRTC stack rather than against another instance of the shared guest. Its
+# own row is produced by the reference self-pair (loopback, via
+# conformance-interop) and the Shadow lab (reference-shadow.json).
+[target.reference]
+
 # The interop pairs run the two-peer behavioral subset over one shared mailbox
-# and a real cross-runtime WebRTC data channel, so a green row proves the two
-# runtimes interoperate rather than merely each passing against itself. Each
-# pair id is `<offerer>-x-<answerer>`; the orchestrator is the
-# `conformance-interop` binary in conformance/adapters/wasmtime.
+# and a real cross-runtime WebRTC data channel. Each pair id is
+# `<offerer>-x-<answerer>`; the orchestrator is the `conformance-interop`
+# binary in conformance/adapters/wasmtime.
+#
+# The bulk of interop coverage anchors every target against the reference peer
+# in both orders: a red cell implicates the target, not the pair. The
+# jco-browser reference pairs run only `interop-handshake` (each test boots
+# its own headless Chromium), so their other two-peer cells render `missing`.
+#
+# The four rtc-sender directions declare `ordered-delivery` unsupported: the
+# `rtc` core (shared by the wasmtime host and the wasip3-impl provider)
+# intermittently emits ordered-channel messages whose SCTP ordering metadata
+# cannot restore application order at a libwebrtc receiver, and a flaky
+# failure cannot be an expected-fail (TODO.md E12 tracks the upstream fix).
+[target.wasmtime-x-reference]
+[[target.wasmtime-x-reference.unsupported]]
+tag = "ordered-delivery"
+reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+
+[target.reference-x-wasmtime]
+[[target.reference-x-wasmtime.unsupported]]
+tag = "ordered-delivery"
+reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+
+[target.jco-node-x-reference]
+[target.reference-x-jco-node]
+[target.jco-browser-x-reference]
+[target.reference-x-jco-browser]
+
+[target.wasip3-guest-x-reference]
+[[target.wasip3-guest-x-reference.unsupported]]
+tag = "ordered-delivery"
+reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+
+[target.reference-x-wasip3-guest]
+[[target.reference-x-wasip3-guest.unsupported]]
+tag = "ordered-delivery"
+reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+
+# Retained implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
+# (webrtc-rs and the sans-I/O `rtc` stack meeting each other) and wasmtime <->
+# jco-node (the wasm guest crossing the host-language boundary).
 [target.wasmtime-x-jco-node]
 [target.jco-node-x-wasmtime]
-[target.wasmtime-x-jco-browser]
-[target.jco-browser-x-wasmtime]
 [target.wasmtime-x-wasip3-guest]
 [target.wasip3-guest-x-wasmtime]

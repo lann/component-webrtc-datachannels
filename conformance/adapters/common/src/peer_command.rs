@@ -70,6 +70,9 @@ pub enum PeerKind {
     Wasmtime,
     /// The composed wasip3 conformance component under `wasmtime run`.
     Wasip3Guest,
+    /// The non-wasm reference peer: plain Node driving `RTCPeerConnection`
+    /// (libwebrtc via `@roamhq/wrtc`) directly.
+    Reference,
 }
 
 impl PeerKind {
@@ -78,6 +81,7 @@ impl PeerKind {
         match self {
             PeerKind::Wasmtime => "wasmtime",
             PeerKind::Wasip3Guest => "wasip3-guest",
+            PeerKind::Reference => "reference",
         }
     }
 }
@@ -112,18 +116,26 @@ pub enum PeerCommand {
         wasmtime_bin: PathBuf,
         component: PathBuf,
     },
+    /// `node <peer.mjs> …` — libwebrtc gathers candidates from the host's own
+    /// interfaces, so the placement's bind address is not passed (each lab
+    /// host has exactly one routable address).
+    Reference { node_bin: PathBuf, script: PathBuf },
 }
 
 impl PeerCommand {
     /// Resolve `kind`'s binaries and components to absolute paths. `guest` and
     /// `peer_bin` serve the `wasmtime` kind; `wasmtime_bin` (a path or a bare
-    /// name looked up on `PATH`) and `component` serve the `wasip3-guest` kind.
+    /// name looked up on `PATH`) and `component` serve the `wasip3-guest`
+    /// kind; `node_bin` (path or bare name) and `reference_peer` serve the
+    /// `reference` kind.
     pub fn resolve(
         kind: PeerKind,
         peer_bin: &Path,
         guest: &Path,
         wasmtime_bin: &str,
         component: &Path,
+        node_bin: &str,
+        reference_peer: &Path,
     ) -> Result<Self> {
         Ok(match kind {
             PeerKind::Wasmtime => PeerCommand::Wasmtime {
@@ -133,6 +145,10 @@ impl PeerCommand {
             PeerKind::Wasip3Guest => PeerCommand::Wasip3Guest {
                 wasmtime_bin: resolve_bin(wasmtime_bin)?,
                 component: absolute(component)?,
+            },
+            PeerKind::Reference => PeerCommand::Reference {
+                node_bin: resolve_bin(node_bin)?,
+                script: absolute(reference_peer)?,
             },
         })
     }
@@ -222,6 +238,29 @@ impl PeerCommand {
                 args.extend(shared_peer_args);
                 args
             }
+            PeerCommand::Reference { node_bin, script } => {
+                let mut args = vec![
+                    node_bin.to_string_lossy().into_owned(),
+                    script.to_string_lossy().into_owned(),
+                ];
+                args.extend(shared_peer_args);
+                if let Some(ice) = run.ice {
+                    if let Some(url) = &ice.server_url {
+                        args.extend([
+                            "--ice-server-url".to_string(),
+                            url.clone(),
+                            "--ice-username".to_string(),
+                            ice.username.clone(),
+                            "--ice-credential".to_string(),
+                            ice.credential.clone(),
+                        ]);
+                    }
+                    if ice.relay_only {
+                        args.push("--relay-only".to_string());
+                    }
+                }
+                args
+            }
         })
     }
 }
@@ -301,5 +340,28 @@ mod tests {
         let argv = command.argv(&run(Some(&PeerIce::default()))).unwrap();
         assert!(argv.contains(&"--env".to_string()));
         assert!(argv.contains(&"WEBRTC_UDP_BIND_ADDR=10.79.1.2".to_string()));
+    }
+
+    #[test]
+    fn reference_argv_omits_bind_addr_and_maps_ice() {
+        let command = PeerCommand::Reference {
+            node_bin: PathBuf::from("/bin/node"),
+            script: PathBuf::from("/peer.mjs"),
+        };
+        let argv = command.argv(&run(None)).unwrap();
+        assert_eq!(argv[0], "/bin/node");
+        assert_eq!(argv[1], "/peer.mjs");
+        assert!(!argv.contains(&"--bind-addr".to_string()));
+        assert!(!argv.contains(&"--ice-server-url".to_string()));
+
+        let ice = PeerIce {
+            server_url: Some("turn:10.79.3.2:3478?transport=udp".to_string()),
+            username: "conf".to_string(),
+            credential: "conf".to_string(),
+            relay_only: true,
+        };
+        let argv = command.argv(&run(Some(&ice))).unwrap();
+        assert!(argv.contains(&"--ice-server-url".to_string()));
+        assert!(argv.contains(&"--relay-only".to_string()));
     }
 }
