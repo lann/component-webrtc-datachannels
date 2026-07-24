@@ -118,7 +118,15 @@ log "Ensuring wasmtime ${WASMTIME_VERSION} is installed"
 if command -v wasmtime >/dev/null 2>&1; then
   echo "wasmtime already present: $(wasmtime --version)"
 else
-  binstall "wasmtime-cli@${WASMTIME_VERSION}"
+  # Restrict binstall to the host target: its default target list falls back
+  # to the static musl build when the host (glibc) release-asset download
+  # fails transiently, and a musl-linked wasmtime cannot run under the
+  # conformance Shadow lab (Shadow injects its shim via LD_PRELOAD, which
+  # needs the host's dynamic linker). Failing the install loudly beats
+  # silently installing a binary one lab cannot spawn.
+  cargo binstall --no-confirm --locked --force \
+    --targets "$(rustc -vV | sed -n 's/^host: //p')" \
+    "wasmtime-cli@${WASMTIME_VERSION}"
 fi
 
 if [ "${SKIP_NETNS_LAB:-0}" = "1" ]; then
