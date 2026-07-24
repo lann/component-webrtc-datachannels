@@ -60,15 +60,12 @@ tracing = "0.1"
 # off multicast-DNS candidate gathering for the Shadow environment (whose
 # simulated stack lacks the multicast-socket options mDNS needs).
 rtc = { workspace = true }
-# Raw syscall wrappers and constants for the Shadow syscall shim (see below).
-libc = { version = "0.2", optional = true }
 
-[features]
-# Compile the in-binary syscall overrides into `conformance-peer` that bridge
-# the gap between the Shadow simulator's syscall surface and the syscalls the
-# `webrtc` 0.20 driver's quinn-udp UDP layer requires (`src/bin/peer/
-# shadow_shim.rs`). Enabled only by the Shadow lab's peer build (see the
-# `conformance-shadow` justfile recipe); every override forwards the call
-# unchanged first and stubs only Shadow's documented failure, so the feature
-# is inert on a real kernel.
-shadow-syscall-shim = ["dep:libc"]
+# Raw syscall wrappers and constants for the Shadow syscall shim
+# (`src/bin/peer/shadow_shim.rs`), which bridges the gap between the Shadow
+# simulator's syscall surface and the syscalls the `webrtc` 0.20 driver's
+# quinn-udp UDP layer requires. The shim is always compiled into
+# `conformance-peer`; its stubs engage only when the Shadow executor sets the
+# `CONFORMANCE_SHADOW_SYSCALL_SHIM` environment variable on the peer.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"

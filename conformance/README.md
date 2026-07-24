@@ -292,17 +292,16 @@ connect over explicit host candidates, so mDNS is unused); the sans-I/O wasip3
 stack has no mDNS at all. Only the Shadow peers pass the flag; the netns
 lab, which runs on a real kernel, is unchanged.
 
-The `wasmtime` Shadow peer is additionally built with the
-`shadow-syscall-shim` cargo feature
+The `wasmtime` peer additionally carries a Shadow syscall shim
 ([`adapters/wasmtime/src/bin/peer/shadow_shim.rs`](adapters/wasmtime/src/bin/peer/shadow_shim.rs)):
-in-binary overrides of `setsockopt` and `recvmmsg` bridging the gap between
-Shadow's syscall surface and the syscalls the webrtc driver's quinn-udp UDP
-layer requires. Each override forwards the call as received and stubs only
-Shadow's documented failure (`ENOPROTOOPT` for the `IPPROTO_IP`
-receive-metadata options, `ENOSYS` for `recvmmsg` — emulated via `recvmsg`);
-an unexpected error aborts the peer instead of being masked. The feature is
-inert on a real kernel and only the Shadow lab's peer build enables it; TODO
-item E5 tracks the upstream fixes that would retire it.
+in-binary overrides of `setsockopt` and `recvmmsg` that forward each call as
+received and stub only Shadow's documented failure (`ENOPROTOOPT` for the
+`IPPROTO_IP` receive-metadata options, `ENOSYS` for `recvmmsg` — emulated via
+`recvmsg`); an unexpected error aborts the peer instead of being masked. The
+stubs engage only when the `CONFORMANCE_SHADOW_SYSCALL_SHIM` environment
+variable is set, which the executor does for the peer processes it places
+inside the simulation — every other environment gets pure pass-through. TODO
+item E5 tracks the upstream fixes that would retire the shim.
 
 CI runs the Shadow lab in a dedicated job (`shadow-lab` in
 [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml));
