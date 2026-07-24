@@ -78,22 +78,6 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E10. Move the Wasmtime host's remaining knobs onto `WasiWebrtcCtx`
-
-Two knobs live outside `WasiWebrtcCtx` despite its docs calling it the
-stable place to grow configuration: the hardcoded 30 s `CONNECT_TIMEOUT`
-(`wasmtime-impl/src/peer_connection.rs`; the WIT makes the bound
-implementation-defined, so it should be configurable) and the
-process-global `OnceLock` env read of the inbound buffer bound
-(`wasmtime-impl/src/data_channel.rs`), which latches its first read and
-forbids per-store configuration. Move both onto `WasiWebrtcCtx` (keeping
-the env var as a default source); the buffer bound must thread from the
-ctx through connection construction down to `spawn_channel_pump`. Also
-note the connect timeouts diverge across implementations (30 s wasmtime vs
-20 s wasip3) — permitted by the WIT, but make it a decision. (The env-var
-parse alignment, the wasip3 bind-error surfacing, the JS byte accounting,
-and the environment-variable index in AGENTS.md are done.)
-
 ## F. Conformance suite
 
 ### F5. Interop barrier sentinel can be lost to the winner's immediate close
@@ -162,5 +146,5 @@ noting the contamination risk in the result document.
 
 1. Conformance-suite integrity: wire `list-tests` + loud missing results
    (F7), the jco close-drain half of the barrier race (F5).
-2. The rest as touched: ctx knob consolidation (E10), jco in-process
-   timeout isolation (F11), the remaining conformance-matrix gaps (A3).
+2. The rest as touched: jco in-process timeout isolation (F11), the
+   remaining conformance-matrix gaps (A3).
