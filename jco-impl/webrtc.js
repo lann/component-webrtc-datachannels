@@ -7,9 +7,9 @@
 // of `node-webrtc`, which provides those globals-compatible classes. It
 // implements the full `connections` surface — `data-channel-options`,
 // `data-channel`, and `peer-connection` (offer/answer, trickle ICE, incoming
-// channels). `conformance/adapters/jco/webrtc.js` is a hand-maintained copy of
-// this module (the conformance suite exercises that copy, not this one); any
-// behavioral change here must be mirrored there.
+// channels) — and is the single host module shared by the demo hosts here and
+// the jco conformance adapters (`conformance/adapters/jco`), which import and
+// serve it from this path; the conformance suite asserts its behavior.
 //
 // `jco --map` wires this module in as the component's `connections` import.
 // Errors are surfaced to the guest by throwing the WIT `error` variant value

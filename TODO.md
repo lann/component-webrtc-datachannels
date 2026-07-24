@@ -197,32 +197,6 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
-### F6. The jco host exists as two ~720-line copies that have already diverged
-
-`jco-impl/webrtc.js` (749 lines) and `conformance/adapters/jco/webrtc.js`
-(721 lines) are ~713 lines byte-identical — the full `DataChannelOptions` /
-`DataChannel` / `PeerConnection` surface plus all stream/queue helpers is
-copy-pasted, and nothing (test, script, or CI) checks the copies agree.
-The real divergences today:
-
-- `[Symbol.dispose]` hooks on `DataChannel` and `PeerConnection`
-  (`jco-impl/webrtc.js:225-252, 497-509`) exist **only** in the jco-impl copy,
-  so the copy the conformance suite actually executes leaks `@roamhq/wrtc`
-  native ICE/DTLS/SCTP resources when a guest drops a resource without
-  calling `close`.
-- The only intended difference is one error-message path
-  (`resolveRTCPeerConnection`: "run `npm install` in jco-impl" vs "…in
-  conformance/adapters/jco").
-
-Fix: extract a single shared module both locations import (parameterize or
-genericize the install-hint message), porting the `Symbol.dispose` hooks so
-both users get them. If a copy must remain for some
-structural reason, add a CI `diff` check with the allowlisted divergence.
-Splitting the WIT-stream interop shims (`streamItems` / `collectByteStream` /
-`toByteChunk` / `bytesToStream`, `jco-impl/webrtc.js:579-671`) and the
-generic stream helpers into their own module(s) first would make the shared
-core smaller and the split natural.
-
 ### F7. Wire up `list-tests` and make missing results loud
 
 The corpus is hand-mirrored with no consistency check: test ids exist in
@@ -255,26 +229,6 @@ fewer results than the registry should at minimum warn, better fail);
 (2) reject empty `--only` selections in `run_corpus` like the Shadow executor
 does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
 params only.
-
-### F8. `patch-generated.mjs` fails open against a floating jco version
-
-`conformance/adapters/jco/patch-generated.mjs:21-28` regex-rewrites jco's
-*generated* borrow-cleanup loop to work around an upstream codegen bug. Two
-fragilities: the regex is whitespace/shape-sensitive against generated code,
-and when it matches nothing the script prints `rewrote 0 borrow-cleanup
-loop(s)` and **exits 0** — the failure then resurfaces at runtime as a
-cryptic `TypeError … Symbol(handle)` far from the cause. Meanwhile both
-package.jsons float jco (`"^1.19.0"`: `conformance/adapters/jco/package.json:13`,
-`jco-impl/package.json`) across the 1.25.2 the bug was observed on, so a
-routine `npm install`/`npm update` can move the resolved codegen out from
-under the regex with no signal.
-
-Fix: pin jco to an exact version in both package.jsons, and make the patch
-fail (or at minimum warn loudly) when the match count is 0 while a
-known-affected jco version is installed, so "fixed upstream" and "regex no
-longer matches the still-broken output" are distinguishable. Document in the
-script header why the `jco-impl` pipeline does not need the patch (different
-async mode) so the asymmetry is a decision, not a mystery.
 
 ### F9. Three mailbox clients have drifted; the browser proxy strips protocol headers
 
@@ -341,10 +295,8 @@ drifted rename fails fast with a clear message.
 
 ## Suggested priority
 
-1. Conformance-suite integrity: de-duplicate the jco host and port the
-   dispose hooks (F6), wire `list-tests` + loud missing results (F7), make
-   `patch-generated.mjs` fail closed and pin jco (F8), the jco close-drain
-   half of the barrier race (F5).
+1. Conformance-suite integrity: wire `list-tests` + loud missing results
+   (F7), the jco close-drain half of the barrier race (F5).
 2. Implementation contract gaps found incidentally: Wasmtime
    close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
