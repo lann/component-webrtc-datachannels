@@ -15,10 +15,11 @@
 //! Usage: `cli-signaling <component.wasm> [offerer|answerer]`.
 
 use wasmtime::component::{Component, HasData, Linker, ResourceTable};
-use wasmtime::{Config, Engine, Result, Store};
+use wasmtime::{Result, Store};
 use wasmtime_wasi::p3::bindings::Command;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 use wasmtime_webrtc_datachannels::{WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView};
+use wasmtime_webrtc_host::{engine, webrtc_ctx};
 
 struct Ctx {
     wasi: WasiCtx,
@@ -46,27 +47,6 @@ impl WasiWebrtcView for Ctx {
             table: &mut self.table,
         }
     }
-}
-
-fn engine() -> Result<Engine> {
-    let mut config = Config::new();
-    config.wasm_component_model(true);
-    config.wasm_component_model_async(true);
-    Engine::new(&config)
-}
-
-/// Build the WebRTC context, opting into loopback ICE candidates when the
-/// `WEBRTC_INCLUDE_LOOPBACK` environment variable is set. This env-driven tweak
-/// is demo-only glue (the crate exposes it as a `SettingEngine` hook)
-/// and is useful when running an offerer and answerer on the same host.
-fn webrtc_ctx() -> WasiWebrtcCtx {
-    let mut ctx = WasiWebrtcCtx::new();
-    if std::env::var_os("WEBRTC_INCLUDE_LOOPBACK").is_some() {
-        ctx.set_setting_engine_hook(|engine| {
-            engine.set_include_loopback_candidate(true);
-        });
-    }
-    ctx
 }
 
 #[tokio::main]
