@@ -29,6 +29,15 @@ const dbg = process.env.REF_PEER_DEBUG
   ? (...args) => console.error("[ref-peer]", ...args)
   : () => {};
 
+/** An error's message with its whole `cause` chain, for failure details. */
+function describeError(err) {
+  const parts = [];
+  for (let e = err; e != null; e = e.cause) {
+    parts.push(e.code ? `${e.message} (${e.code})` : String(e.message ?? e));
+  }
+  return parts.join(": ");
+}
+
 // --- mailbox client (PROTOCOL.md) -------------------------------------------
 
 /** A fetch-based client of one conformance-signalingd room, bound to a role. */
@@ -511,7 +520,7 @@ try {
   await Promise.race([runTest(parseCli()), timeout]);
   result = { tag: "pass" };
 } catch (err) {
-  result = { tag: "fail", val: String(err?.message ?? err) };
+  result = { tag: "fail", val: describeError(err) };
 }
 console.log(JSON.stringify(result));
 // wrtc's worker threads keep the event loop alive; exit explicitly.
