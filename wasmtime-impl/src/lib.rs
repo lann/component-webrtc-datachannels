@@ -11,6 +11,24 @@
 //! [`add_to_linker`] to satisfy the `types` and `connections` imports with a
 //! real WebRTC/SCTP data channel.
 //!
+//! A host generating its own bindings with `wasmtime::component::bindgen!`
+//! must map the `connections` resources onto this crate's host types:
+//!
+//! ```text
+//! with: {
+//!     "lann:webrtc-datachannels/connections.data-channel-options":
+//!         wasmtime_webrtc_datachannels::DataChannelOptions,
+//!     "lann:webrtc-datachannels/connections.data-channel":
+//!         wasmtime_webrtc_datachannels::DataChannel,
+//!     "lann:webrtc-datachannels/connections.peer-connection":
+//!         wasmtime_webrtc_datachannels::PeerConnection,
+//! },
+//! ```
+//!
+//! The crate has no tests of its own: its behavior is asserted end to end by
+//! the conformance suite (`conformance/`) and the demo-host integration tests
+//! (`examples/wasmtime-demo/tests`).
+//!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
 pub mod bindings;

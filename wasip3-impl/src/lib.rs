@@ -25,8 +25,6 @@
 
 mod peer;
 
-pub use peer::{PeerEvent, SansIoPeer, Transmit};
-
 wit_bindgen::generate!({
     path: "wit",
     world: "provider",

@@ -29,7 +29,3 @@ async-trait = "0.1"
 # the peer-connection build/channel-wiring tasks, and uses `sync`/`time` for the
 # `wait-connected` connection-state signalling and its timeout.
 tokio = { version = "1", features = ["rt", "sync", "time", "macros"] }
-
-[dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
-wit-component = "0.247"

@@ -4195,7 +4195,6 @@ dependencies = [
  "tokio",
  "wasmtime",
  "webrtc",
- "wit-component 0.247.0",
 ]
 
 [[package]]
