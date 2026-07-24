@@ -12,7 +12,7 @@ demo/manual-signaling driver (`wasmtime-demo`) that exercise the
   stack satisfies that import — into one self-contained component, then run under
   `wasmtime`, standing up an offerer and an answerer that connect over loopback
   entirely in-guest and exchange a message each way. This is the basic in-guest
-  integration test. Build, compose, and run it with `just test-webrtc-composed`
+  integration test. Build, compose, and run it with `just examples::test-webrtc-composed`
   (needs `wasmtime` v46+ and `wac` on `PATH`), or directly:
 
   ```sh

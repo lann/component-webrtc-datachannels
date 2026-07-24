@@ -44,7 +44,7 @@ jobs:
       - name: Download Shadow from release
         # Fetch the prebuilt Shadow network simulator from the `shadow-dev`
         # prerelease into ~/.local so the conformance Shadow lab
-        # (`just conformance-shadow`) works in the agent environment without a
+        # (`just conformance::shadow`) works in the agent environment without a
         # slow from-source build. Dispatch .github/workflows/shadow-build.yml if
         # the release does not exist yet. Best-effort: if the release is missing,
         # provisioning still succeeds and the lab recipe prints install guidance

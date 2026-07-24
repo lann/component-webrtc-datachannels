@@ -1,0 +1,294 @@
+# The conformance suite (see README.md here). Loaded as the `conformance`
+# module of the top-level justfile: invoke as `just conformance` (full loopback
+# suite) or `just conformance::<recipe>`.
+#
+# Recipes run from the repository root so cargo invocations, `target/` binary
+# paths, and `conformance/...` paths all match the top-level layout.
+set working-directory := ".."
+
+# The whole-run safety cap (seconds) for each conformance adapter invocation.
+# Every attempt inside an adapter is already individually bounded (90s), but
+# this caps the entire run so a systemic hang fails in minutes, not hours.
+timeout := "600"
+
+# Run the conformance suite over the currently enabled targets (see
+# README.md). Builds the shared conformance guest component, runs each
+# adapter to produce conformance/results/<target>.json, then classifies the
+# results over conformance/tests.toml + conformance/manifests.toml — also
+# spawning the standalone conformance-signalingd binary (ephemeral localhost
+# port, gated on /healthz) to exercise its lifecycle — and writes the matrix to
+# conformance/matrix.md, exiting nonzero on any fail or unexpected-pass.
+#
+# Enabled targets: wasmtime (native webrtc-rs), jco-node and jco-browser (the
+# browser-first host transpiled by jco, run under Node and headless Chromium),
+# wasip3-guest (the whole WebRTC stack in wasm: the guest composed with the
+# wasip3-impl provider, run under `wasmtime run`), plus the interop pairs
+# wasmtime<->jco-node, wasmtime<->jco-browser, and wasmtime<->wasip3-guest
+# (both orders each). The jco targets need a JSPI-capable Node (24+; see
+# jco-node) and, for the browser target, a Chrome 137+ binary (auto-detected,
+# or set CHROME_PATH).
+[doc("Run the full loopback conformance suite and render the matrix")]
+all: wasmtime jco-node jco-browser wasip3 interop build-runner && classify
+
+# ---------------------------------------------------------------------------
+# Builders. Everything below `run-` executes prebuilt artifacts only, so CI
+# can compile once (build-all) and fan the artifacts out to runner jobs.
+# ---------------------------------------------------------------------------
+
+# Build one release-profile binary.
+[private]
+bin package binary:
+    cargo build --release -p {{package}} --bin {{binary}}
+
+# Build the shared conformance guest component into conformance/guest/build/.
+build-guest:
+    cargo build --release -p conformance-guest --target wasm32-unknown-unknown
+    mkdir -p conformance/guest/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/conformance_guest.wasm \
+        -o conformance/guest/build/conformance-guest.component.wasm
+
+# Transpile the conformance guest for the jco adapters (Node + browser) into
+# conformance/adapters/jco/generated (jco `--instantiation` mode so one process
+# can stand up two guest instances). Rebuilds the guest component first.
+[doc("Transpile the conformance guest for the jco adapters")]
+transpile-guest: build-guest
+    cd conformance/adapters/jco && npm run transpile
+
+# Build the fully composed wasip3-guest conformance component into
+# conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm: the shared
+# conformance guest is composed (`wac plug`) with the wasip3-impl provider
+# (exports `connections` over wasi:sockets UDP), the in-guest wasi:http mailbox
+# client, and the CLI driver that exports an async `wasi:cli/run` and reports
+# the single-test result on stdout. Rebuilds the guest component first.
+[doc("Compose the wasip3-guest conformance component (guest + provider + mailbox + driver)")]
+build-wasip3: build-guest
+    cargo build --release --target wasm32-wasip2 \
+        -p wasip3-webrtc-datachannels \
+        -p conformance-wasip3-mailbox \
+        -p conformance-wasip3-driver
+    mkdir -p conformance/adapters/wasip3/build
+    wac plug conformance/guest/build/conformance-guest.component.wasm \
+        --plug target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm \
+        --plug target/wasm32-wasip2/release/conformance_wasip3_mailbox.wasm \
+        -o conformance/adapters/wasip3/build/conformance-wasip3.guest.wasm
+    wac plug target/wasm32-wasip2/release/conformance_wasip3_driver.wasm \
+        --plug conformance/adapters/wasip3/build/conformance-wasip3.guest.wasm \
+        -o conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm
+
+# Build the conformance-signalingd mailbox server (shared by every adapter).
+build-signalingd:
+    cargo build -p conformance-signalingd
+
+# Build the conformance-runner result classifier.
+build-runner:
+    cargo build -p conformance-runner
+
+# Build everything the loopback suite (`run-matrix`) executes.
+build-matrix: build-guest transpile-guest build-wasip3 build-signalingd build-runner \
+    (bin "conformance-adapter-wasmtime" "conformance-adapter-wasmtime") \
+    (bin "conformance-adapter-wasip3" "conformance-adapter-wasip3") \
+    (bin "conformance-adapter-wasmtime" "conformance-interop")
+
+# Build everything the Shadow lab (`run-shadow`) executes.
+build-shadow: build-guest build-wasip3 build-signalingd build-runner \
+    (bin "conformance-adapter-wasmtime" "conformance-peer") \
+    (bin "conformance-adapter-common" "conformance-shadow")
+
+# Build every artifact the CI conformance jobs run (matrix + Shadow lab).
+build-all: build-matrix build-shadow
+
+# ---------------------------------------------------------------------------
+# Per-target recipes: build what the target needs, then run it.
+# ---------------------------------------------------------------------------
+
+# Run the wasmtime conformance adapter over loopback. Writes
+# conformance/results/wasmtime.json.
+[doc("Build + run the wasmtime target over loopback")]
+wasmtime: build-guest (bin "conformance-adapter-wasmtime" "conformance-adapter-wasmtime") && run-wasmtime
+
+# Run the wasip3-guest conformance adapter: the composed component runs under
+# `wasmtime run` (v46+; component-model async + WASIp3 + wasi:http), one
+# process per peer, connecting over wasi:sockets UDP loopback across processes
+# and signaling through the in-guest wasi:http mailbox client. Writes
+# conformance/results/wasip3-guest.json.
+[doc("Build + run the wasip3-guest target over loopback")]
+wasip3: build-wasip3 (bin "conformance-adapter-wasip3" "conformance-adapter-wasip3") && run-wasip3
+
+# Run the jco-node conformance adapter (guest transpiled by jco, run under Node
+# with @roamhq/wrtc). jco's async ABI needs JavaScript Promise Integration, so
+# this uses `node --experimental-wasm-jspi` and requires Node 24+ (which ships
+# WebAssembly.Suspending). Writes conformance/results/jco-node.json.
+[doc("Build + run the jco-node target over loopback (Node 24+)")]
+jco-node: transpile-guest build-signalingd && run-jco-node
+
+# Run the jco-browser conformance adapter (the same guest + host modules inside
+# headless Chromium; Chrome 137+ ships JSPI). Writes
+# conformance/results/jco-browser.json.
+[doc("Build + run the jco-browser target over loopback (Chrome 137+)")]
+jco-browser: transpile-guest build-signalingd && run-jco-browser
+
+# Run the interop pairs (each in both orders): wasmtime<->jco-node,
+# wasmtime<->jco-browser (one headless-Chromium instance per test), and
+# wasmtime<->wasip3-guest — one peer per runtime shares a signaling room and a
+# real WebRTC data channel. Writes conformance/results/<pair>.json for each of
+# the six pair directions.
+[doc("Build + run the cross-runtime interop pairs over loopback")]
+interop: transpile-guest build-wasip3 build-signalingd (bin "conformance-adapter-wasmtime" "conformance-interop") && run-interop
+
+# Run the two-peer corpus inside the Shadow network simulator
+# (https://github.com/shadow/shadow). Like the netns lab it places the two peers
+# of each test on separate hosts over a routed, non-loopback path — but Shadow
+# simulates the network in user space, so it needs NO root, network namespaces,
+# or real kernel networking, which makes it reproducible and runnable in
+# restricted sandboxes and CI. The target-neutral environment executor
+# (conformance-shadow, in conformance/adapters/common) generates a single
+# Shadow config per target, runs `shadow` once per target, and writes
+# conformance/results/<target>-shadow.json (the `shadow` environment column):
+# the wasmtime target runs the native conformance-peer and the wasip3-guest
+# target runs the composed wasip3 conformance component under `wasmtime run`,
+# with each in-guest provider bound to its host's simulated address via
+# WEBRTC_UDP_BIND_ADDR. Needs `shadow` on PATH; install it with
+# scripts/download-shadow.sh (prebuilt, from the `shadow-dev` release) or
+# scripts/build-shadow.sh (from source).
+[doc("Build + run the Shadow lab (deterministic non-loopback simulation)")]
+shadow: build-shadow && run-shadow
+
+# ---------------------------------------------------------------------------
+# Runners: execute prebuilt artifacts only (no cargo). CI's build job compiles
+# via `build-all` and hands the artifacts to jobs that invoke these directly.
+# ---------------------------------------------------------------------------
+
+# Run every loopback adapter and classify the results (prebuilt artifacts).
+run-matrix: run-wasmtime run-jco-node run-jco-browser run-wasip3 run-interop && classify
+
+# Run a prebuilt wasmtime adapter over loopback.
+run-wasmtime:
+    timeout {{timeout}} target/release/conformance-adapter-wasmtime \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --out conformance/results
+
+# Run a prebuilt wasip3-guest adapter over loopback.
+run-wasip3:
+    timeout {{timeout}} target/release/conformance-adapter-wasip3 \
+        --component conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+        --out conformance/results
+
+# Run the jco-node adapter against the transpiled guest.
+run-jco-node:
+    cd conformance/adapters/jco && timeout {{timeout}} npm run run:node
+
+# Run the jco-browser adapter against the transpiled guest.
+run-jco-browser:
+    cd conformance/adapters/jco && timeout {{timeout}} npm run run:browser
+
+# Run the prebuilt interop-pair orchestrator.
+run-interop:
+    timeout {{timeout}} target/release/conformance-interop
+
+# Run the prebuilt Shadow-lab executor for both targets.
+run-shadow:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v shadow >/dev/null 2>&1; then
+        cat >&2 <<'EOF'
+    ==> ERROR: the `shadow` binary is required by the Shadow lab but was not found
+        on PATH.
+
+        Shadow ships no upstream prebuilt binary, so install it one of these ways:
+          * Download the prebuilt binary from the `shadow-dev` GitHub prerelease:
+              ./scripts/download-shadow.sh
+          * Build it from source (slow; needs the Debian/Ubuntu build deps):
+              ./scripts/build-shadow.sh
+
+        Both install to ~/.local (bin/shadow + lib/libshadow_*.so); make sure
+        ~/.local/bin is on PATH afterward.
+    EOF
+        exit 1
+    fi
+    # The Shadow peer carries the in-binary syscall shim bridging Shadow's
+    # syscall surface to the webrtc driver's quinn-udp UDP layer (see
+    # adapters/wasmtime/src/bin/peer/shadow_shim.rs); the executor arms it via
+    # CONFORMANCE_SHADOW_SYSCALL_SHIM on the simulated peers only.
+    timeout {{timeout}} target/release/conformance-shadow \
+        --target wasmtime --peer-kind wasmtime \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --signaling-bin target/debug/conformance-signalingd \
+        --peer-bin target/release/conformance-peer \
+        --out conformance/results
+    timeout {{timeout}} target/release/conformance-shadow \
+        --target wasip3-guest --peer-kind wasip3-guest \
+        --component conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+        --signaling-bin target/debug/conformance-signalingd \
+        --data-dir target/shadow-data-wasip3 \
+        --out conformance/results
+
+# Classify every result in conformance/results against the manifests and
+# render conformance/matrix.md, also exercising conformance-signalingd's
+# process lifecycle; exits nonzero on any fail or unexpected-pass.
+[doc("Classify conformance/results against the manifests into conformance/matrix.md")]
+classify:
+    target/debug/conformance-runner \
+        --tests conformance/tests.toml \
+        --manifests conformance/manifests.toml \
+        --results conformance/results \
+        --signaling-bin target/debug/conformance-signalingd \
+        --matrix-out conformance/matrix.md
+
+# Classify the Shadow-lab results (<target>-shadow.json) and render the
+# environment-columned matrix to conformance/shadow-matrix.md.
+[doc("Classify the Shadow-lab results into conformance/shadow-matrix.md")]
+classify-shadow:
+    target/debug/conformance-runner \
+        --tests conformance/tests.toml \
+        --manifests conformance/manifests.toml \
+        --results conformance/results \
+        --matrix-out conformance/shadow-matrix.md
+
+# ---------------------------------------------------------------------------
+# Workstation-only labs.
+# ---------------------------------------------------------------------------
+
+# Run the conformance netns lab for one scenario (lan | stun-srflx | turn-relay |
+# nat-symmetric; see README.md). The target-neutral environment executor
+# (conformance-netns, in adapters/common) provisions a routed
+# network-namespace topology in Rust (netns + nftables + coturn; the `lab`
+# module), places the two peers of each two-peer test in separate namespaces,
+# and — for the server-mediated scenarios — routes them through coturn while
+# the router blocks the direct path (and, for the NAT scenarios, source-NATs
+# each peer), so the handshake exercises a real (non-loopback) candidate path.
+# Writes conformance/results/<target>-<scenario>.json (environment column in
+# the matrix). The optional peer_kind argument selects the peer (wasmtime |
+# wasip3-guest); the wasip3-guest peer's in-guest sans-I/O stack supports no
+# STUN/TURN, so only `lan` works for it. Needs root for `ip netns exec` (hence
+# sudo) and `turnserver` on PATH for the non-`lan` scenarios (installed by
+# scripts/setup.sh). The lab is always torn down on exit. `stun-srflx` runs
+# behind a static one-to-one (full-cone) NAT so its srflx path is meaningful;
+# `nat-symmetric` runs behind a symmetric NAT so ICE must fall back to a TURN
+# relay.
+[doc("Run the netns lab for one scenario (root; workstation-only)")]
+netns scenario="lan" peer_kind="wasmtime": build-guest build-signalingd \
+    (bin "conformance-adapter-wasmtime" "conformance-peer") \
+    (bin "conformance-adapter-common" "conformance-netns")
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "{{peer_kind}}" = "wasip3-guest" ]; then
+        just conformance::build-wasip3
+    fi
+    sudo timeout {{timeout}} target/release/conformance-netns \
+        --scenario {{scenario}} \
+        --peer-kind {{peer_kind}} \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --component conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+        --signaling-bin target/debug/conformance-signalingd \
+        --peer-bin target/release/conformance-peer \
+        --out conformance/results
+
+# Run the NAT matrix (see README.md): the srflx scenario behind a one-to-one
+# (full-cone) NAT, where the server-reflexive candidates connect, and the
+# symmetric-NAT scenario, where srflx fails and ICE must fall back to a TURN
+# relay. Both write conformance/results/wasmtime-<scenario>.json. Like the rest
+# of the netns lab it is workstation-only (not run in CI). Requires the same
+# privileges/tools as `netns`.
+[doc("Run the netns NAT matrix: stun-srflx then nat-symmetric (workstation-only)")]
+nat: (netns "stun-srflx") (netns "nat-symmetric")

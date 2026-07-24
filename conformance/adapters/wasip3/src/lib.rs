@@ -35,7 +35,7 @@ impl Wasip3Peer {
     /// signaling server at `server`, parsing the driver's single-line JSON
     /// `test-result` from stdout.
     ///
-    /// The flags mirror `just test-webrtc-composed` plus `-S http` for the
+    /// The flags mirror `just examples::test-webrtc-composed` plus `-S http` for the
     /// in-guest mailbox client: the component-model async ABI, the WASIp3 host
     /// APIs, and network access for the provider's `wasi:sockets` UDP and the
     /// mailbox's outgoing HTTP.

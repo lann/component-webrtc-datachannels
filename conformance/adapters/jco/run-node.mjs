@@ -11,7 +11,7 @@
 //
 // jco's async ABI needs JavaScript Promise Integration (JSPI), so this must run
 // under a JSPI-capable runtime: Node 24+ with `--experimental-wasm-jspi`. The
-// `just conformance-jco-node` recipe supplies both.
+// `just conformance::jco-node` recipe supplies both.
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";

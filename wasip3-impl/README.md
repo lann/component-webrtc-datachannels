@@ -43,7 +43,7 @@ that imports `connections`, stands up an offerer and an answerer, and round-trip
 a message each way. Compose and run it:
 
 ```sh
-just test-webrtc-composed
+just examples::test-webrtc-composed
 ```
 
 which builds both components, composes them with `wac plug` (the consumer's
@@ -56,7 +56,7 @@ to choose the bind address and a routable host candidate.
 ## Build
 
 ```sh
-just build-wasip3-provider
+just examples::build-wasip3-provider
 ```
 
 produces `target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm`, a

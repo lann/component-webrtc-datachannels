@@ -247,7 +247,7 @@ struct Cli {
     wasmtime_bin: String,
 
     /// Path to the fully composed wasip3-guest component
-    /// (see `just build-conformance-wasip3`).
+    /// (see `just conformance::build-wasip3`).
     #[arg(
         long,
         default_value = "conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm"
