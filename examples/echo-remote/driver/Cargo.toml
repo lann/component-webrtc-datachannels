@@ -1,0 +1,21 @@
+[package]
+name = "echo-remote-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "CLI driver component for the fully in-guest echo-remote demo: imports demo:webrtc-echo/remote, exports an async wasi:cli/run, and reports the run's stats on stdout."
+
+[lib]
+# A component: built for `wasm32-wasip2` and composed (`wac plug`) over the
+# echo-remote guest's exported `remote` interface.
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:cli/run` export (a synchronous `run` cannot await the async
+# `run` import).
+wasip3 = { version = "0.7", features = ["async-spawn"] }
+# The imported `remote` bindings.
+# Pinned to the wit-bindgen version the `wasip3` crate uses: this crate shares
+# wit-bindgen runtime types with wasip3, and mixing two runtime versions in one
+# component is unsupported. Upgrade together with the wasip3 dependency.
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }

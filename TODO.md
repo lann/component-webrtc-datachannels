@@ -107,32 +107,22 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-## F. Examples
+## F. Conformance suite
 
-### F3. Wire up `rendezvous` end-to-end (tracking)
+### F5. Interop barrier sentinel can be lost to the winner's immediate close
 
-`demo:webrtc-echo/rendezvous` (`examples/echo-demo/wit/webrtc-echo-demo.wit`) is
-defined but imported by no world and implemented by neither host. Per AGENTS.md,
-the intended flagship example is two separate component instances (offerer /
-answerer) connecting via `peer-connection` (now implemented everywhere) + a
-`rendezvous` host that relays SDP/ICE over `wasi:http@0.3` (Wasmtime) / `fetch`
-(jco) through a trivial local mailbox server (the conformance
-`conformance-signalingd` is a ready-made candidate). This would exercise nearly
-every interface at once and would make the echo demo's two peers genuinely
-separate components, making it the reference example.
-
-### F4. Drive the sans-I/O `rtc` stack across a real network (tracking)
-
-`wasip3-impl` is now a **component** that runs the sans-I/O `rtc` stack
-in-guest and exports the project `connections` interface, composed (`wac plug`)
-with `examples/webrtc-consumer` for the same-host round-trip integration test.
-The remaining step is a real deployment across separate machines: the consumer
-chooses the bind address through `WEBRTC_UDP_BIND_ADDR` (which produces a
-routable host candidate, exercised across a non-loopback simulated network by
-the conformance Shadow lab); combined with `rendezvous` (item F3), two separate
-components can then connect across a network.
-Host-candidate gathering must stay explicit (`ifaces()` is `Unsupported` on
-wasm).
+The interop "attempt timed-out" flake family is now diagnosed (via the
+phase-marker logs): in a two-peer test the side that finishes its barrier
+first closes immediately, and the wasmtime host's `close()` tears the
+connection down without draining — the just-sent barrier sentinel can be
+discarded before it reaches the wire, leaving the slower peer (observed:
+the jco-browser offerer, its wasmtime partner passing in ~2s) waiting for
+a sentinel that never arrives; the browser does not surface the dirty
+teardown as a channel close within the 90s guard. Fix candidates: a
+bounded close-drain in the wasmtime host mirroring `wasip3-impl`'s
+`CLOSE_DRAIN` (flush queued sends before tearing down), or making the
+conformance barrier ack-acked so neither side closes before both
+sentinels are confirmed received.
 
 ## G. Development environment / CI
 
@@ -148,7 +138,5 @@ flags from the WIT) so a drifted rename fails fast with a clear message.
 
 1. Contract alignment: fix the `peer-connection` divergences and land their
    conformance tests (C1).
-2. Strategic build-out: wire `rendezvous` (F3) and take `wasip3`'s
-   WIT-speaking component to a real network (F4).
-3. Cheap hygiene: the transpile-flag CI check (G1), the remaining
+2. Cheap hygiene: the transpile-flag CI check (G1), the remaining
    conformance-matrix gaps (A3).

@@ -1,8 +1,6 @@
 package demo:webrtc-echo@0.1.0;
 
-/// Demo-only HTTP signaling rendezvous (a proposal, not yet wired into the
-/// runnable world — mirroring how `lann:webrtc-datachannels/signaling` is
-/// designed but not yet exercised).
+/// Demo-only HTTP signaling rendezvous.
 ///
 /// To connect two *separate* peers (offerer and answerer) they must exchange
 /// SDP offers/answers and trickled ICE candidates out of band. `rendezvous` is
@@ -13,11 +11,14 @@ package demo:webrtc-echo@0.1.0;
 /// between them.
 ///
 /// The transport is deliberately unstandardized — it lives in the demo package,
-/// not in `lann:webrtc-datachannels`. A host is expected to implement it by
-/// relaying blobs to and from an existing HTTP signaling server over
-/// `wasi:http@0.3` (the guest itself does not need to speak HTTP). The blob
-/// payloads are opaque here; the guest chooses the encoding (for example, JSON
-/// produced from the `signaling` records).
+/// not in `lann:webrtc-datachannels`. Implementations relay blobs to and from
+/// an existing HTTP signaling server (the guest itself does not need to speak
+/// HTTP): the Wasmtime demo host implements it natively, the jco host over
+/// `fetch`, and the `rendezvous-http` component over in-guest `wasi:http@0.3`
+/// (composable under the guest so a plain `wasmtime run -S http` provisions
+/// it). The blob payloads are opaque here; the guest chooses the encoding
+/// (for example, JSON carrying `session-description` / `ice-candidate`
+/// values).
 interface rendezvous {
     use lann:webrtc-datachannels/types@0.1.0.{error};
 
@@ -31,13 +32,19 @@ interface rendezvous {
     /// A named signaling session shared by exactly two peers on the server.
     resource session {
         /// Join (creating if necessary) the room `room` on the signaling
-        /// server as `role`. Both peers must agree on `room`; the server keeps
-        /// the two directions of blobs separate by role.
-        open: static async func(room: string, as-role: role) -> result<session, error>;
+        /// server reachable at base URL `server` (for example
+        /// `http://127.0.0.1:8080`) as `as-role`. Both peers must agree on
+        /// `room`; the server keeps the two directions of blobs separate by
+        /// role.
+        open: static async func(
+            server: string,
+            room: string,
+            as-role: role,
+        ) -> result<session, error>;
 
-        /// Publish the next opaque signaling blob (an SDP or a batch of ICE
-        /// candidates, encoded by the guest) for the peer to fetch. Blobs are
-        /// delivered to the peer in publish order.
+        /// Publish the next opaque signaling blob (an SDP or an ICE candidate,
+        /// encoded by the guest) for the peer to fetch. Blobs are delivered to
+        /// the peer in publish order.
         send: async func(blob: list<u8>) -> result<_, error>;
 
         /// Fetch the next opaque signaling blob published by the peer,
@@ -45,9 +52,10 @@ interface rendezvous {
         /// the peer has signalled that it will publish no more blobs.
         recv: async func() -> result<option<list<u8>>, error>;
 
-        /// Signal that this peer has published its final blob and close the
-        /// session's mailbox on the server.
-        close: func();
+        /// Signal that this peer has published its final blob: the peer's
+        /// `recv` resolves `none` once it has consumed everything published
+        /// before this call.
+        done: async func() -> result<_, error>;
     }
 }
 
@@ -76,6 +84,40 @@ interface demo {
     run: async func(config: demo-config) -> result<demo-stats, error>;
 }
 
+/// The remote-echo entry point: one peer of a two-process echo run.
+///
+/// Unlike `demo` (which stands up both peers inside one component instance),
+/// each `remote` instance drives exactly one peer and reaches the other
+/// through `rendezvous` signaling, so two genuinely separate component
+/// instances — typically separate OS processes, potentially separate machines
+/// — form one real WebRTC connection.
+interface remote {
+    use lann:webrtc-datachannels/types@0.1.0.{error};
+    use rendezvous.{role};
+    use demo.{demo-stats};
+
+    /// Parameters for one peer of a remote echo run.
+    record remote-config {
+        /// Base URL of the HTTP signaling server both peers share.
+        server: string,
+        /// Signaling room both peers agree on.
+        room: string,
+        /// Which peer this instance drives. The offerer creates the channel
+        /// and sends the messages; the answerer echoes them back.
+        role: role,
+        /// Number of messages the offerer sends (the answerer echoes until the
+        /// channel closes and ignores this field).
+        message-count: u32,
+        /// Size, in bytes, of each message.
+        message-size: u32,
+    }
+
+    /// Connect to the remote peer via `rendezvous` + `connections`, run this
+    /// role's half of the echo exchange (verifying every payload
+    /// byte-for-byte), and report the stats observed from this side.
+    run: async func(config: remote-config) -> result<demo-stats, error>;
+}
+
 /// The world implemented by the example component and driven by both hosts.
 /// The component stands up both peers itself through the standard
 /// `connections` interface (an offerer and an in-component echo answerer), so
@@ -83,4 +125,14 @@ interface demo {
 world webrtc-echo-demo {
     import lann:webrtc-datachannels/connections@0.1.0;
     export demo;
+}
+
+/// The world implemented by the `echo-remote` component: one peer of a
+/// two-process echo run, signaling through `rendezvous` (implemented by the
+/// host or by the composable `rendezvous-http` component) and connecting
+/// through the standard `connections` interface.
+world webrtc-echo-remote {
+    import lann:webrtc-datachannels/connections@0.1.0;
+    import rendezvous;
+    export remote;
 }

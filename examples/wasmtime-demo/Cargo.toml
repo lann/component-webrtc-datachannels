@@ -18,7 +18,13 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 futures = "0.3"
 anyhow = "1"
 env_logger = "0.11.11"
+# Native HTTP client backing the echo-remote binary's rendezvous host (plain
+# HTTP/1.1 long-poll against the local signaling server; no TLS needed).
+reqwest = { version = "0.12", default-features = false }
 
 [dev-dependencies]
 # The integration test decodes the guest's base64 SDP blobs to recognize them.
 base64 = "0.22"
+# The echo-remote integration test starts the signaling mailbox server
+# in-process on an ephemeral port.
+conformance-signalingd = { path = "../../conformance/signaling/server" }
