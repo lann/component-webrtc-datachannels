@@ -12,8 +12,11 @@
 // `TypeError: Cannot read properties of undefined (reading 'Symbol(handle)')`.
 //
 // This script rewrites that cleanup into a shape-tolerant loop that handles
-// both entry forms. It is a no-op once jco generates consistent forms, at
-// which point it can be deleted.
+// both entry forms. Only this adapter's transpile step (blanket `-I async`
+// over the conformance guest, see package.json) runs it — the only pipeline
+// where the broken cleanup has been observed. It can be deleted once jco
+// generates consistent forms; it fails when it matches nothing so that
+// upgrade is a deliberate decision rather than a silent no-op.
 
 import { readFile, writeFile } from "node:fs/promises";
 
@@ -38,5 +41,19 @@ const patched = source.replace(BROKEN, () => {
   count += 1;
   return FIXED;
 });
+if (count === 0) {
+  // Fail closed: with the pinned jco version the broken cleanup shape must be
+  // present, so zero matches means either (a) jco was upgraded and generates
+  // consistent forms now — delete this patch step from the transpile script —
+  // or (b) jco's codegen reformatted the still-broken cleanup and the BROKEN
+  // regex must be updated. Continuing silently would defer the failure to a
+  // cryptic runtime TypeError deep inside a test run.
+  console.error(
+    `patch-generated: found no borrow-cleanup loop to rewrite in ${path}.\n` +
+      "If the jco upgrade fixed the codegen (see the header), remove this " +
+      "patch step; if the generated shape merely changed, update BROKEN.",
+  );
+  process.exit(1);
+}
 await writeFile(path, patched);
 console.error(`patch-generated: rewrote ${count} borrow-cleanup loop(s) in ${path}`);

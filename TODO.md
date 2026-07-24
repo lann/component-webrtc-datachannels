@@ -230,26 +230,6 @@ fewer results than the registry should at minimum warn, better fail);
 does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
 params only.
 
-### F8. `patch-generated.mjs` fails open against a floating jco version
-
-`conformance/adapters/jco/patch-generated.mjs:21-28` regex-rewrites jco's
-*generated* borrow-cleanup loop to work around an upstream codegen bug. Two
-fragilities: the regex is whitespace/shape-sensitive against generated code,
-and when it matches nothing the script prints `rewrote 0 borrow-cleanup
-loop(s)` and **exits 0** — the failure then resurfaces at runtime as a
-cryptic `TypeError … Symbol(handle)` far from the cause. Meanwhile both
-package.jsons float jco (`"^1.19.0"`: `conformance/adapters/jco/package.json:13`,
-`jco-impl/package.json`) across the 1.25.2 the bug was observed on, so a
-routine `npm install`/`npm update` can move the resolved codegen out from
-under the regex with no signal.
-
-Fix: pin jco to an exact version in both package.jsons, and make the patch
-fail (or at minimum warn loudly) when the match count is 0 while a
-known-affected jco version is installed, so "fixed upstream" and "regex no
-longer matches the still-broken output" are distinguishable. Document in the
-script header why the `jco-impl` pipeline does not need the patch (different
-async mode) so the asymmetry is a decision, not a mystery.
-
 ### F9. Three mailbox clients have drifted; the browser proxy strips protocol headers
 
 The signaling protocol has three independent client implementations with
@@ -316,8 +296,7 @@ drifted rename fails fast with a clear message.
 ## Suggested priority
 
 1. Conformance-suite integrity: wire `list-tests` + loud missing results
-   (F7), make `patch-generated.mjs` fail closed and pin jco (F8), the jco
-   close-drain half of the barrier race (F5).
+   (F7), the jco close-drain half of the barrier race (F5).
 2. Implementation contract gaps found incidentally: Wasmtime
    close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
