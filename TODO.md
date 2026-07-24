@@ -33,6 +33,51 @@ confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
   supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
   in a namespace) is deferred.
 
+### A4. Guest-facing `peer-connection` configuration (ICE servers, transport policy)
+
+The `peer-connection` constructor takes no configuration, so connectivity
+config is host-side only: the Wasmtime host's `WasiWebrtcCtx` ICE config,
+nothing at all on the jco host, and the deployment-side
+`WEBRTC_UDP_BIND_ADDR` for the in-guest provider. Real deployments need
+*application-owned* ICE configuration — TURN credentials are typically
+ephemeral, fetched by the app at runtime — which no host-side channel can
+express, and `RTCConfiguration.iceServers` is the most load-bearing field of
+the W3C constructor this package mirrors.
+
+Agreed design, following `wasi:http`'s `request-options` precedent of
+**fallible setters**:
+
+- A `peer-connection-config` builder resource with
+  `set-ice-servers: func(servers: list<ice-server>) -> result<_, config-error>`
+  and `set-ice-transport-policy` (`all | relay`), where
+  `config-error = not-supported | invalid(string)`. Getters reflect what a
+  successful set stored. `peer-connection`'s constructor takes
+  `option<peer-connection-config>` by ownership, like `create-data-channel`
+  takes its options.
+- **Accepted ⇒ honored**: rejection happens eagerly at the setter, so any
+  config that was successfully built is binding — an implementation may never
+  silently ignore a field. `data-channel-options` keeps its infallible
+  setters (its fields are universally supportable); capability-gated options
+  get the fallible variant of the same builder pattern.
+- The wasip3 provider returns `not-supported` from `set-ice-servers` (the
+  in-guest sans-I/O stack has no STUN/TURN client) until `rtc`'s stun/turn
+  crates are wired into the driver; the conformance manifest records this
+  with an `unsupported` tag so the matrix shows it and forces cleanup when
+  support lands.
+- The same error channel carries **host policy**: on the Wasmtime host, a
+  `WasiWebrtcCtx` hook may reject guest-supplied servers
+  (allowlist/deny), surfacing as `not-supported`/`invalid` — capability and
+  policy are indistinguishable to the guest, deliberately.
+- Conformance contract: per target, `set-ice-servers` returns
+  `not-supported` XOR the TURN scenarios pass. This extends the netns
+  TURN coverage beyond the wasmtime target (the browser `RTCPeerConnection`
+  accepts `iceServers` directly) — see A3's netns-lab coverage gap.
+
+Out of scope, deliberately host/deployment-side: the bind address
+(topology), loopback candidates (demo glue), buffer bounds and timeouts
+(host resource policy). Do this when the first non-LAN use case lands or
+when extending lab coverage to jco — it is an interface change, not hygiene.
+
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -101,6 +146,38 @@ unsupported in `conformance/manifests.toml` (a flaky failure cannot be an
 `expected-fail`: it would `unexpected-pass` on green runs). File the
 upstream `webrtc-rs/rtc` issue with the repro above, and drop the manifest
 entries once a fixed pin lands.
+||||||| parent of 3da5c1e (Record the peer-connection config design and env-var follow-ups (A4, E13))
+
+### E13. Unify and shrink the implementations' environment-variable surface
+
+The env-var surface is now indexed (AGENTS.md) and fails loud on invalid
+values, but three refinements remain:
+
+- **Latching semantics differ per implementation.** The Rust
+  implementations latch `WEBRTC_MAX_INBOUND_BUFFER_BYTES` at first read
+  (`OnceLock`), for the process lifetime; the jco host resolves it lazily
+  per channel (`maxInboundBuffered` in `jco-impl/webrtc.js`). A harness
+  that changes the value mid-process observes different behavior per
+  target. Align on read-once-at-first-use everywhere.
+- **The Wasmtime host library still reads ambient env.**
+  `WasiWebrtcCtx::default()` sources the buffer bound from the env var, so
+  a malformed value panics even when the embedder immediately overrides it
+  via `set_max_inbound_buffer_bytes` — and a library panicking on ambient
+  state is harsh for embedders in general. Consider making `wasmtime-impl`
+  env-free: move the env read to its consumers (the demo binaries and the
+  conformance adapter) through the existing ctx accessor, keeping the one
+  shared variable name working across all three implementations for the
+  conformance suite.
+- **Policy: no new implementation-level env vars** without first
+  considering the proper channel — `WasiWebrtcCtx` on the Wasmtime host, an
+  exported configure hook for the jco module (which `jco --map` gives no
+  instantiation-time config channel), the WIT surface for in-guest
+  configuration (see A4). Every env var is an undeclared API that each
+  deployer must discover; the AGENTS.md table is its only registry.
+
+`WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
+address is deployment topology, owned by whoever runs the process (see A4).
+
 
 ## F. Conformance suite
 
@@ -168,7 +245,9 @@ noting the contamination risk in the result document.
 
 ## Suggested priority
 
-1. Conformance-suite integrity: wire `list-tests` + loud missing results
-   (F7), the jco close-drain half of the barrier race (F5).
-2. The rest as touched: jco in-process timeout isolation (F11), the
-   remaining conformance-matrix gaps (A3).
+1. The jco close-drain half of the barrier race (F5).
+2. When the first non-LAN use case (or jco lab coverage) calls for it:
+   guest-facing peer-connection configuration (A4).
+3. The rest as touched: the remaining corpus-mirror unification (F7), jco
+   in-process timeout isolation (F11), env-var latching/library hygiene
+   (E13), the remaining conformance-matrix gaps (A3).
