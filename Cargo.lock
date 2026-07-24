@@ -595,6 +595,7 @@ dependencies = [
  "anyhow",
  "clap",
  "conformance-adapter-common",
+ "serde_json",
  "tokio",
 ]
 

@@ -197,82 +197,37 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
-### F7. Wire up `list-tests` and make missing results loud
+### F7. Unify the remaining corpus mirrors (plan + params)
 
-The corpus is hand-mirrored with no consistency check: test ids exist in
-**four** places (`conformance/tests.toml`; guest `corpus()` at
-`conformance/guest/src/lib.rs:82-123`; `TESTS` at
-`conformance/adapters/common/src/lib.rs:164-194`; `TESTS` at
-`conformance/adapters/jco/driver.js:17-47`), the orchestration plan in three
-(guest `run()` dispatch `guest/src/lib.rs:126-154`; `plan_for()`
-`common/src/lib.rs:229-251`; `IN_PROCESS` `driver.js:50-69`), and message
-params in two plus stray re-defaults (`params_for()`
-`common/src/lib.rs:254-267`; `paramsFor()` `driver.js:80-97`; re-defaulted
-`4`/`256` in `conformance/adapters/wasmtime/src/bin/peer.rs:61-66` and
-`conformance/adapters/wasip3/driver/src/lib.rs:77-78`). The guest exports
-`list-tests` *specifically* so the registry can be cross-checked
-(`conformance/wit/world.wit:63-65`, `tests.toml:4`,
-`conformance/runner/src/registry.rs:5-7`) — and nothing ever calls it
-(`registry.get()` is `#[allow(dead_code)]` "used by later phases",
-`registry.rs:64-69`).
+The test ids are now cross-checked (each full-corpus adapter verifies its
+registered list against the guest's `list-tests` export before running; the
+runner rejects results for unregistered ids and warns on missing cells in
+report-backed rows; empty `--only` selections are errors). Still mirrored by
+hand with no consistency check:
 
-The failure mode is silent: a test missing from one mirror renders as
-`Missing`, which is neutral (`conformance/runner/src/results.rs:62-79`
-renders "—"; the runner exits 0), and a typo'd `--only` filter selects
-nothing and passes (`common/src/lib.rs:433`; only the Shadow executor rejects
-an empty selection, `common/src/bin/shadow.rs:184-186`).
+- the orchestration plan (guest `run()` dispatch, `plan_for()` in
+  `conformance/adapters/common/src/lib.rs`, `IN_PROCESS` in
+  `conformance/adapters/jco/driver.js`), and
+- the message params (`params_for()` / `paramsFor()`, plus re-defaulted
+  `4`/`256` in the peer binaries).
 
-Fix: (1) have each adapter call `list-tests` once and diff ids/tags against
-its local list (or have the runner require every adapter report to cover
-every registered test not excused by the manifest — a target that reported
-fewer results than the registry should at minimum warn, better fail);
-(2) reject empty `--only` selections in `run_corpus` like the Shadow executor
-does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
-params only.
+The natural next step is to make `list-tests` authoritative for these too:
+extend `test-descriptor` with the plan (and params), have the adapters
+consume it, and delete the mirrors. Separately, `Missing` in a full-corpus
+loopback row could be escalated from a warning to a failure once expected
+coverage is expressible per target (the interop pairs legitimately run the
+two-peer subset).
 
-### F9. Three mailbox clients have drifted; the browser proxy strips protocol headers
+### F11. jco in-process test timeouts cannot cancel the timed-out attempt
 
-The signaling protocol has three independent client implementations with
-diverging behavior:
-
-- wasmtime host: `wait=10000`, treats **any** 204 as done, ignores `x-done`
-  (`conformance/adapters/wasmtime/src/lib.rs:219-249`).
-- jco host: `wait=10000`, ignores `x-done`
-  (`conformance/adapters/jco/signaling.js:72-98`).
-- wasip3 client: sends **no** `wait` param (falls back to the server's 25 s
-  default long-poll) and *requires* `x-done` on 204
-  (`conformance/adapters/wasip3/mailbox/src/lib.rs:140, 176-202`).
-
-Separately, the browser adapter's same-origin proxy forwards only
-`content-type` (`conformance/adapters/jco/run-browser.mjs:163, 171-173`),
-dropping `x-seq`/`x-done` — harmless today only because the jco client
-ignores headers; any header-dependent client routed through it would fail
-mid-handshake confusingly.
-
-Fix: pick one interpretation (per `conformance/signaling/PROTOCOL.md`), align
-the three clients on `wait` and `x-done` handling, and forward all upstream
-headers in the proxy (one line).
-
-### F11. Replace fixed sleeps with the health-poll pattern the suite already has
-
-- `conformance/adapters/common/src/bin/netns.rs:274` sleeps a fixed 500 ms
-  per test for signaling-server bind; `conformance/adapters/common/src/lab.rs:611`
-  sleeps 1 s for coturn. The suite already has the right pattern
-  (`waitHealthy` polling `/healthz`, `conformance/adapters/jco/run-node.mjs:99-121`;
-  `conformance/runner/src/signaling.rs:55-72`) — use it: the mailbox clients
-  do not retry transport failures, so slow server startup fails the test.
-- The wasip3 driver lingers `CLOSE_GRACE_NANOS` = 500 ms on **every**
-  invocation (`conformance/adapters/wasip3/driver/src/lib.rs:54, 61`),
-  including in-process `both`-role tests with no remote peer to protect —
-  ~20 s of pure sleep per corpus run. Skip the grace for `both`-role runs,
-  or replace the guess with an ack over the channel.
-- The jco in-process `withTimeout` (`conformance/adapters/jco/driver.js:127-133`)
-  abandons but cannot cancel the timed-out promise; wedged guest instances,
-  their `RTCPeerConnection`s and pending long-polls keep running in the same
-  process for the rest of the corpus and can degrade later tests with no
-  attribution. Consider per-test child processes for jco-node (matching the
-  other adapters' isolation) or at least noting the contamination risk in the
-  result document.
+The jco adapters' `withTimeout` (`conformance/adapters/jco/driver.js`)
+abandons but cannot cancel a timed-out test attempt: the wedged guest
+instances, their `RTCPeerConnection`s and pending long-polls keep running in
+the same Node/browser process for the rest of the corpus and can degrade
+later tests with no attribution (contrast: the wasmtime adapter drops the
+`Store`, and subprocess peers are `kill_on_drop`). Consider per-test child
+processes for jco-node (matching the other adapters' isolation) or at least
+noting the contamination risk in the result document.
 
 ## G. Development environment / CI
 
@@ -301,6 +256,6 @@ drifted rename fails fast with a clear message.
    close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
-   (F11), config consolidation + env-var index (E10), example de-duplication
-   (D3), the remaining conformance-matrix gaps (A3).
+4. The rest as touched: config consolidation + env-var index (E10), example
+   de-duplication (D3), jco in-process timeout isolation (F11), the
+   remaining conformance-matrix gaps (A3).

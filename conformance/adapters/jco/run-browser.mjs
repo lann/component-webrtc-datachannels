@@ -187,8 +187,14 @@ async function proxy(req, res, signalingBase) {
     return;
   }
   res.statusCode = upstream.status;
-  const contentType = upstream.headers.get("content-type");
-  if (contentType) res.setHeader("content-type", contentType);
+  // Forward every upstream header (the protocol's `x-seq`/`x-done` included),
+  // skipping the hop-by-hop and length framing Node manages itself.
+  for (const [name, value] of upstream.headers) {
+    if (["connection", "keep-alive", "transfer-encoding", "content-length"].includes(name)) {
+      continue;
+    }
+    res.setHeader(name, value);
+  }
   res.end(Buffer.from(await upstream.arrayBuffer()));
 }
 
