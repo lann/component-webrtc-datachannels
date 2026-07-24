@@ -67,7 +67,7 @@ fn peer_role(wasmtime_role: Role) -> &'static str {
     match wasmtime_role {
         Role::Offerer => "answerer",
         Role::Answerer => "offerer",
-        Role::Both => "answerer",
+        Role::Both => unreachable!("interop peers always run a single role"),
     }
 }
 

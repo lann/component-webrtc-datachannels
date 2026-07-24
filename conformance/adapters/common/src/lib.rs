@@ -216,10 +216,6 @@ pub const TWO_PEER_TESTS: &[&str] = &[
 pub enum Plan {
     /// A single `both` instance stands up both peers in-process (no signaling).
     InProcess,
-    /// A single instance that the guest reports `skipped` regardless of role.
-    /// (No registered test currently uses this plan; it remains for tests a
-    /// future corpus cannot run on any target.)
-    Skip,
     /// Two instances — an offerer and an answerer — share one signaling room.
     TwoPeer,
 }

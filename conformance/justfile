@@ -14,9 +14,8 @@ timeout := "600"
 # Run the conformance suite over the currently enabled targets (see
 # README.md). Builds the shared conformance guest component, runs each
 # adapter to produce conformance/results/<target>.json, then classifies the
-# results over conformance/tests.toml + conformance/manifests.toml — also
-# spawning the standalone conformance-signalingd binary (ephemeral localhost
-# port, gated on /healthz) to exercise its lifecycle — and writes the matrix to
+# results over conformance/tests.toml + conformance/manifests.toml and writes
+# the matrix to
 # conformance/matrix.md, exiting nonzero on any fail or unexpected-pass.
 #
 # Enabled targets: wasmtime (native webrtc-rs), jco-node and jco-browser (the
@@ -224,15 +223,13 @@ run-shadow:
         --out conformance/results
 
 # Classify every result in conformance/results against the manifests and
-# render conformance/matrix.md, also exercising conformance-signalingd's
-# process lifecycle; exits nonzero on any fail or unexpected-pass.
+# render conformance/matrix.md; exits nonzero on any fail or unexpected-pass.
 [doc("Classify conformance/results against the manifests into conformance/matrix.md")]
 classify:
     target/debug/conformance-runner \
         --tests conformance/tests.toml \
         --manifests conformance/manifests.toml \
         --results conformance/results \
-        --signaling-bin target/debug/conformance-signalingd \
         --matrix-out conformance/matrix.md
 
 # Classify the Shadow-lab results (<target>-shadow.json) and render the

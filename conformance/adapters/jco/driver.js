@@ -5,9 +5,8 @@
 //
 // It mirrors the wasmtime adapter's orchestration (`conformance/adapters/
 // wasmtime/src/main.rs`): a test is run either as a single in-process `both`
-// instance (peer-connection API, error-taxonomy, and streaming probes), a
-// single instance the guest reports `skipped` regardless of role (currently
-// none), or two instances — an offerer and an answerer sharing one signaling
+// instance (peer-connection API, error-taxonomy, and streaming probes) or as
+// two instances — an offerer and an answerer sharing one signaling
 // room — for the behavioral/interop tests. Tests run in a single
 // attempt (no retries): a nondeterministic failure is a real signal and must
 // surface, not be masked by a second attempt. The guest owns every assertion;
@@ -67,12 +66,10 @@ const IN_PROCESS = new Set([
   "receive-via-stream",
   "receive-via-stream-once",
 ]);
-const SKIP = new Set([]);
 
-/** The orchestration plan for a test id: `in-process`, `skip`, or `two-peer`. */
+/** The orchestration plan for a test id: `in-process` or `two-peer`. */
 export function planFor(testId) {
   if (IN_PROCESS.has(testId)) return "in-process";
-  if (SKIP.has(testId)) return "skip";
   return "two-peer";
 }
 
@@ -119,7 +116,6 @@ function makeConfig(role, base, room, count, size) {
     room,
     messageCount: count,
     messageSize: size,
-    trickle: true,
   };
 }
 
@@ -174,10 +170,8 @@ async function runTest(newInstance, base, testId, roomSeq) {
           ]);
           return foldTwo(offerer, answerer);
         }
-        case "in-process":
+        default: // in-process
           return runInstance(newInstance, testId, makeConfig("both", base, room, count, size));
-        default: // skip
-          return runInstance(newInstance, testId, makeConfig("offerer", base, room, count, size));
       }
     })();
     result = await withTimeout(run, TEST_TIMEOUT_MS, "attempt timed-out");

@@ -320,7 +320,6 @@ pub fn make_config(role: Role, base_url: &str, room: &str, count: u32, size: u32
         room: room.to_string(),
         message_count: count,
         message_size: size,
-        trickle: true,
     }
 }
 

@@ -156,7 +156,6 @@ async function main() {
       room: values.room,
       messageCount: Number(values["message-count"]),
       messageSize: Number(values["message-size"]),
-      trickle: true,
     };
     phase("modules compiled; instantiating guest");
     const instance = await newInstance();
