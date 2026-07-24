@@ -1,0 +1,24 @@
+[package]
+name = "rendezvous-http"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "In-guest wasi:http rendezvous client for the echo-remote demo: exports demo:webrtc-echo/rendezvous, relaying signaling blobs to and from an HTTP mailbox server (conformance-signalingd's protocol) over the WASIp3 async HTTP client."
+
+[lib]
+# A component: built for `wasm32-wasip2` and composed (`wac plug`) under the
+# echo-remote guest's `rendezvous` import.
+crate-type = ["cdylib"]
+
+[dependencies]
+# The async `wasi:http` outgoing client (`wasip3::http::client::send`) plus the
+# `http-compat` bridge to the idiomatic `http` types.
+wasip3 = { version = "0.7", features = ["async-spawn", "http-compat"] }
+# The exported `rendezvous` bindings.
+# Pinned to the wit-bindgen version the `wasip3` crate uses: this crate shares
+# wit-bindgen runtime types with wasip3, and mixing two runtime versions in one
+# component is unsupported. Upgrade together with the wasip3 dependency.
+wit-bindgen = { version = "0.57", features = ["async", "async-spawn"] }
+http = "1"
+http-body-util = "0.1"
+bytes = "1"

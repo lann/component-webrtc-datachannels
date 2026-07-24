@@ -78,6 +78,14 @@ impl Role {
             Role::Answerer => "answerer",
         }
     }
+
+    /// The peer's role.
+    fn opposite(self) -> Role {
+        match self {
+            Role::Offerer => Role::Answerer,
+            Role::Answerer => Role::Offerer,
+        }
+    }
 }
 
 /// Drive the manual-signaling exchange for `role`, returning the message the
@@ -168,9 +176,11 @@ async fn first_incoming(pc: &PeerConnection) -> Result<DataChannel, Error> {
         .ok_or_else(|| Error::Other("no incoming data channel".to_string()))
 }
 
-/// Send one greeting and receive the peer's greeting over the data channel.
+/// Send one greeting and receive the peer's greeting over the data channel,
+/// verifying the peer's message is exactly the greeting its role sends.
 async fn exchange(channel: &DataChannel, role: Role) -> Result<String, Error> {
     let greeting = format!("hello from the {}", role.name());
+    let expected = format!("hello from the {}", role.opposite().name());
 
     let send_fut = channel.send(Message::Binary(greeting.into_bytes()));
     let recv_fut = channel.receive();
@@ -178,11 +188,17 @@ async fn exchange(channel: &DataChannel, role: Role) -> Result<String, Error> {
     let (send_result, peer_message) = futures::join!(send_fut, recv_fut);
     send_result?;
 
-    Ok(match peer_message {
+    let received = match peer_message {
         Ok(Message::Binary(bytes)) => String::from_utf8_lossy(&bytes).into_owned(),
         Ok(Message::String(text)) => text,
-        Err(_) => String::new(),
-    })
+        Err(err) => return Err(err),
+    };
+    if received != expected {
+        return Err(Error::Other(format!(
+            "peer message mismatch: expected {expected:?}, got {received:?}"
+        )));
+    }
+    Ok(received)
 }
 
 /// Present an outgoing signaling blob (base64-encoded SDP) on stdout, alone on

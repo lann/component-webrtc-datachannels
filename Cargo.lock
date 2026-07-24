@@ -1129,6 +1129,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "echo-remote"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "serde",
+ "serde_json",
+ "wit-bindgen 0.59.0",
+]
+
+[[package]]
+name = "echo-remote-driver"
+version = "0.1.0"
+dependencies = [
+ "wasip3",
+ "wit-bindgen 0.57.1",
+]
+
+[[package]]
 name = "either"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2499,6 +2517,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "663ba70707f96e871406fe10d68128412e619b06d1d47cb91c3a4c6501176240"
 dependencies = [
  "bytecheck",
+]
+
+[[package]]
+name = "rendezvous-http"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "http",
+ "http-body-util",
+ "wasip3",
+ "wit-bindgen 0.57.1",
 ]
 
 [[package]]
@@ -4175,8 +4204,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64",
+ "conformance-signalingd",
  "env_logger",
  "futures",
+ "reqwest",
  "tokio",
  "wasmtime",
  "wasmtime-wasi",

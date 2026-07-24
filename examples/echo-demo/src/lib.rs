@@ -11,7 +11,8 @@
 //!      `data-channel.send` on the offerer's channel,
 //!   2. echoes every message back from the answerer's end of the channel,
 //!   3. concurrently reads the echoed messages back through
-//!      `data-channel.receive`, counting the messages/bytes,
+//!      `data-channel.receive`, verifying each payload byte-for-byte and in
+//!      order while counting the messages/bytes,
 //!
 //! all within a single cooperative async task (the loops run under
 //! `futures::join!`). The same component binary runs unchanged under the Node
@@ -61,6 +62,25 @@ impl Guest for Component {
             while messages_received < count {
                 match near.receive().await {
                     Ok(message) => {
+                        // Every echoed message must come back byte-for-byte and
+                        // in order: the channel is ordered and the answerer
+                        // echoes verbatim, so message `i` is exactly
+                        // `make_message(size, i)`.
+                        let expected = make_message(size, messages_received);
+                        match &message {
+                            Message::Binary(bytes) if *bytes == expected => {}
+                            other => {
+                                return Err(Error::Other(format!(
+                                    "message {messages_received} corrupted or out of order \
+                                     (got {} bytes, kind {})",
+                                    message_len(other),
+                                    match other {
+                                        Message::Binary(_) => "binary",
+                                        Message::String(_) => "string",
+                                    }
+                                )));
+                            }
+                        }
                         messages_received += 1;
                         bytes_echoed += message_len(&message) as u64;
                     }
@@ -68,13 +88,13 @@ impl Guest for Component {
                     Err(_) => break,
                 }
             }
-            (messages_received, bytes_echoed)
+            Ok((messages_received, bytes_echoed))
         };
 
-        let (send_result, echo_result, (messages_received, bytes_echoed)) =
-            futures::join!(send_fut, echo_fut, recv_fut);
+        let (send_result, echo_result, recv_result) = futures::join!(send_fut, echo_fut, recv_fut);
         send_result?;
         echo_result?;
+        let (messages_received, bytes_echoed) = recv_result?;
 
         offerer.close();
         answerer.close();
@@ -157,8 +177,8 @@ fn message_len(message: &Message) -> usize {
     }
 }
 
-/// Build a deterministic `size`-byte message tagged with its index so a peer
-/// (or a stricter demo) could verify ordering.
+/// Build a deterministic `size`-byte message tagged with its index; the
+/// receive loop verifies each echoed payload against it byte-for-byte.
 fn make_message(size: usize, index: u32) -> Vec<u8> {
     let mut message = vec![0u8; size];
     let tag = index.to_le_bytes();

@@ -45,6 +45,14 @@ use crate::{DataChannel, SettingEngineHook};
 /// How long [`PeerConnection::wait_connected`] waits before reporting a timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// How long [`PeerConnection::close`] keeps the underlying connection alive
+/// after the close is observed locally, so messages already handed to the
+/// transport flush to the wire before teardown discards the SCTP send queue.
+/// Long enough for queued sends on any sane path, short enough that an
+/// unresponsive peer cannot hold resources meaningfully longer; matches the
+/// in-guest `wasip3-impl` driver's drain bound.
+const CLOSE_DRAIN: Duration = Duration::from_secs(1);
+
 /// The kind of SDP description passed to `set-local-description` /
 /// `set-remote-description`, mirroring the applicable `session-description`
 /// variants (`rollback` is rejected before reaching the host).
@@ -421,13 +429,34 @@ impl PeerConnection {
 
     /// Close the peer connection, tearing down its `webrtc-rs` background tasks.
     /// Idempotent.
+    ///
+    /// The close is observed **locally** at once — the close signal fires
+    /// first, so pending and subsequent operations on this side resolve with
+    /// `error.closed` immediately — but the network teardown is deferred by a
+    /// bounded [`CLOSE_DRAIN`] grace: `webrtc-rs`'s `close()` discards the
+    /// SCTP send queue, so a message accepted by `send` just before `close`
+    /// (for example a rendezvous sentinel the remote peer still needs) would
+    /// otherwise be lost before it reaches the wire. Mirrors the bounded
+    /// close-drain of the in-guest `wasip3-impl` driver.
     pub fn close(&self) {
         // Fire the close signal first so pending channel operations resolve
         // with `error.closed` (the `webrtc` 0.20 wrapper reports nothing to the
-        // channels itself), then tear down the connection.
+        // channels itself), then tear down the connection after the drain.
         self.inner.close_trigger.fire();
         let pc = self.inner.pc.lock().unwrap().take();
-        close_peer_connections(pc.into_iter().collect());
+        if pc.is_none() {
+            return;
+        }
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn(async move {
+                tokio::time::sleep(CLOSE_DRAIN).await;
+                close_peer_connections(pc.into_iter().collect());
+            });
+        } else {
+            // No runtime to defer on: tear down immediately (the connection's
+            // own runtime is gone, so nothing could flush anyway).
+            close_peer_connections(pc.into_iter().collect());
+        }
     }
 }
 

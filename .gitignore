@@ -7,6 +7,7 @@ node_modules/
 # Build artifacts
 build/
 jco-impl/generated/
+jco-impl/generated-remote/
 conformance/adapters/jco/generated/
 conformance/matrix.md
 conformance/nat-matrix.md

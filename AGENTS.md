@@ -109,8 +109,8 @@ separate:
   one component that implements them.
 - **`demo:webrtc-echo`** — the demo-only interfaces, split across the demo
   components that use them:
-  - `examples/echo-demo/wit/webrtc-echo-demo.wit` — `rendezvous`, `demo`, and
-    the `webrtc-echo-demo` world.
+  - `examples/echo-demo/wit/webrtc-echo-demo.wit` — `rendezvous`, `demo`,
+    `remote`, and the `webrtc-echo-demo` / `webrtc-echo-remote` worlds.
   - `examples/cli-signaling/wit/world.wit` — the `cli-signaling` world
     (`demo:cli-signaling`), which imports only the standard `connections`
     interface; the vanilla (non-trickle) ICE handling is guest-side.
@@ -245,6 +245,7 @@ in doubt about whether a recipe's scope is touched, run it.
 | `just test` | any Rust host/guest code, or the cli-signaling demo. |
 | `just build-component` | the `echo-demo` guest or its WIT. |
 | `just test-webrtc-composed` | the `wasip3-impl` provider component, the `webrtc-consumer`, or the `connections` WIT (composes them with `wac plug` and runs the round trip under `wasmtime`). |
+| `just test-echo-remote-composed` | the `echo-remote` guest, `rendezvous-http`, the `wasip3-impl` provider, or the `rendezvous`/`remote` WIT (composes the fully in-guest peer and connects two `wasmtime run` processes over a signaling server). |
 | `just transpile` | anything affecting the component's interfaces, or the `jco transpile` flags / `--map` targets in `jco-impl`. |
 | `just test-browser` | the browser host (`jco-impl`, e.g. `webrtc.js`) or the component it runs. |
 | `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the conformance guest, adapters, or manifests (CI runs it in `.github/workflows/conformance.yml`). |
@@ -255,6 +256,14 @@ in doubt about whether a recipe's scope is touched, run it.
 running either rebuilds the component first. Keep the implementations producing
 the same result — the conformance suite is what asserts it.
 
+### Awaiting PR checks
+
+To wait for a pull request's CI checks, use `gh pr checks`' own watch mode
+bounded by a timeout — e.g. `timeout 900 gh pr checks <pr> --watch` — rather
+than polling with `sleep … && gh pr checks`. Watch mode returns as soon as the
+checks settle (a fixed sleep either wastes the difference or wakes up too
+early), and the `timeout` bound keeps a wedged run from hanging the session.
+
 ## Code comments
 
 Code comments describe **what** something is or does, not the process by which
@@ -263,29 +272,24 @@ needed because…" belongs in commit messages, PR descriptions, or chat — not 
 source files.  Keeping process reasoning out of comments avoids cluttering the
 codebase with context that quickly becomes stale and misleading.
 
-## Real signaling (`rendezvous` + `wasi:http@0.3`) — direction
+## Real signaling (`rendezvous`): the two-process echo demo
 
-The runnable demo stands up *both* peers inside one component instance, so no
-external signaling happens. To support genuinely separate peers (developed and
-tested locally), two component instances — an offerer and an answerer — must
-exchange SDP and trickled ICE out of band.
+The `webrtc-echo-demo` world stands up *both* peers inside one component
+instance. The **two-process** demo makes the peers genuinely separate: the
+`webrtc-echo-remote` world (implemented by [`examples/echo-remote`](examples/echo-remote))
+drives **one** peer per instance, exchanging SDP and trickled ICE with the
+other instance through the demo-only `demo:webrtc-echo/rendezvous` mailbox
+interface, relayed via an HTTP signaling server (`conformance-signalingd`'s
+protocol). The guest never speaks HTTP; three `rendezvous` implementations
+exist:
 
-The intended shape:
-
-- The guest drives the `lann:webrtc-datachannels/connections` `peer-connection`
-  interface to produce/consume offers, answers, and ICE candidates.
-- Those opaque blobs travel between the two peers through the demo-only
-  `demo:webrtc-echo/rendezvous` mailbox interface. It is deliberately **not**
-  standardized and lives in the demo package.
-- A host implements `rendezvous` by relaying blobs to and from an **existing**
-  HTTP signaling server over **`wasi:http@0.3`** (the guest never speaks HTTP
-  itself). Because the whole loop is plain HTTP, the server can run locally.
-
-`rendezvous` is defined but not yet wired into the `webrtc-echo-demo` world —
-mirroring how `connections.peer-connection` is "designed but not yet exercised". Wiring it up
-(host implementations for both stacks, a chosen signaling server, and a guest
-that drives it) is the natural next step; see the starter's `wasi:http` example
-for the client pattern.
+- the Wasmtime demo host implements it natively (the `echo-remote` binary in
+  `examples/wasmtime-demo`; `just demo-remote`),
+- the jco host implements it over `fetch` (`jco-impl/rendezvous.js`;
+  `just demo-node-remote`), and
+- [`examples/rendezvous-http`](examples/rendezvous-http) is a **component**
+  implementing it over in-guest `wasi:http@0.3`, composable under the guest so
+  a plain `wasmtime run -S http` provisions it (the fully in-guest path below).
 
 ## In-guest sans-I/O WebRTC (`wasip3-impl`) — direction
 
@@ -324,6 +328,10 @@ Because the sans-I/O model has no OS interface enumeration, each
 mDNS. `peer-connection` binds the IP address named by the `WEBRTC_UDP_BIND_ADDR`
 environment variable, defaulting to IPv4 loopback (same-host peers); a routable
 address gives the peer a host candidate reachable across a real network path,
-as the conformance Shadow lab exercises. The remaining step is pairing that
-with the `rendezvous` signaling above, so two separate components can connect
-across a real deployment.
+as the conformance Shadow lab exercises. Paired with the `rendezvous` signaling
+above, the **fully in-guest** two-process peer exists: `just
+test-echo-remote-composed` composes the echo-remote guest + `rendezvous-http`
+(wasi:http signaling) + `wasip3-impl` (wasi:sockets WebRTC) under a CLI driver
+and connects two plain `wasmtime run` processes — point `WEBRTC_UDP_BIND_ADDR`
+and `--server` at routable addresses to run the same pair across real
+machines.
