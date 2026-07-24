@@ -1,5 +1,6 @@
 // The jco browser conformance adapter: runs the same shared conformance guest
-// and the same `webrtc.js` + `signaling.js` host modules inside a real, headless
+// and the same host modules (`jco-impl/webrtc.js` + the adapter's
+// `signaling.js`) inside a real, headless
 // Chromium — the environment the "browser-first" host actually targets — and
 // emits the adapter result document the conformance runner consumes
 // (`conformance/results/jco-browser.json`). It is the browser counterpart of the
@@ -137,9 +138,12 @@ function startServer(signalingBase) {
       return;
     }
 
-    // Strict allowlist: the transpiled bundle under /generated/ and the adapter
-    // host modules. Each path is a single, dot-segment-free file name, which
-    // scopes the server and rules out path traversal.
+    // Strict allowlist: the transpiled bundle under /generated/ and the host
+    // modules. Each path is a single, dot-segment-free file name, which
+    // scopes the server and rules out path traversal. `/webrtc.js` is served
+    // from jco-impl: the connections host is one module shared with the demo
+    // hosts (in the browser its `@roamhq/wrtc` fallback import is never
+    // reached, so serving the file alone is enough).
     const match =
       /^\/(generated)\/([A-Za-z0-9._-]+)$|^\/(webrtc\.js|signaling\.js|driver\.js)$/.exec(pathname);
     if (!match || pathname.includes("..")) {
@@ -147,9 +151,12 @@ function startServer(signalingBase) {
       res.end("not found");
       return;
     }
-    const file = match[3]
-      ? join(ADAPTER_DIR, match[3])
-      : join(values.generated, match[2]);
+    const file =
+      match[3] === "webrtc.js"
+        ? join(REPO_ROOT, "jco-impl", "webrtc.js")
+        : match[3]
+          ? join(ADAPTER_DIR, match[3])
+          : join(values.generated, match[2]);
     try {
       const body = await readFile(file);
       res.setHeader("content-type", MIME[extname(file)] ?? "application/octet-stream");

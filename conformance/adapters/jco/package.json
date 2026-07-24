@@ -12,8 +12,5 @@
   "devDependencies": {
     "@bytecodealliance/jco": "^1.19.0",
     "playwright-core": "^1.61.1"
-  },
-  "dependencies": {
-    "@roamhq/wrtc": "^0.8.0"
   }
 }

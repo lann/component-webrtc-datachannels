@@ -1,5 +1,6 @@
 // The jco Node conformance adapter: runs the shared conformance guest against
-// the browser-first host (`webrtc.js` + `signaling.js`) under Node, backed by
+// the browser-first host (`jco-impl/webrtc.js` + the adapter's `signaling.js`)
+// under Node, backed by
 // `@roamhq/wrtc`, and emits the adapter result document the conformance runner
 // consumes (`conformance/results/jco-node.json`).
 //
@@ -20,7 +21,11 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { runCorpus, MAX_INBOUND_BUFFER_BYTES } from "./driver.js";
-import * as connections from "./webrtc.js";
+// The single host module, shared with the demo hosts. Its bare
+// `@roamhq/wrtc` import resolves from jco-impl/node_modules (the module's own
+// location), so `npm install` in jco-impl is a prerequisite (scripts/setup.sh
+// runs it).
+import * as connections from "../../../jco-impl/webrtc.js";
 import { Session } from "./signaling.js";
 
 // Shrink the host's inbound-buffer bound so the `receive-buffer-overflow`
