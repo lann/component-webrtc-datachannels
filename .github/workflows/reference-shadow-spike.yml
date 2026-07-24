@@ -13,6 +13,10 @@ name: reference-shadow-spike
 
 on:
   workflow_dispatch:
+  # workflow_dispatch is only registered once the file reaches the default
+  # branch; the push trigger lets the spike run from its own branch.
+  push:
+    branches: [node-webrtc-interop]
 
 permissions:
   contents: read
