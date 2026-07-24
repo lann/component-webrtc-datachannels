@@ -63,12 +63,11 @@ const CLOSE_GRACE_NANOS: u64 = 500_000_000;
 wasip3::cli::command::export!(Component);
 
 /// Parse `--test <id> --role <offerer|answerer|both> --server <url> --room <id>
-/// [--message-count N] [--message-size N] [--no-trickle]` into a `run-test`
+/// [--message-count N] [--message-size N]` into a `run-test`
 /// invocation.
 fn parse_args(args: impl Iterator<Item = String>) -> Result<(String, TestConfig), String> {
     const USAGE: &str = "usage: conformance-wasip3 --test <id> --role <offerer|answerer|both> \
-                         --server <url> --room <id> [--message-count N] [--message-size N] \
-                         [--no-trickle]";
+                         --server <url> --room <id> [--message-count N] [--message-size N]";
 
     let mut test_id = None;
     let mut role = None;
@@ -76,7 +75,6 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<(String, TestConfig)
     let mut room = None;
     let mut message_count = 4u32;
     let mut message_size = 256u32;
-    let mut trickle = true;
 
     let mut args = args.peekable();
     while let Some(flag) = args.next() {
@@ -106,7 +104,6 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<(String, TestConfig)
                     .parse()
                     .map_err(|e| format!("bad --message-size: {e}\n{USAGE}"))?
             }
-            "--no-trickle" => trickle = false,
             other => return Err(format!("unknown flag {other:?}\n{USAGE}")),
         }
     }
@@ -118,7 +115,6 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<(String, TestConfig)
         room: room.ok_or_else(|| format!("missing --room\n{USAGE}"))?,
         message_count,
         message_size,
-        trickle,
     };
     Ok((test_id, config))
 }

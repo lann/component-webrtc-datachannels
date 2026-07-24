@@ -359,7 +359,6 @@ async function main() {
         room: values.room,
         messageCount: Number(values["message-count"]),
         messageSize: Number(values["message-size"]),
-        trickle: true,
       };
       const result = await page.evaluate(runInteropInPage, {
         base,

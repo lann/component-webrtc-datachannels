@@ -97,15 +97,6 @@ async fn run_test(
                 )
                 .await
             }
-            Plan::Skip => {
-                run_instance(
-                    engine,
-                    component,
-                    test_id,
-                    make_config(Role::Offerer, base_url, &room, count, size),
-                )
-                .await
-            }
         }
     })
     .await

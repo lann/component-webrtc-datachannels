@@ -42,9 +42,6 @@ interface runner {
         message-count: u32,
         /// Payload size, in bytes, for size-parameterized tests.
         message-size: u32,
-        /// Whether to trickle ICE candidates (`true`) or embed them in the SDP
-        /// (`false`); a pure blob-schedule knob for `trickle-variants`.
-        trickle: bool,
     }
 
     /// The WIT-observable outcome of one test.

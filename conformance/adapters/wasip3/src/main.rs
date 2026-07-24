@@ -63,10 +63,6 @@ async fn run_test(
                 peer.run(base_url, test_id, &room, "both", count, size)
                     .await
             }
-            Plan::Skip => {
-                peer.run(base_url, test_id, &room, "offerer", count, size)
-                    .await
-            }
         }
     })
     .await

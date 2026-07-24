@@ -393,35 +393,6 @@ Fix: pick one interpretation (per `conformance/signaling/PROTOCOL.md`), align
 the three clients on `wait` and `x-done` handling, and forward all upstream
 headers in the proxy (one line).
 
-### F10. Delete dead conformance plumbing
-
-- **`Plan::Skip` is triplicated for zero users** and would *hang*, not skip:
-  the skip branch runs the guest as a two-peer offerer with no answerer
-  (`conformance/adapters/wasmtime/src/main.rs:100-108`,
-  `conformance/adapters/wasip3/src/main.rs:66-69`), the jco `SKIP` set is
-  empty by construction (`conformance/adapters/jco/driver.js:70, 75,
-  179-180`), and the guest never returns `Skipped`
-  (`conformance/guest/src/lib.rs:64-70`). Delete the plan variant, the `SKIP`
-  set, and the adapter branches (or implement skipping for real if a use is
-  imminent).
-- **The `trickle` knob is end-to-end dead**: `test-config.trickle`
-  (`conformance/wit/world.wit:45-47`) is set `true` by every adapter,
-  parseable as `--no-trickle` in the wasip3 driver, and never read by the
-  guest; the WIT comment describes a `trickle-variants` tag that does not
-  exist in `tests.toml`. Delete the field (or add the tests it was for).
-- **The runner's `--signaling-bin` spawns a server no adapter uses**
-  (`conformance/runner/src/main.rs:49-87`; every adapter spawns its own);
-  `conformance/runner/src/signaling.rs` (118 lines) exists solely to support
-  it, and the surrounding "Phase 0 / later phases" comments narrate a build
-  plan that already happened. Delete the flag, the module, and the stale
-  comments (the `classify` recipe in `conformance/justfile` passes
-  `--signaling-bin`; update it too).
-- Minor: the dead `Role::Both => "answerer"` arm in
-  `conformance/adapters/wasmtime/src/bin/interop.rs:66-72`; the
-  `#[allow(dead_code)]` `description` / `ExpectedFail::reason` fields if they
-  stay unused after F7 (or render them into the matrix, which would make the
-  skip/xfail reasons visible — today they never reach the artifact).
-
 ### F11. Replace fixed sleeps with the health-poll pattern the suite already has
 
 - `conformance/adapters/common/src/bin/netns.rs:274` sleeps a fixed 500 ms
@@ -490,8 +461,8 @@ drifted rename fails fast with a clear message.
 2. Implementation contract gaps found incidentally: the wasip3 provider trio
    (E7), Wasmtime close-observation and `send-via-stream` buffering (E8),
    jco failed-state termination (E9).
-3. Cheap hygiene, high leverage for humans and agents: dead plumbing deletion
-   (F10), transpile-flag check (G1), broken npm scripts (G4).
+3. Cheap hygiene, high leverage for humans and agents: transpile-flag check
+   (G1), broken npm scripts (G4).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
    (F11), config consolidation + env-var index (E10), dead-code/module sweep
    (E11), example de-duplication (D3), the remaining conformance-matrix gaps
