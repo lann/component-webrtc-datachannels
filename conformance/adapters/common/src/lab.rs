@@ -157,7 +157,7 @@ pub enum Scenario {
     TurnRelay,
     /// A symmetric NAT with a STUN/TURN server available but no relay-only
     /// policy: the direct path is blocked and the symmetric NAT makes the srflx
-    /// candidates unusable, so ICE must fall back to a TURN relay (Phase 6).
+    /// candidates unusable, so ICE must fall back to a TURN relay.
     NatSymmetric,
 }
 

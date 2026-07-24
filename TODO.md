@@ -215,9 +215,7 @@ same close path.
   process-global `OnceLock` env read of the inbound buffer bound
   (`wasmtime-impl/src/data_channel.rs:68-81`), which latches its first read
   and forbids per-store configuration. Move both onto `WasiWebrtcCtx`
-  (keeping the env var as a default source), and fix the stale "the only
-  knob so far" comment at `wasmtime-impl/src/lib.rs:83-85` (there are already
-  two).
+  (keeping the env var as a default source).
 - The same knob has different failure semantics per implementation:
   `WEBRTC_MAX_INBOUND_BUFFER_BYTES` silently falls back to the default on a
   parse failure in wasip3 (`wasip3-impl/src/runtime.rs:141`, `.parse().ok()`)
@@ -273,64 +271,6 @@ same close path.
   (`peer.rs:310-315` propagates two fallible `rtc` calls); make the peer
   optional (`Option<SansIoPeer>` or a small enum) instead.
 
-### E12. Stale-comment sweep (verified comment/code mismatches)
-
-Each of these was verified false against the code; they misdirect exactly the
-reader (human or agent) who trusts docs first:
-
-- `wasmtime-impl/wit/world.wit:12-15`: claims the crate does not implement
-  `peer-connection` and that its host functions "trap if a guest ever calls
-  them" — the crate fully implements it (`wasmtime-impl/src/host.rs:547-576,
-  670-783`, `peer_connection.rs`), and the text uses the banned
-  "`signaling` design target" phrasing. This is the first doc a contributor
-  regenerating bindings reads. (Also `bindings.rs:5` / `peer_connection.rs:5`
-  call `peer-connection` "the guest-driven signaling surface".)
-- `examples/echo-demo/wit/webrtc-echo-demo.wit`: references
-  `lann:webrtc-datachannels/signaling`, an interface that does not exist
-  (relic of the `peer-connection` rename).
-- `conformance/adapters/jco/webrtc.js:4-8` and `jco-impl/webrtc.js:10-11`:
-  see F6.
-- `wasip3-impl/src/peer.rs:10-11`: "the `rtc` fork stubs `ifaces()`" — the
-  workspace pins upstream `rtc` master, not a fork (`Cargo.toml:38-39`).
-- `wasip3-impl/src/runtime.rs:37-39`: "mirroring the reference driver's 50ms
-  cap" — no such driver exists in the repo; cite the actual upstream source
-  or drop the claim.
-- `wasip3-impl/src/provider.rs:328-330`: the doc on `started_pump` describes
-  a removed delivered-ids set; the field means "the pump task has been
-  spawned".
-- `wasmtime-impl/src/lib.rs:83-85`: "the only knob so far is the
-  `SettingEngine` hook" — `ice_config` is a second knob, added right below.
-- `conformance/adapters/common/src/bin/shadow.rs:12-13`: "drives the corpus
-  … with retries" — there are no retries anywhere
-  (`common/src/lib.rs:386-388` explicitly forbids them); plus the
-  "long-poll retries cover any residual race" claims (see F11).
-- Stale "Phase 0/6" build-plan narration:
-  `conformance/runner/src/main.rs:40, 83-84`,
-  `conformance/runner/src/plan.rs:67`,
-  `conformance/adapters/common/src/lab.rs:160` — exactly the process
-  commentary AGENTS.md forbids.
-- `conformance/guest/src/lib.rs:407-408`: the barrier comment "the channel is
-  reliable and ordered" is false for `max-retransmits-accepted`, whose
-  channel is created with `max_retransmits = 0`
-  (`guest/src/lib.rs:1078-1080`). Latent two-peer hang on lossy paths (the
-  barrier sentinel can be dropped and both peers wait out the hang guard);
-  run that test's barrier over a reliable channel, or accept and document the
-  restriction to lossless paths.
-- `examples/echo-demo/src/lib.rs:130-131`: "Trickle each side's candidates"
-  describes code that drains the candidate stream to end-of-gathering before
-  adding any (batch, not trickle) — fine in-process, misleading as a
-  template for real two-peer code.
-- `jco-impl/test/browser.mjs:98-101`: the comment credits the allowlist regex
-  with blocking `..` traversal; the regex matches `..` fine — the separate
-  `pathname.includes("..")` check is what blocks it. A "simplification"
-  removing the "redundant" check would open the hole the comment invites.
-
-Beyond the fixes, consider a review-policy line in AGENTS.md: comments should
-not make claims about *other* files/implementations unless a test enforces
-the claim (the "8 MiB across all implementations" WIT claim survives because
-conformance actually pins it; most of the list above rotted because nothing
-did).
-
 ## F. Conformance suite
 
 ### F5. Interop barrier sentinel can be lost to the winner's immediate close
@@ -364,19 +304,13 @@ The real divergences today:
   so the copy the conformance suite actually executes leaks `@roamhq/wrtc`
   native ICE/DTLS/SCTP resources when a guest drops a resource without
   calling `close`.
-- Both header comments are false: `conformance/adapters/jco/webrtc.js:4-8`
-  claims its twin "implements only the demo `connect` shortcut" (no such
-  shortcut exists in either file), and `jco-impl/webrtc.js:10-11` claims the
-  conformance suite asserts behavioral sync (the suite never loads
-  `jco-impl/webrtc.js`; `conformance/adapters/jco/run-node.mjs` imports only
-  the local copy).
 - The only intended difference is one error-message path
   (`resolveRTCPeerConnection`: "run `npm install` in jco-impl" vs "…in
   conformance/adapters/jco").
 
 Fix: extract a single shared module both locations import (parameterize or
 genericize the install-hint message), porting the `Symbol.dispose` hooks so
-both users get them, and rewrite both headers. If a copy must remain for some
+both users get them. If a copy must remain for some
 structural reason, add a CI `diff` check with the allowlisted divergence.
 Splitting the WIT-stream interop shims (`streamItems` / `collectByteStream` /
 `toByteChunk` / `bytesToStream`, `jco-impl/webrtc.js:579-671`) and the
@@ -494,11 +428,8 @@ headers in the proxy (one line).
   per test for signaling-server bind; `conformance/adapters/common/src/lab.rs:611`
   sleeps 1 s for coturn. The suite already has the right pattern
   (`waitHealthy` polling `/healthz`, `conformance/adapters/jco/run-node.mjs:99-121`;
-  `conformance/runner/src/signaling.rs:55-72`) — use it. Related: the
-  netns/Shadow comments claiming "peer-side long-poll retries cover any
-  residual race" (`netns.rs:273-274`, `shadow.rs:297-298`) are wrong — all
-  three mailbox clients treat transport failure as fatal, so slow server
-  startup fails the test.
+  `conformance/runner/src/signaling.rs:55-72`) — use it: the mailbox clients
+  do not retry transport failures, so slow server startup fails the test.
 - The wasip3 driver lingers `CLOSE_GRACE_NANOS` = 500 ms on **every**
   invocation (`conformance/adapters/wasip3/driver/src/lib.rs:54, 61`),
   including in-process `both`-role tests with no remote peer to protect —
@@ -559,9 +490,8 @@ drifted rename fails fast with a clear message.
 2. Implementation contract gaps found incidentally: the wasip3 provider trio
    (E7), Wasmtime close-observation and `send-via-stream` buffering (E8),
    jco failed-state termination (E9).
-3. Cheap hygiene, high leverage for humans and agents: the stale-comment
-   sweep (E12), dead plumbing deletion (F10), transpile-flag check (G1),
-   broken npm scripts (G4).
+3. Cheap hygiene, high leverage for humans and agents: dead plumbing deletion
+   (F10), transpile-flag check (G1), broken npm scripts (G4).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
    (F11), config consolidation + env-var index (E10), dead-code/module sweep
    (E11), example de-duplication (D3), the remaining conformance-matrix gaps

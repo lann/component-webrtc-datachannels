@@ -36,8 +36,7 @@ struct Cli {
     manifests: PathBuf,
 
     /// Directory of adapter JSON result documents (`*.json`). Optional; when
-    /// absent or empty, targets are planned purely from their manifests, which
-    /// is the Phase 0 "no targets enabled" state.
+    /// absent or empty, targets are planned purely from their manifests.
     #[arg(long)]
     results: Option<PathBuf>,
 
@@ -80,8 +79,7 @@ fn main() -> Result<()> {
     let matrix = Matrix::classify(&registry, &manifests, &reports);
     let markdown = matrix.render_markdown();
 
-    // Adapters run between server startup and teardown in later phases; for now
-    // tear the server down once the (stub) aggregation is complete.
+    // Tear the spawned server down once classification is complete.
     if let Some(server) = signaling {
         server.shutdown();
     }

@@ -80,11 +80,12 @@ impl WebrtcIceConfig {
 /// `WasiHttpCtx`); it exists so hosts have a stable place to grow configuration
 /// without changing the [`WasiWebrtcView`] shape.
 ///
-/// The only knob so far is the [`SettingEngine`] hook (see
+/// The knobs so far are the [`SettingEngine`] hook (see
 /// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue of
-/// wasmtime-wasi-http's `WasiHttpHooks`: the crate itself hardcodes no
-/// environment-driven ICE behavior, leaving loopback and similar tweaks to
-/// demo/test hosts.
+/// wasmtime-wasi-http's `WasiHttpHooks`, and the [`WebrtcIceConfig`] ICE
+/// server configuration (see [`set_ice_config`](Self::set_ice_config)): the
+/// crate itself hardcodes no environment-driven ICE behavior, leaving loopback
+/// and similar tweaks to demo/test hosts.
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct WasiWebrtcCtx {

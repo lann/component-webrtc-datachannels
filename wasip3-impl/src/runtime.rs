@@ -34,9 +34,8 @@ use crate::wasi::sockets::types::{
 
 /// The pump's timer-service tick interval. The stack's retransmit and
 /// keep-alive deadlines are serviced on the next tick rather than at their
-/// exact instant, bounding timer latency at one interval — mirroring the
-/// reference driver's 50ms cap — in exchange for a tick future that is never
-/// cancelled mid-flight.
+/// exact instant, bounding timer latency at one interval, in exchange for a
+/// tick future that is never cancelled mid-flight.
 const MAX_WAIT_NANOS: u64 = 50_000_000;
 
 /// How long the pump keeps draining after a local `close` when the core has not

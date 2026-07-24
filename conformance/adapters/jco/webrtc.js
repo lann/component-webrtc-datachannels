@@ -1,11 +1,11 @@
 // The `lann:webrtc-datachannels/connections` host for the jco conformance
 // adapters, written against the standard W3C WebRTC API so the exact same module
 // runs under Node (backed by `@roamhq/wrtc`) and in a real browser (where the
-// classes are globals). It is the conformance counterpart of `jco-impl/webrtc.js`
-// — that module implements only the demo `connect` shortcut, whereas this one
-// implements the full `connections` surface the conformance guest drives:
+// classes are globals). It is a hand-maintained copy of `jco-impl/webrtc.js`,
+// implementing the full `connections` surface the conformance guest drives:
 // `data-channel-options`, `data-channel`, and `peer-connection` (offer/answer,
-// trickle ICE, incoming channels).
+// trickle ICE, incoming channels). Any behavioral change here must be mirrored
+// there (and vice versa).
 //
 // jco wires this module in as the component's `connections` import (via
 // `instantiate(..., { 'lann:webrtc-datachannels/connections': <this module> })`).
