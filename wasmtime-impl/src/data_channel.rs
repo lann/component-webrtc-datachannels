@@ -61,16 +61,22 @@ pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 /// bound so its overflow probe needs only a small flood.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
-/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set to
-/// a positive integer, else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`].
+/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set,
+/// else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. A set-but-invalid value (not a
+/// positive integer) panics rather than silently reverting to the default:
+/// the variable is primarily a test knob, and a typo that silently restores
+/// the 8 MiB bound would invalidate exactly the test that set it.
 pub(crate) fn max_inbound_buffer_bytes() -> usize {
     static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        std::env::var(MAX_INBOUND_BUFFER_ENV)
+    *LIMIT.get_or_init(|| match std::env::var(MAX_INBOUND_BUFFER_ENV) {
+        Ok(value) if !value.is_empty() => value
+            .parse()
             .ok()
-            .and_then(|value| value.parse().ok())
             .filter(|&bytes| bytes > 0)
-            .unwrap_or(DEFAULT_MAX_INBOUND_BUFFER_BYTES)
+            .unwrap_or_else(|| {
+                panic!("invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count")
+            }),
+        _ => DEFAULT_MAX_INBOUND_BUFFER_BYTES,
     })
 }
 

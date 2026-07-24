@@ -78,36 +78,21 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E10. Consolidate scattered configuration; publish the env-var contract
+### E10. Move the Wasmtime host's remaining knobs onto `WasiWebrtcCtx`
 
-- Two Wasmtime-host knobs live outside `WasiWebrtcCtx` despite its docs
-  calling it the stable place to grow configuration: the hardcoded 30 s
-  `CONNECT_TIMEOUT` (`wasmtime-impl/src/peer_connection.rs:46`; WIT makes the
-  bound implementation-defined, so it should be configurable) and the
-  process-global `OnceLock` env read of the inbound buffer bound
-  (`wasmtime-impl/src/data_channel.rs:68-81`), which latches its first read
-  and forbids per-store configuration. Move both onto `WasiWebrtcCtx`
-  (keeping the env var as a default source).
-- The same knob has different failure semantics per implementation:
-  `WEBRTC_MAX_INBOUND_BUFFER_BYTES` silently falls back to the default on a
-  parse failure in wasip3 (`wasip3-impl/src/runtime.rs:141`, `.parse().ok()`)
-  while `WEBRTC_UDP_BIND_ADDR` fails loud (`wasip3-impl/src/provider.rs:44-54`
-  — though the error text is then swallowed by the `Err(_)` dead-peer arm at
-  `provider.rs:367`; surface the message). Align on fail-loud. Also note the
-  connect timeouts diverge across implementations (30 s wasmtime vs 20 s
-  wasip3, `provider.rs:60`) — permitted by the WIT, but make it a decision.
-- The JS host counts string payloads in UTF-16 code units, not bytes
-  (`jco-impl/webrtc.js:705`, `data.length`), so the "8 MiB of payload bytes"
-  bound (`wit/webrtc.wit:186-187`) diverges up to 2× for non-ASCII text —
-  use `Buffer.byteLength`/`TextEncoder` for strings.
-- There is no single index of the cross-process environment surface
-  (`WEBRTC_UDP_BIND_ADDR`, `WEBRTC_MAX_INBOUND_BUFFER_BYTES`,
-  `WEBRTC_INCLUDE_LOOPBACK`, `CONFORMANCE_SHADOW_SYSCALL_SHIM`,
-  `CONFORMANCE_WASMTIME`, `CONFORMANCE_NODE`,
-  `CHROME_PATH`/`CHROME_BIN`/`PUPPETEER_EXECUTABLE_PATH`, `SKIP_NODE`,
-  `SKIP_NETNS_LAB`). Each is documented only at its use site; chasing a knob
-  through four codebases is today's discovery path. Add one table (AGENTS.md
-  or a doc both it and README link).
+Two knobs live outside `WasiWebrtcCtx` despite its docs calling it the
+stable place to grow configuration: the hardcoded 30 s `CONNECT_TIMEOUT`
+(`wasmtime-impl/src/peer_connection.rs`; the WIT makes the bound
+implementation-defined, so it should be configurable) and the
+process-global `OnceLock` env read of the inbound buffer bound
+(`wasmtime-impl/src/data_channel.rs`), which latches its first read and
+forbids per-store configuration. Move both onto `WasiWebrtcCtx` (keeping
+the env var as a default source); the buffer bound must thread from the
+ctx through connection construction down to `spawn_channel_pump`. Also
+note the connect timeouts diverge across implementations (30 s wasmtime vs
+20 s wasip3) — permitted by the WIT, but make it a decision. (The env-var
+parse alignment, the wasip3 bind-error surfacing, the JS byte accounting,
+and the environment-variable index in AGENTS.md are done.)
 
 ## F. Conformance suite
 
@@ -198,6 +183,5 @@ drifted rename fails fast with a clear message.
    (F7), the jco close-drain half of the barrier race (F5).
 2. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-3. The rest as touched: config consolidation + env-var index (E10), jco
-   in-process timeout isolation (F11), the remaining conformance-matrix
-   gaps (A3).
+3. The rest as touched: ctx knob consolidation (E10), jco in-process
+   timeout isolation (F11), the remaining conformance-matrix gaps (A3).

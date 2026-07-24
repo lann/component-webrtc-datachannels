@@ -369,6 +369,12 @@ impl GuestPeerConnection for PeerConnection {
         // every method observes it as already closed.
         let peer = SansIoPeer::new();
         let built = peer.and_then(|peer| Runtime::bind(peer, bind_ip()?));
+        if let Err(err) = &built {
+            // The construction error itself cannot be returned (constructors
+            // are infallible here); make the cause visible before the dead
+            // connection surfaces it as `error.closed`.
+            eprintln!("peer-connection construction failed: {err:#}");
+        }
         PeerConnection {
             inner: RefCell::new(built.ok().map(|(runtime, wake_rx, candidate)| PeerState {
                 shared: runtime.shared(),
