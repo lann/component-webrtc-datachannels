@@ -127,8 +127,10 @@ async fn connect_pair() -> Result<(PeerConnection, PeerConnection, DataChannel, 
     answerer.set_local_description(answer.clone()).await?;
     offerer.set_remote_description(answer).await?;
 
-    // Trickle each side's candidates to the other; the stream ending is the
-    // end-of-candidates signal.
+    // Relay each side's candidates to the other. This batches rather than
+    // trickles: `collect_candidates` waits for the stream to end (the
+    // end-of-candidates signal) before any are added — fine here, where both
+    // peers live in one instance and gathering needs no remote input.
     for candidate in collect_candidates(offerer.local_ice_candidates()).await {
         answerer.add_ice_candidate(candidate).await?;
     }

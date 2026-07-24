@@ -279,6 +279,12 @@ needed because…" belongs in commit messages, PR descriptions, or chat — not 
 source files.  Keeping process reasoning out of comments avoids cluttering the
 codebase with context that quickly becomes stale and misleading.
 
+Comments should also avoid claims about *other* files or implementations
+("the other hosts do X", "its twin implements Y") unless a test — typically
+the conformance suite — enforces the claim: nothing keeps an unenforced
+cross-file claim true, and a reader who trusts it first is misdirected
+exactly when it matters.
+
 ## Real signaling (`rendezvous`): the two-process echo demo
 
 The `webrtc-echo-demo` world stands up *both* peers inside one component

@@ -9,10 +9,9 @@ package wasmtime:webrtc-datachannels-host;
 
 /// The set of `lann:webrtc-datachannels` imports satisfied by this crate.
 ///
-/// The crate fully implements the `data-channel` resource; the
-/// `peer-connection` resource (the `signaling` design target) shares the
-/// `connections` interface but is not implemented here, so its host functions
-/// trap if a guest ever calls them.
+/// The crate implements the whole `connections` interface: the
+/// `data-channel-options` builder, the `data-channel` transport, and the
+/// `peer-connection` resource.
 world imports {
     import lann:webrtc-datachannels/connections@0.1.0;
 }

@@ -2,7 +2,7 @@
 //!
 //! The crate implements the `types` interface and, in the `connections`
 //! interface, the `data-channel-options` builder, the `data-channel` resource,
-//! and the `peer-connection` resource (the guest-driven signaling surface). See
+//! and the `peer-connection` resource. See
 //! [`crate`] for the public API built on top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]

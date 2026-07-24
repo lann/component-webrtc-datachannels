@@ -10,7 +10,7 @@
 //! where raw `ip netns` traffic is unavailable.
 //!
 //! Unlike the netns executor — which `exec`s each peer into a namespace and
-//! drives the corpus itself with retries — Shadow owns the whole run: this binary
+//! drives the corpus itself — Shadow owns the whole run: this binary
 //! generates a single Shadow configuration describing, for each test, a signaling
 //! host plus an offerer and an answerer host (each on its own simulated IP), runs
 //! `shadow` once, then reads each peer's single-line JSON `test-result` from the
@@ -294,8 +294,9 @@ fn render_config(
                 ip,
                 &argv,
                 env,
-                // Give the signaling server a moment to bind; peer-side long-poll
-                // retries cover any residual race.
+                // Give the signaling server a moment to bind: the mailbox
+                // clients retry a long-poll that finds no blob, but treat a
+                // failed HTTP round trip (server not yet listening) as fatal.
                 "2s",
                 None,
             );

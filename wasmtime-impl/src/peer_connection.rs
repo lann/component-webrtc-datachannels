@@ -2,7 +2,7 @@
 //!
 //! [`PeerConnection`] is the concrete host type mapped onto the
 //! `lann:webrtc-datachannels/connections.peer-connection` resource: the
-//! guest-driven signaling surface (`create-offer`/`create-answer`,
+//! guest-driven connection surface (`create-offer`/`create-answer`,
 //! `set-local-description`/`set-remote-description`, trickled ICE candidates)
 //! that lets a guest connect two separate peers.
 //!

@@ -7,8 +7,8 @@
 //! nothing, so the same core can be fed by the in-guest `wasi:sockets` driver
 //! (see [`crate::runtime`]).
 //!
-//! The sans-I/O model has no OS interface enumeration (the `rtc` fork stubs
-//! `ifaces()` out on wasm), so candidates are supplied explicitly by the driver
+//! The sans-I/O model has no OS interface enumeration (`rtc` stubs `ifaces()`
+//! out on wasm), so candidates are supplied explicitly by the driver
 //! via [`SansIoPeer::add_local_host_candidate`] rather than gathered.
 
 use std::net::SocketAddr;

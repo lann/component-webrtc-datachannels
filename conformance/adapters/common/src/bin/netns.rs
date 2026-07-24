@@ -269,8 +269,9 @@ async fn run_ice_test(
         // Bring up this attempt's signaling server; killed when `_signaling`
         // drops at the end of the attempt.
         let _signaling = start_signaling(cli, topology, port).context("signaling server")?;
-        // Let it bind before the peers connect; peer-side long-poll retries cover
-        // any residual race.
+        // Let it bind before the peers connect: the mailbox clients retry a
+        // long-poll that finds no blob, but treat a failed HTTP round trip
+        // (server not yet listening) as fatal.
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         let offerer = run_peer(

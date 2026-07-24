@@ -404,8 +404,11 @@ async fn exchange(test_id: &str, config: &TestConfig, dc: &DataChannel) -> Resul
 
 /// A final rendezvous over the connected data channel: each peer sends a
 /// sentinel and waits for the peer's, so neither peer tears down the connection
-/// while the other still needs it. The sentinel arrives after any test payloads
-/// because the channel is reliable and ordered. A `closed` error counts as the
+/// while the other still needs it. On a reliable, ordered channel the sentinel
+/// arrives after any test payloads. (`max-retransmits-accepted` runs the
+/// barrier over its `max-retransmits = 0` channel, whose sentinel a lossy path
+/// could drop; the corpus currently runs only on lossless paths, where SCTP
+/// still delivers it.) A `closed` error counts as the
 /// rendezvous: the peer only closes after completing its own exchange, so the
 /// close carries the same information as the sentinel (and hosts may drop a
 /// final in-flight message when the remote tears down immediately after it).

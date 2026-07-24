@@ -325,8 +325,7 @@ struct PeerState {
     /// Whether `incoming-data-channels` has been taken: the stream is
     /// take-once, and channels are never re-delivered on a later stream.
     incoming_taken: bool,
-    /// Which channel ids have already been surfaced via
-    /// `incoming-data-channels`.
+    /// Whether the pump task has been spawned (see `ensure_pump`).
     started_pump: bool,
     runtime: Option<(Runtime, mpsc::UnboundedReceiver<()>)>,
 }
