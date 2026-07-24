@@ -51,8 +51,9 @@ use crate::data_channel::{
 use crate::error::{WebrtcError, WebrtcResult};
 use crate::{DataChannel, SettingEngineHook};
 
-/// How long [`PeerConnection::wait_connected`] waits before reporting a timeout.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long [`PeerConnection::wait_connected`] waits before reporting a
+/// timeout, unless overridden through `WasiWebrtcCtx::set_connect_timeout`.
+pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long [`PeerConnection::close`] keeps the underlying connection alive
 /// after the close is observed locally, so messages already handed to the
@@ -124,6 +125,10 @@ struct Inner {
     close_trigger: CloseTrigger,
     /// The signal handed to each data channel this connection creates/adopts.
     close_signal: CloseSignal,
+    /// How long `wait-connected` waits before reporting a timeout.
+    connect_timeout: Duration,
+    /// The per-channel inbound buffer bound, in payload bytes.
+    max_inbound_buffer_bytes: usize,
 }
 
 /// A counter of in-flight spawned operations, awaitable at zero.
@@ -198,9 +203,17 @@ impl PeerConnection {
     ///
     /// `hook` customizes the [`SettingEngine`](webrtc::peer_connection::SettingEngine)
     /// before the connection is built, and `ice` (bind addresses, STUN/TURN
-    /// servers, relay-only policy) is applied when it is built. Requires a
+    /// servers, relay-only policy) is applied when it is built.
+    /// `connect_timeout` bounds `wait-connected` and
+    /// `max_inbound_buffer_bytes` bounds each channel's inbound buffering
+    /// (both configured through `WasiWebrtcCtx`). Requires a
     /// running Tokio runtime; without one every subsequent operation fails.
-    pub fn new_with(hook: Option<SettingEngineHook>, ice: crate::WebrtcIceConfig) -> Self {
+    pub fn new_with(
+        hook: Option<SettingEngineHook>,
+        ice: crate::WebrtcIceConfig,
+        connect_timeout: Duration,
+        max_inbound_buffer_bytes: usize,
+    ) -> Self {
         let (built_tx, built_rx) =
             oneshot::channel::<WebrtcResult<Arc<dyn WebrtcPeerConnection>>>();
         let (cand_tx, cand_rx) = mpsc::unbounded::<LocalCandidate>();
@@ -215,7 +228,14 @@ impl PeerConnection {
             let trigger = close_trigger.clone();
             let signal = close_sig.clone();
             handle.spawn(async move {
-                let handler = connection_handler(cand_tx, inc_tx, state, trigger, signal.clone());
+                let handler = connection_handler(
+                    cand_tx,
+                    inc_tx,
+                    state,
+                    trigger,
+                    signal.clone(),
+                    max_inbound_buffer_bytes,
+                );
                 match new_peer_connection_with(
                     |engine| {
                         if let Some(hook) = &hook {
@@ -266,6 +286,8 @@ impl PeerConnection {
                 pc: pc_slot,
                 close_trigger,
                 close_signal: close_sig,
+                connect_timeout,
+                max_inbound_buffer_bytes,
             }),
         }
     }
@@ -303,6 +325,7 @@ impl PeerConnection {
         let (wire_tx, wired) = wiring_channel();
         let built = self.inner.built.clone();
         let channel_label = label.clone();
+        let max_inbound_buffer_bytes = self.inner.max_inbound_buffer_bytes;
         if let Ok(handle) = Handle::try_current() {
             let pending = self.inner.pending_channels.clone();
             pending.begin();
@@ -326,7 +349,7 @@ impl PeerConnection {
                 // produced from here on covers it.
                 pending.end();
                 match created {
-                    Ok(channel) => spawn_channel_wiring(channel, wire_tx),
+                    Ok(channel) => spawn_channel_wiring(channel, wire_tx, max_inbound_buffer_bytes),
                     Err(err) => {
                         let _ = wire_tx.send(Err(WebrtcError::other(err)));
                     }
@@ -425,7 +448,7 @@ impl PeerConnection {
     pub async fn wait_connected(&self) -> WebrtcResult<()> {
         self.pc().await?;
         let state = self.inner.state.clone();
-        let deadline = tokio::time::sleep(CONNECT_TIMEOUT);
+        let deadline = tokio::time::sleep(self.inner.connect_timeout);
         tokio::pin!(deadline);
         loop {
             let notified = state.notify.notified();
@@ -495,6 +518,7 @@ fn connection_handler(
     state: Arc<ConnState>,
     close_trigger: CloseTrigger,
     close_sig: CloseSignal,
+    max_inbound_buffer_bytes: usize,
 ) -> Arc<CallbackHandler> {
     let cand_tx = Arc::new(Mutex::new(Some(cand_tx)));
     let gather_cand_tx = cand_tx.clone();
@@ -526,7 +550,7 @@ fn connection_handler(
                     tokio::spawn(async move {
                         while let Some(channel) = raw_rx.next().await {
                             let label = channel.label().await.unwrap_or_default();
-                            let wired = wire_open_channel(channel);
+                            let wired = wire_open_channel(channel, max_inbound_buffer_bytes);
                             let _ = inc_tx.unbounded_send(DataChannel::deferred(
                                 label,
                                 wired,

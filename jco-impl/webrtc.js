@@ -52,13 +52,31 @@ const CONNECT_TIMEOUT_MS = 20_000;
 // variable (Node) or a global of the same name (browsers).
 const DEFAULT_MAX_INBOUND_BUFFERED = 8 * 1024 * 1024;
 
-/** The configured inbound buffer bound, resolved lazily per channel. */
+/**
+ * The configured inbound buffer bound, resolved lazily per channel. A
+ * set-but-invalid value (not a positive number) throws rather than silently
+ * reverting to the default: the knob is primarily a test knob, and a typo
+ * that silently restored the 8 MiB bound would invalidate exactly the test
+ * that set it.
+ */
 function maxInboundBuffered() {
-  const configured = Number(
+  const raw =
     globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES ??
-      globalThis.process?.env?.WEBRTC_MAX_INBOUND_BUFFER_BYTES,
-  );
-  return configured > 0 ? configured : DEFAULT_MAX_INBOUND_BUFFERED;
+    globalThis.process?.env?.WEBRTC_MAX_INBOUND_BUFFER_BYTES;
+  if (raw === undefined || raw === "") return DEFAULT_MAX_INBOUND_BUFFERED;
+  const configured = Number(raw);
+  if (!(configured > 0)) {
+    throw new Error(
+      `invalid WEBRTC_MAX_INBOUND_BUFFER_BYTES ${JSON.stringify(raw)}: expected a positive byte count`,
+    );
+  }
+  return configured;
+}
+
+/** The UTF-8 byte length of a string payload (the WIT bound counts bytes). */
+const utf8 = new TextEncoder();
+function utf8ByteLength(text) {
+  return utf8.encode(text).byteLength;
 }
 
 /**
@@ -718,7 +736,9 @@ function incomingQueue(channel) {
 
   channel.addEventListener("message", ({ data }) => {
     if (overflowed) return;
-    const size = typeof data === "string" ? data.length : data.byteLength;
+    // Account string payloads in UTF-8 bytes (the WIT bound counts payload
+    // bytes; `.length` would count UTF-16 code units).
+    const size = typeof data === "string" ? utf8ByteLength(data) : data.byteLength;
     if (buffered + size > limit && !waiters.length) {
       // The bounded inbound buffer overflowed: close the channel and discard
       // this and any later messages. Already-buffered messages stay deliverable.
