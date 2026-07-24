@@ -34,7 +34,8 @@
 //        "granted" and lets real host candidates (raw loopback/LAN IPs, no
 //        mDNS) flow. Only then is the component run.
 //
-// Run with:  npm run build:component && npm run transpile && npm run test:browser
+// Run with:  just examples::test-browser   (or: npm run transpile && npm run
+// test:browser after `just examples::build-component`)
 import { chromium } from "playwright-core";
 import http from "node:http";
 import { access, readFile } from "node:fs/promises";
@@ -124,7 +125,7 @@ async function main() {
     await access(COMPONENT);
   } catch {
     throw new Error(
-      `missing ${COMPONENT}; run "npm run build:component && npm run transpile" first`,
+      `missing ${COMPONENT}; run "just examples::transpile" first`,
     );
   }
 

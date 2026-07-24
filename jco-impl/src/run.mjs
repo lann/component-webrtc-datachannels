@@ -1,7 +1,8 @@
 // Driver for the Node host: transpile output is imported and the component's
 // exported async `run` is invoked, then the round-trip stats are asserted.
 //
-// Run with:  npm run build:component && npm run transpile && npm start
+// Run with:  just examples::demo-node   (or: npm run transpile && npm start
+// after `just examples::build-component`)
 import { demo } from "../generated/echo-demo.js";
 
 const MESSAGE_COUNT = 1000;

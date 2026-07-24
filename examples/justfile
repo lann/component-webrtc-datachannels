@@ -8,7 +8,11 @@ set working-directory := ".."
 
 # Build the echo-demo guest component into examples/echo-demo/build/.
 build-component:
-    cd jco-impl && npm run build:component
+    cargo build --release -p echo-demo --target wasm32-unknown-unknown
+    mkdir -p examples/echo-demo/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/echo_demo.wasm \
+        -o examples/echo-demo/build/echo-demo.component.wasm
 
 # Transpile the echo-demo component for the Node host (runs build-component).
 transpile: build-component
@@ -20,7 +24,7 @@ test-browser: transpile
 
 # Run the Node (browser-first) host demo.
 demo-node: transpile
-    cd jco-impl && node --experimental-wasm-jspi src/run.mjs
+    cd jco-impl && npm start
 
 # Run the Wasmtime (native) host demo.
 demo-wasmtime count="1000" size="4096": build-component
@@ -72,10 +76,10 @@ demo-remote count="100" size="1024": build-echo-remote build-signalingd
 # Run the two-process echo demo under the Node host (transpiles the
 # echo-remote component; needs Node 24+ for JSPI).
 [doc("Run the two-process echo demo under the Node host (Node 24+)")]
-demo-node-remote count="100" size="1024": build-signalingd
+demo-node-remote count="100" size="1024": build-signalingd build-echo-remote
     #!/usr/bin/env bash
     set -euo pipefail
-    cd jco-impl && npm run build:component-remote && npm run transpile-remote && cd ..
+    cd jco-impl && npm run transpile-remote && cd ..
     target/debug/conformance-signalingd --host 127.0.0.1 --port 0 > target/demo-remote-signalingd.log 2>&1 &
     SIG=$!
     trap 'kill $SIG 2>/dev/null || true' EXIT
