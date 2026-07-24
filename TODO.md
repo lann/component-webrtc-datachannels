@@ -158,30 +158,9 @@ later tests with no attribution (contrast: the wasmtime adapter drops the
 processes for jco-node (matching the other adapters' isolation) or at least
 noting the contamination risk in the result document.
 
-## G. Development environment / CI
-
-### G1. jco transpile flags are not checked against the WIT
-
-Any interface/method rename must be mirrored by hand in the
-`--async-exports` / `--async-imports` / `--map` strings in
-`jco-impl/package.json` (`transpile` and `transpile-remote`; AGENTS.md
-documents this), but nothing verifies it — a mismatch fails only at
-transpile or runtime. It has already drifted: the `--async-imports` lists
-omit `data-channel.send-via-stream`, which the WIT declares `async`
-(`wit/webrtc.wit:229`), so any guest built through this pipeline that calls
-it silently gets the sync ABI. The conformance pipeline avoids the whole
-class by transpiling with blanket `-I async`
-(`conformance/adapters/jco/package.json:8`) — meaning the two jco pipelines
-also exercise *different* async ABIs for the same interface, and only the
-conformance one is asserted by the suite. Fix: generate the flags from the
-WIT (or adopt blanket async in both pipelines), and add a CI check so a
-drifted rename fails fast with a clear message.
-
 ## Suggested priority
 
 1. Conformance-suite integrity: wire `list-tests` + loud missing results
    (F7), the jco close-drain half of the barrier race (F5).
-2. Cheap hygiene, high leverage for humans and agents: the transpile-flag
-   check (G1).
-3. The rest as touched: ctx knob consolidation (E10), jco in-process
+2. The rest as touched: ctx knob consolidation (E10), jco in-process
    timeout isolation (F11), the remaining conformance-matrix gaps (A3).
