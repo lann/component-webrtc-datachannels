@@ -138,6 +138,21 @@ tags = ["peer-connection"]
 description = "wait-connected resolves once the connection is established."
 
 [[test]]
+id = "peer-wait-connected-latch"
+tags = ["peer-connection"]
+description = "wait-connected is latched: re-awaitable after connect, still ok after close."
+
+[[test]]
+id = "peer-streams-once"
+tags = ["peer-connection"]
+description = "local-ice-candidates and incoming-data-channels are take-once; later calls end immediately."
+
+[[test]]
+id = "post-close-signaling"
+tags = ["peer-connection", "errors"]
+description = "peer-connection methods called after close fail with error.closed."
+
+[[test]]
 id = "peer-close-releases"
 tags = ["peer-connection"]
 description = "close releases resources; subsequent ops do not hang."

@@ -259,9 +259,31 @@ export class PeerConnection {
   #pc;
   #candidates;
   #channels;
+  /** Latched true once the connection has ever reached `connected`. */
+  #everConnected = false;
+  /** True once `close()` has been called. */
+  #closed = false;
+  /** Take-once claims for the resource's two streams (see the WIT contract). */
+  #candidatesTaken = false;
+  #channelsTaken = false;
+  /**
+   * Pending `waitConnected` rejecters, woken by a local `close()` — the W3C
+   * `close()` transitions the state without firing `connectionstatechange`,
+   * so a pending waiter would otherwise hang to its timeout.
+   */
+  #closeHooks = new Set();
 
   constructor() {
     this.#pc = new RTCPeerConnection();
+
+    // Latch `connected` as soon as it is reached, independent of any
+    // `waitConnected` caller: the WIT contract keeps reporting a
+    // once-connected connection as connected even after a later close.
+    const latch = () => {
+      if (this.#isConnectedNow()) this.#everConnected = true;
+    };
+    this.#pc.addEventListener("connectionstatechange", latch);
+    this.#pc.addEventListener("iceconnectionstatechange", latch);
 
     // Local ICE candidates: a `null` (or empty) candidate ends the stream.
     this.#candidates = eventStream((push, end) => {
@@ -287,29 +309,71 @@ export class PeerConnection {
   }
 
   /**
+   * Throw `{ tag: 'closed' }` when the connection is terminally over, per the
+   * WIT contract for method calls made after `close` (the gate precedes any
+   * input handling, so a malformed argument after close is still `closed`).
+   */
+  #requireOpen() {
+    if (this.#closed || this.#pc.connectionState === "closed") {
+      throw { tag: "closed" };
+    }
+  }
+
+  #isConnectedNow() {
+    return (
+      this.#pc.connectionState === "connected" ||
+      this.#pc.iceConnectionState === "connected" ||
+      this.#pc.iceConnectionState === "completed"
+    );
+  }
+
+  /**
    * Create a data channel negotiated in-band with the peer.
    * @param {DataChannelOptions} options
    */
   createDataChannel(options) {
-    const channel = this.#pc.createDataChannel(options.label(), options.toInit());
-    return new DataChannel(channel);
+    this.#requireOpen();
+    try {
+      const channel = this.#pc.createDataChannel(options.label(), options.toInit());
+      return new DataChannel(channel);
+    } catch (err) {
+      throw { tag: "other", val: String(err) };
+    }
   }
 
-  /** A stream of data channels opened by the remote peer. */
+  /**
+   * A stream of data channels opened by the remote peer. Take-once per the
+   * WIT contract: later calls return a stream that ends immediately, and
+   * channels are never re-delivered.
+   */
   incomingDataChannels() {
+    if (this.#channelsTaken) return emptyStream();
+    this.#channelsTaken = true;
     return this.#channels.stream;
   }
 
   /** Produce an SDP offer describing the local peer. */
   async createOffer() {
-    const offer = await this.#pc.createOffer();
-    return { kind: "offer", sdp: offer.sdp };
+    this.#requireOpen();
+    try {
+      const offer = await this.#pc.createOffer();
+      return { kind: "offer", sdp: offer.sdp };
+    } catch (err) {
+      // Map to a WIT error rather than letting the rejection escape as a trap.
+      throw { tag: "other", val: String(err) };
+    }
   }
 
   /** Produce an SDP answer in response to a previously set remote offer. */
   async createAnswer() {
-    const answer = await this.#pc.createAnswer();
-    return { kind: "answer", sdp: answer.sdp };
+    this.#requireOpen();
+    try {
+      const answer = await this.#pc.createAnswer();
+      return { kind: "answer", sdp: answer.sdp };
+    } catch (err) {
+      // Map to a WIT error rather than letting the rejection escape as a trap.
+      throw { tag: "other", val: String(err) };
+    }
   }
 
   /**
@@ -317,6 +381,7 @@ export class PeerConnection {
    * @param {{ kind: string, sdp: string }} description
    */
   async setLocalDescription(description) {
+    this.#requireOpen();
     try {
       await this.#pc.setLocalDescription({ type: description.kind, sdp: description.sdp });
     } catch (err) {
@@ -329,6 +394,7 @@ export class PeerConnection {
    * @param {{ kind: string, sdp: string }} description
    */
   async setRemoteDescription(description) {
+    this.#requireOpen();
     try {
       await this.#pc.setRemoteDescription({ type: description.kind, sdp: description.sdp });
     } catch (err) {
@@ -336,8 +402,15 @@ export class PeerConnection {
     }
   }
 
-  /** A stream of locally gathered ICE candidates to trickle to the peer. */
+  /**
+   * A stream of locally gathered ICE candidates to trickle to the peer.
+   * Take-once per the WIT contract: later calls return a stream that ends
+   * immediately, and candidates are never re-delivered. End-of-candidates is
+   * the stream ending.
+   */
   localIceCandidates() {
+    if (this.#candidatesTaken) return emptyStream();
+    this.#candidatesTaken = true;
     return this.#candidates.stream;
   }
 
@@ -346,6 +419,7 @@ export class PeerConnection {
    * @param {{ candidate: string, sdpMid?: string, sdpMlineIndex?: number }} candidate
    */
   async addIceCandidate(candidate) {
+    this.#requireOpen();
     try {
       await this.#pc.addIceCandidate({
         candidate: candidate.candidate,
@@ -358,47 +432,69 @@ export class PeerConnection {
   }
 
   /**
-   * Resolve once the connection reaches `connected`, or reject
-   * `{ tag: 'timed-out' }` when it fails or when `CONNECT_TIMEOUT_MS` elapses
-   * first (a handshake that can never complete — for example with no remote
-   * peer — must not hang forever).
+   * Resolve once the connection reaches `connected`.
+   *
+   * `connected` is latched per the WIT contract: once the connection has ever
+   * connected this resolves immediately — including after a later `close` —
+   * and may be awaited repeatedly. If the connection closes or fails without
+   * ever having connected it rejects `{ tag: 'closed' }`; a handshake that
+   * can never complete (for example with no remote peer) rejects
+   * `{ tag: 'timed-out' }` after `CONNECT_TIMEOUT_MS`.
    */
   async waitConnected() {
     const pc = this.#pc;
-    const isConnected = () =>
-      pc.connectionState === "connected" ||
-      pc.iceConnectionState === "connected" ||
-      pc.iceConnectionState === "completed";
-    const isFailed = () => pc.connectionState === "failed" || pc.iceConnectionState === "failed";
+    const isFailed = () =>
+      pc.connectionState === "failed" ||
+      pc.iceConnectionState === "failed" ||
+      pc.connectionState === "closed";
 
-    if (isConnected()) return;
+    if (this.#isConnectedNow()) this.#everConnected = true;
+    if (this.#everConnected) return;
+    if (this.#closed || isFailed()) throw { tag: "closed" };
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         cleanup();
         reject({ tag: "timed-out" });
       }, CONNECT_TIMEOUT_MS);
       const check = () => {
-        if (isConnected()) {
+        if (this.#isConnectedNow()) {
+          this.#everConnected = true;
           cleanup();
           resolve();
         } else if (isFailed()) {
           cleanup();
-          reject({ tag: "timed-out" });
+          reject({ tag: "closed" });
         }
+      };
+      const onClose = () => {
+        cleanup();
+        reject({ tag: "closed" });
       };
       const cleanup = () => {
         clearTimeout(timer);
+        this.#closeHooks.delete(onClose);
         pc.removeEventListener("connectionstatechange", check);
         pc.removeEventListener("iceconnectionstatechange", check);
       };
+      this.#closeHooks.add(onClose);
       pc.addEventListener("connectionstatechange", check);
       pc.addEventListener("iceconnectionstatechange", check);
     });
   }
 
-  /** Close the peer connection and any of its data channels. */
+  /**
+   * Close the peer connection and any of its data channels. Idempotent; wakes
+   * pending `waitConnected` callers (the W3C `close()` transitions the state
+   * without firing events).
+   */
   close() {
+    if (this.#closed) return;
+    this.#closed = true;
     this.#pc.close();
+    for (const hook of this.#closeHooks) hook();
+    this.#closeHooks.clear();
+    this.#candidates.end();
+    this.#channels.end();
   }
 }
 
@@ -435,7 +531,16 @@ function eventStream(setup) {
     }
   };
   setup(push, end);
-  return { stream };
+  return { stream, end };
+}
+
+/** A `ReadableStream` that ends immediately without yielding anything. */
+function emptyStream() {
+  return new ReadableStream({
+    start(controller) {
+      controller.close();
+    },
+  });
 }
 
 /**

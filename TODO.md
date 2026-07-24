@@ -33,36 +33,6 @@ confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
   supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
   in a namespace) is deferred.
 
-## C. WIT interface design
-
-### C1. Align the implementations with the documented `peer-connection` contract
-
-The `peer-connection` contract is now specified in `wit/webrtc.wit` doc
-comments (end-of-candidates = stream end; take-once streams; latched
-`wait-connected`; sync, idempotent `close` with post-close calls failing
-`error.closed`). A cross-implementation survey found the implementations
-diverge from it, and none of the divergences are visible to the conformance
-matrix. Fix the implementations and add a conformance test per behavior:
-
-- **`wait-connected` latch (jco)**: jco does not latch `connected` — a
-  connected-then-closed connection hangs the full 20s and rejects
-  `timed-out`, and a terminal failure also rejects `timed-out` instead of
-  `closed` (`conformance/adapters/jco/webrtc.js`); wasmtime and wasip3 latch
-  and classify correctly.
-- **Take-once streams (jco, wasip3)**: a second `local-ice-candidates` /
-  `incoming-data-channels` call must return an immediately-ended stream
-  (wasmtime's behavior). jco returns the *same* stream object each call (a
-  live first stream makes the second consumption trap); wasip3's second
-  `incoming-data-channels` replays every previously delivered channel as
-  duplicate handles over shared state (`pump_incoming` restarts its cursor
-  at 0, `wasip3-impl/src/provider.rs`).
-- **Post-close calls → `error.closed` (all three)**: none gate signaling
-  methods on close — wasmtime/wasip3 surface whatever the underlying stack
-  returns (`other`/`invalid-signaling`), and jco's `create-offer` /
-  `create-answer` have no error mapping at all, so a closed-pc rejection
-  escapes as a raw trap rather than a WIT `error` (a bug regardless of the
-  contract).
-
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -75,10 +45,11 @@ needs syscalls the Shadow simulator does not implement — Shadow rejects the
 does not implement `recvmmsg` (`ENOSYS`), which quinn-udp's Linux receive
 path calls with no fallback. The conformance Shadow lab bridges this with
 an in-binary syscall shim compiled into its `conformance-peer` build
-(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, cargo feature
-`shadow-syscall-shim`): each override forwards the call and stubs only
+(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, armed by the
+`CONFORMANCE_SHADOW_SYSCALL_SHIM` environment variable the Shadow executor
+sets on its simulated peers): each override forwards the call and stubs only
 Shadow's documented failure; anything unexpected aborts the peer. Loopback
-and netns paths are unaffected and run shim-free.
+and netns paths never set the variable and get pure pass-through.
 
 The shim is a bridge, not a fix. Retire it when any upstream lands and
 reaches a published release:
@@ -136,7 +107,5 @@ flags from the WIT) so a drifted rename fails fast with a clear message.
 
 ## Suggested priority
 
-1. Contract alignment: fix the `peer-connection` divergences and land their
-   conformance tests (C1).
-2. Cheap hygiene: the transpile-flag CI check (G1), the remaining
+1. Cheap hygiene: the transpile-flag CI check (G1), the remaining
    conformance-matrix gaps (A3).

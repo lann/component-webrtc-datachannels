@@ -185,6 +185,9 @@ pub const TESTS: &[&str] = &[
     "peer-local-ice-candidates",
     "peer-add-ice-candidate",
     "peer-wait-connected",
+    "peer-wait-connected-latch",
+    "peer-streams-once",
+    "post-close-signaling",
     "peer-close-releases",
     "peer-invalid-sdp",
     "interop-handshake",
@@ -230,6 +233,9 @@ pub fn plan_for(test_id: &str) -> Plan {
         | "peer-local-ice-candidates"
         | "peer-add-ice-candidate"
         | "peer-wait-connected"
+        | "peer-wait-connected-latch"
+        | "peer-streams-once"
+        | "post-close-signaling"
         | "peer-close-releases"
         | "peer-invalid-sdp"
         | "error-invalid-signaling"
@@ -270,6 +276,12 @@ pub const CONFORMANCE_MAX_INBOUND_BUFFER_BYTES: u32 = 512 * 1024;
 
 /// The environment variable naming the implementations' inbound-buffer bound.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
+
+/// The environment variable that arms the wasmtime peer's Shadow syscall shim
+/// (`conformance-adapter-wasmtime`, `src/bin/peer/shadow_shim.rs`). The Shadow
+/// executor sets it on the peer processes it places inside the simulation;
+/// everywhere else the shim's overrides are pure pass-through.
+pub const SHADOW_SYSCALL_SHIM_ENV: &str = "CONFORMANCE_SHADOW_SYSCALL_SHIM";
 
 // ----- peer subprocess invocation --------------------------------------------
 

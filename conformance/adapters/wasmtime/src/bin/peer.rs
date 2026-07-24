@@ -24,8 +24,9 @@ use conformance_adapter_wasmtime::{
 };
 
 /// Syscall overrides bridging Shadow's syscall surface to the host's needs
-/// (see the module docs). Compiled only into the Shadow lab's peer build.
-#[cfg(all(feature = "shadow-syscall-shim", target_os = "linux"))]
+/// (see the module docs). Always compiled in; the stubs engage only when the
+/// Shadow executor sets `CONFORMANCE_SHADOW_SYSCALL_SHIM` on the peer.
+#[cfg(target_os = "linux")]
 #[path = "peer/shadow_shim.rs"]
 mod shadow_shim;
 

@@ -188,7 +188,7 @@ impl PeerConnection {
             let trigger = close_trigger.clone();
             let signal = close_sig.clone();
             handle.spawn(async move {
-                let handler = connection_handler(cand_tx, inc_tx, state, trigger, signal);
+                let handler = connection_handler(cand_tx, inc_tx, state, trigger, signal.clone());
                 match new_peer_connection_with(
                     |engine| {
                         if let Some(hook) = &hook {
@@ -202,6 +202,12 @@ impl PeerConnection {
                 {
                     Ok(pc) => {
                         *pc_slot.lock().unwrap() = Some(pc.clone());
+                        // `close()` may have raced the build: it found the slot
+                        // empty, so tear the connection down now that it exists.
+                        if signal.is_closed() {
+                            let taken = pc_slot.lock().unwrap().take();
+                            close_peer_connections(taken.into_iter().collect());
+                        }
                         let _ = built_tx.send(Ok(pc));
                     }
                     Err(err) => {
@@ -240,6 +246,21 @@ impl PeerConnection {
     /// Await the built peer connection (or its build error).
     async fn pc(&self) -> WebrtcResult<Arc<dyn WebrtcPeerConnection>> {
         self.inner.built.clone().await
+    }
+
+    /// Whether the connection is terminally over: closed by [`close`] or
+    /// failed. Per the WIT contract, methods called after that point fail
+    /// with `error.closed`.
+    pub fn is_closed(&self) -> bool {
+        self.inner.close_signal.is_closed()
+    }
+
+    /// Gate a method on the connection being open (see [`is_closed`]).
+    fn ensure_open(&self) -> WebrtcResult<()> {
+        if self.is_closed() {
+            return Err(WebrtcError::Closed);
+        }
+        Ok(())
     }
 
     /// Create a data channel to negotiate in-band with the peer.
@@ -306,6 +327,7 @@ impl PeerConnection {
 
     /// Produce an SDP offer. The caller applies it via `set-local-description`.
     pub async fn create_offer(&self) -> WebrtcResult<String> {
+        self.ensure_open()?;
         let pc = self.pc().await?;
         // Wait for any spawned `create-data-channel` registrations, so the
         // offer's SDP covers every channel created before this call.
@@ -318,6 +340,7 @@ impl PeerConnection {
 
     /// Produce an SDP answer to a previously set remote offer.
     pub async fn create_answer(&self) -> WebrtcResult<String> {
+        self.ensure_open()?;
         let pc = self.pc().await?;
         // Wait for any spawned `create-data-channel` registrations, so the
         // answer's SDP covers every channel created before this call.
@@ -331,6 +354,7 @@ impl PeerConnection {
     /// Apply a local description, starting ICE gathering (and, in turn, the
     /// trickled `local-ice-candidates`).
     pub async fn set_local_description(&self, kind: SdpKind, sdp: String) -> WebrtcResult<()> {
+        self.ensure_open()?;
         let pc = self.pc().await?;
         let desc = to_rtc_description(kind, sdp)?;
         pc.set_local_description(desc)
@@ -340,6 +364,7 @@ impl PeerConnection {
 
     /// Apply the remote peer's description.
     pub async fn set_remote_description(&self, kind: SdpKind, sdp: String) -> WebrtcResult<()> {
+        self.ensure_open()?;
         let pc = self.pc().await?;
         let desc = to_rtc_description(kind, sdp)?;
         pc.set_remote_description(desc)
@@ -354,6 +379,7 @@ impl PeerConnection {
         sdp_mid: Option<String>,
         sdp_mline_index: Option<u16>,
     ) -> WebrtcResult<()> {
+        self.ensure_open()?;
         let pc = self.pc().await?;
         let init = RTCIceCandidateInit {
             candidate,

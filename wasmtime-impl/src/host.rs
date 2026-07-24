@@ -559,11 +559,13 @@ impl HostPeerConnection for WasiWebrtcCtxView<'_> {
         // `create-data-channel` takes ownership of the options resource; read
         // its configuration, then drop it from the table.
         let options = self.table.delete(options)?;
-        let channel = self.table.get(&self_)?.create_data_channel(
-            options.label,
-            options.ordered,
-            options.max_retransmits,
-        );
+        let pc = self.table.get(&self_)?;
+        // Per the WIT contract, methods on a closed connection fail `closed`.
+        if pc.is_closed() {
+            return Ok(Err(crate::WebrtcError::Closed.into()));
+        }
+        let channel =
+            pc.create_data_channel(options.label, options.ordered, options.max_retransmits);
         Ok(Ok(self.table.push(channel)?))
     }
 
