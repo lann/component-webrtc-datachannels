@@ -39,6 +39,7 @@ impl wasip3::exports::cli::run::Guest for Component {
             }
         };
 
+        let role = config.role;
         let result = runner::run_test(test_id, config).await;
         let json = match &result {
             TestResult::Pass => serde_json::json!({ "tag": "pass" }),
@@ -50,8 +51,12 @@ impl wasip3::exports::cli::run::Guest for Component {
         // export, so its detached pump flushes the final sends (the barrier
         // sentinel, the SCTP/DTLS close handshake) only while this task
         // yields. Returning immediately would end the process and cut the
-        // pump off mid-teardown, stalling the remote peer.
-        wasip3::clocks::monotonic_clock::wait_for(CLOSE_GRACE_NANOS).await;
+        // pump off mid-teardown, stalling the remote peer. A `both`-role run
+        // holds both peers in this one process, so there is no remote peer to
+        // protect and the grace is skipped.
+        if !matches!(role, Role::Both) {
+            wasip3::clocks::monotonic_clock::wait_for(CLOSE_GRACE_NANOS).await;
+        }
         Ok(())
     }
 }

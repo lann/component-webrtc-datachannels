@@ -253,26 +253,16 @@ Fix: pick one interpretation (per `conformance/signaling/PROTOCOL.md`), align
 the three clients on `wait` and `x-done` handling, and forward all upstream
 headers in the proxy (one line).
 
-### F11. Replace fixed sleeps with the health-poll pattern the suite already has
+### F11. jco in-process test timeouts cannot cancel the timed-out attempt
 
-- `conformance/adapters/common/src/bin/netns.rs:274` sleeps a fixed 500 ms
-  per test for signaling-server bind; `conformance/adapters/common/src/lab.rs:611`
-  sleeps 1 s for coturn. The suite already has the right pattern
-  (`waitHealthy` polling `/healthz`, `conformance/adapters/jco/run-node.mjs:99-121`;
-  `conformance/runner/src/signaling.rs:55-72`) — use it: the mailbox clients
-  do not retry transport failures, so slow server startup fails the test.
-- The wasip3 driver lingers `CLOSE_GRACE_NANOS` = 500 ms on **every**
-  invocation (`conformance/adapters/wasip3/driver/src/lib.rs:54, 61`),
-  including in-process `both`-role tests with no remote peer to protect —
-  ~20 s of pure sleep per corpus run. Skip the grace for `both`-role runs,
-  or replace the guess with an ack over the channel.
-- The jco in-process `withTimeout` (`conformance/adapters/jco/driver.js:127-133`)
-  abandons but cannot cancel the timed-out promise; wedged guest instances,
-  their `RTCPeerConnection`s and pending long-polls keep running in the same
-  process for the rest of the corpus and can degrade later tests with no
-  attribution. Consider per-test child processes for jco-node (matching the
-  other adapters' isolation) or at least noting the contamination risk in the
-  result document.
+The jco adapters' `withTimeout` (`conformance/adapters/jco/driver.js`)
+abandons but cannot cancel a timed-out test attempt: the wedged guest
+instances, their `RTCPeerConnection`s and pending long-polls keep running in
+the same Node/browser process for the rest of the corpus and can degrade
+later tests with no attribution (contrast: the wasmtime adapter drops the
+`Store`, and subprocess peers are `kill_on_drop`). Consider per-test child
+processes for jco-node (matching the other adapters' isolation) or at least
+noting the contamination risk in the result document.
 
 ## G. Development environment / CI
 
