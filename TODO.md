@@ -33,36 +33,6 @@ confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
   supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
   in a namespace) is deferred.
 
-## D. Examples
-
-### D3. De-duplicate example guest helpers and the wasmtime-demo binaries
-
-- Near-identical helpers are copied across example guests:
-  `collect_candidates` (`examples/echo-demo/src/lib.rs:156`,
-  `examples/webrtc-consumer/src/lib.rs:187`,
-  `examples/echo-remote/src/lib.rs:285`), `first_incoming`
-  (`examples/cli-signaling/src/lib.rs:170`,
-  `examples/webrtc-consumer/src/lib.rs:177`, plus inline in echo-demo), and
-  the wasi-stdout `print` helper (`examples/cli-signaling/src/lib.rs:290` ≡
-  `examples/webrtc-consumer/src/lib.rs:204`, doc comment included). A tiny
-  shared demo-util crate ends the drift; if the duplication is intentional
-  (each example maximally self-contained), say so once in `examples/`.
-- `examples/wasmtime-demo/src/lib.rs` is a doc-comment-only empty lib while
-  the binaries duplicate the glue it should host: `engine()` and
-  `webrtc_ctx()` with the `WEBRTC_INCLUDE_LOOPBACK` hook are repeated in
-  `src/main.rs`, `src/bin/cli-signaling.rs`, and `src/bin/echo-remote.rs`.
-  Move them into the lib.
-- `examples/webrtc-consumer/src/lib.rs:87-90` decides retryability by
-  substring-matching a `Debug` rendering (`contains("wait-connected") &&
-  contains("TimedOut")`); a context-string or variant rename silently
-  disables the retry. Match on the typed WIT error variant before converting
-  to `anyhow` (the conversion is the `anyhow!("… wait-connected: {e:?}")`
-  formatting at the call sites).
-- `examples/wasmtime-demo/src/main.rs`: the default component path is
-  CWD-relative (`../echo-demo/build/…`), so `cargo run --bin
-  wasmtime-webrtc-host` only works from `examples/wasmtime-demo/`. Resolve
-  relative to `CARGO_MANIFEST_DIR` or make the argument required.
-
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -107,44 +77,6 @@ upstream; the netns lab's `stun-srflx` scenario passes with zero dropped
 srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
-
-### E8. Wasmtime host: close observation and `send-via-stream` buffering
-
-All in `wasmtime-impl/src/host.rs` unless noted:
-
-1. **`send` does not observe connection close while in flight.** It checks
-   `conn_closed.is_closed()` once *before* `wired.await` (`host.rs:368-370`)
-   and never races `conn_closed.fired()` afterwards — unlike `receive`,
-   which does exactly that with a documented biased race
-   (`host.rs:406-436`; the pattern to copy). Per the crate's own comments
-   the `webrtc` 0.20 wrapper neither errors sends nor emits `OnClose` after
-   `PeerConnection::close` (`data_channel.rs:184-186`), so a `send` on a
-   never-opened channel racing `close()` can pend forever, and a send landing
-   just after close can report `Ok` for a silently dropped message — WIT
-   requires in-flight operations to fail `error.closed`
-   (`wit/webrtc.wit:317-319`). `send_via_stream` has the same unraced
-   `wired.await` (`host.rs:446`) and checks close only between messages
-   (`host.rs:467`).
-2. **`send-via-stream` is a guest-controlled memory amplifier.** All queued
-   messages are drained concurrently into `Vec`s via an unbounded mpsc
-   (`host.rs:326-345, 459`); `Vec::with_capacity(length)` allocates up to
-   4 GiB from a guest-declared `u32` (`host.rs:335`); and the declared-length
-   check runs only **after** the payload stream ends (`host.rs:474`), so a
-   message declaring `length: 1` can stream unbounded bytes first. This
-   undercuts the WIT's stated rationale that `stream-message` exists "to
-   bound in-memory buffering" (`wit/webrtc.wit:57-58`). Fix: enforce the
-   declared length *during* collection and bound per-channel in-flight
-   payload bytes (the inbound side already shows how).
-3. **Incoming-channel delivery can violate the WIT's ordering.**
-   `on_data_channel` spawns a task per channel that awaits the async
-   `label()` before pushing to the incoming queue
-   (`wasmtime-impl/src/peer_connection.rs:498-505`), so two channels opened
-   in quick succession can be delivered out of order vs "in the order they
-   open" (`wit/webrtc.wit:269-270`) — a real divergence risk against the
-   browser host, where `ondatachannel` ordering is deterministic. Fix:
-   reserve the queue slot synchronously in the callback and fill the label
-   afterwards (the `DataChannel::deferred` machinery already supports
-   deferred wiring).
 
 ### E10. Consolidate scattered configuration; publish the env-var contract
 
@@ -221,6 +153,18 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
+The same race also reached the Wasmtime host through a second path, now
+fixed: dropping the `peer-connection` resource (a guest returning without
+calling `close`) tore the network down immediately, skipping the
+`CLOSE_DRAIN` grace that `close()` applies — the cli-signaling round trip
+flaked (~5-10% locally) with the offerer's `receive` failing `closed`
+because the answerer's just-sent reply was discarded with the SCTP send
+queue. `Drop` now mirrors `close()` (fire the signal, defer teardown by
+the drain), and the cli-signaling host binary lingers briefly after the
+guest returns so process exit does not cut the drain short. A
+flush-aware teardown (close once the SCTP queue is empty, bounded) would
+replace both graces.
+
 ### F7. Unify the remaining corpus mirrors (plan + params)
 
 The test ids are now cross-checked (each full-corpus adapter verifies its
@@ -276,10 +220,8 @@ drifted rename fails fast with a clear message.
 
 1. Conformance-suite integrity: wire `list-tests` + loud missing results
    (F7), the jco close-drain half of the barrier race (F5).
-2. Implementation contract gaps found incidentally: Wasmtime
-   close-observation and `send-via-stream` buffering (E8).
-3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
+2. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-4. The rest as touched: config consolidation + env-var index (E10), example
-   de-duplication (D3), jco in-process timeout isolation (F11), the
-   remaining conformance-matrix gaps (A3).
+3. The rest as touched: config consolidation + env-var index (E10), jco
+   in-process timeout isolation (F11), the remaining conformance-matrix
+   gaps (A3).

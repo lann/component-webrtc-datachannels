@@ -27,6 +27,7 @@ use std::time::Duration;
 use futures::channel::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use futures::channel::oneshot;
 use futures::future::{FutureExt, Shared};
+use futures::StreamExt as _;
 use tokio::runtime::Handle;
 use tokio::sync::Notify;
 use webrtc::data_channel::RTCDataChannelInit;
@@ -162,8 +163,24 @@ impl PendingOps {
 
 impl Drop for Inner {
     fn drop(&mut self) {
+        // Mirror `close()`: fire the close signal (any surviving `data-channel`
+        // resources observe `error.closed`) and defer the network teardown by
+        // the same bounded drain, so a message handed to the transport just
+        // before the resource was dropped still flushes to the wire rather
+        // than being discarded with the SCTP send queue.
+        self.close_trigger.fire();
         let pc = self.pc.lock().unwrap().take();
-        close_peer_connections(pc.into_iter().collect());
+        if pc.is_none() {
+            return;
+        }
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn(async move {
+                tokio::time::sleep(CLOSE_DRAIN).await;
+                close_peer_connections(pc.into_iter().collect());
+            });
+        } else {
+            close_peer_connections(pc.into_iter().collect());
+        }
     }
 }
 
@@ -497,14 +514,30 @@ fn connection_handler(
             .on_gathering_complete(move || {
                 gather_cand_tx.lock().unwrap().take();
             })
-            .on_data_channel(move |channel| {
-                let inc_tx = inc_tx.clone();
-                let signal = close_sig.clone();
-                tokio::spawn(async move {
-                    let label = channel.label().await.unwrap_or_default();
-                    let wired = wire_open_channel(channel);
-                    let _ = inc_tx.unbounded_send(DataChannel::deferred(label, wired, signal));
-                });
+            .on_data_channel({
+                // Deliver incoming channels in the order they open (the WIT
+                // contract): the callback forwards each channel synchronously
+                // onto an ordered queue, and one dispatcher task per
+                // connection awaits the async `label()` and wires them
+                // sequentially — a per-channel task here could reorder two
+                // channels opened in quick succession.
+                let (raw_tx, mut raw_rx) = mpsc::unbounded::<Arc<dyn WebrtcDataChannel>>();
+                if Handle::try_current().is_ok() {
+                    tokio::spawn(async move {
+                        while let Some(channel) = raw_rx.next().await {
+                            let label = channel.label().await.unwrap_or_default();
+                            let wired = wire_open_channel(channel);
+                            let _ = inc_tx.unbounded_send(DataChannel::deferred(
+                                label,
+                                wired,
+                                close_sig.clone(),
+                            ));
+                        }
+                    });
+                }
+                move |channel| {
+                    let _ = raw_tx.unbounded_send(channel);
+                }
             })
             .on_connection_state(move |s| {
                 match s {

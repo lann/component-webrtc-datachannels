@@ -25,3 +25,13 @@ demo/manual-signaling driver (`wasmtime-demo`) that exercise the
       target/webrtc-composed.wasm
   ```
 - **`wasmtime-demo`** — the native Rust host binaries built on `wasmtime-impl`.
+
+## Shared guest helpers are deliberately duplicated
+
+Small helpers (draining a `local-ice-candidates` stream, adopting the first
+incoming data channel, the `wasi:cli` stdout `print`) are copied between the
+example guests rather than shared through a crate: each example stays
+self-contained, and the guests intentionally span two `wit-bindgen`
+generations (0.59, and 0.57 matching the `wasip3` crate's runtime), whose
+stream types do not unify across a shared library. Treat the copies as
+per-example code, not a library to keep in sync.
