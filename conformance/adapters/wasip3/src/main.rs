@@ -80,7 +80,7 @@ async fn run_test(
 #[command(name = "conformance-adapter-wasip3", version)]
 struct Cli {
     /// Path to the fully composed component (guest + provider + mailbox +
-    /// driver; see `just build-conformance-wasip3`).
+    /// driver; see `just conformance::build-wasip3`).
     #[arg(
         long,
         default_value = "conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm"
@@ -122,7 +122,7 @@ async fn main() -> Result<()> {
 
     anyhow::ensure!(
         cli.component.exists(),
-        "composed component {} not found (run `just build-conformance-wasip3`)",
+        "composed component {} not found (run `just conformance::build-wasip3`)",
         cli.component.display()
     );
     let peer = Wasip3Peer {

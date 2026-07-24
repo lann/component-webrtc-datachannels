@@ -21,8 +21,8 @@ conformance guest, the `conformance-signalingd` mailbox, adapters for
 `wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser`, and
 `wasmtime`<->`wasip3-guest` (both orders each) — all run in CI over loopback
 via `just conformance` — plus the Shadow lab in CI (non-loopback,
-deterministic) and the workstation-only netns lab (`just conformance-netns` /
-`just conformance-nat`) covering `lan`, `stun-srflx` (behind a one-to-one
+deterministic) and the workstation-only netns lab (`just conformance::netns` /
+`just conformance::nat`) covering `lan`, `stun-srflx` (behind a one-to-one
 full-cone NAT), `turn-relay`, and `nat-symmetric`. The full netns lab has been
 confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
 

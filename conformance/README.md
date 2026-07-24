@@ -120,14 +120,22 @@ signaling server, applies the expected-fail / unexpected-pass policy, tears the
 server down, and writes the markdown matrix to `conformance/matrix.md`. It exits
 nonzero on any `fail` or `unexpected-pass`.
 
+CI ([`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))
+runs the same recipes split build-once/run-many: a `build` job compiles every
+artifact (`just conformance::build-all`) and hands them to the runner jobs as a
+tarball artifact, so the `matrix` job (`just conformance::run-matrix`) and the
+`shadow-lab` job (`just conformance::run-shadow` + `classify-shadow`) execute
+prebuilt binaries without compiling — the Rust dependency tree is compiled and
+cached exactly once per run.
+
 The jco targets and their interop pair invoke `node --experimental-wasm-jspi`, so
 a JSPI-capable **Node 24+** must be on `PATH` (see the jco note above). The
 `conformance-interop` binary honours the `CONFORMANCE_NODE` environment variable
 if a specific node binary is needed. The `wasip3-guest` target and its interop
 pair invoke `wasmtime run` (v46+, installed by `scripts/setup.sh`; overridable
 via `CONFORMANCE_WASMTIME`). To run a single target in isolation, use the
-per-target recipes (`just conformance-jco-node`, `just conformance-jco-browser`,
-`just conformance-wasip3`, `just conformance-interop`).
+per-target recipes (`just conformance::jco-node`, `just conformance::jco-browser`,
+`just conformance::wasip3`, `just conformance::interop`).
 
 Within each adapter, tests run **in parallel by default** (4 at a time): every
 test's peers use fresh guest instances (or processes) and their own signaling
@@ -164,7 +172,7 @@ cargo run -p conformance-signalingd
 cargo run -p conformance-signalingd -- --host 0.0.0.0 --port 8080
 ```
 
-## netns lab (`just conformance-netns`)
+## netns lab (`just conformance::netns`)
 
 The default adapters connect their peers over the loopback interface. The **ICE
 lab** instead runs the two peers of each test over a real routed
@@ -203,14 +211,14 @@ exec`, and `turnserver` on `PATH` for the non-`lan` scenarios — both provided 
 [`scripts/setup.sh`](../scripts/setup.sh)):
 
 ```sh
-just conformance-netns lan
-just conformance-netns stun-srflx
-just conformance-netns turn-relay
-just conformance-netns nat-symmetric
+just conformance::netns lan
+just conformance::netns stun-srflx
+just conformance::netns turn-relay
+just conformance::netns nat-symmetric
 # or run both NAT scenarios (the NAT matrix) at once:
-just conformance-nat
+just conformance::nat
 # or run the lan scenario with the wasip3-guest peer:
-just conformance-netns lan wasip3-guest
+just conformance::netns lan wasip3-guest
 ```
 
 For interactive debugging, a provisioned lab can be kept up across runs: run the
@@ -238,7 +246,7 @@ traffic to its own "public" address:
   peer and ICE must fall back to a TURN relay.
 
 The NAT scenarios are part of the workstation-only netns lab (see below); run
-them with `just conformance-nat`.
+them with `just conformance::nat`.
 
 The netns lab is **workstation-only**: CI does not run it. CI's non-loopback
 coverage comes from the Shadow lab (`shadow-lab` in
@@ -247,7 +255,7 @@ which needs no root or network namespaces; the netns lab remains the
 higher-fidelity environment for exercising the STUN/TURN/NAT candidate paths
 on a real kernel.
 
-## Shadow lab (`just conformance-shadow`)
+## Shadow lab (`just conformance::shadow`)
 
 The **Shadow lab** gives the same "two peers on separate hosts over a
 non-loopback path" property as the netns lab, but runs the peers inside the
@@ -283,7 +291,7 @@ from source ([`scripts/build-shadow.sh`](../scripts/build-shadow.sh)).
 and fails if the binary is missing:
 
 ```sh
-just conformance-shadow
+just conformance::shadow
 ```
 
 Shadow does not implement UDP `SO_REUSEADDR`/`SO_REUSEPORT`, which webrtc's mDNS

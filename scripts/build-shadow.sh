@@ -3,7 +3,7 @@
 # Build the Shadow network simulator (https://github.com/shadow/shadow) from
 # source and install it under a prefix (default ~/.local: bin/shadow +
 # lib/libshadow_*.so). Shadow ships no prebuilt binary, so the conformance Shadow
-# lab (`just conformance-shadow`) needs it built.
+# lab (`just conformance::shadow`) needs it built.
 #
 # This is the single source of truth for the pinned Shadow revision and the
 # build steps. It is used by:

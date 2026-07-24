@@ -14,12 +14,12 @@
 #   - just, the command runner used for development and CI recipes
 #   - cargo-nextest, the faster test runner used by `just test`
 #   - wac, the component linker used to compose the webrtc-consumer with the
-#     wasip3 provider (`just compose-webrtc`)
+#     wasip3 provider (`just examples::compose-webrtc`)
 #   - wasmtime, the host runtime that runs the composed in-guest WebRTC
-#     integration test (`just test-webrtc-composed`)
+#     integration test (`just examples::test-webrtc-composed`)
 #   - iproute2, nftables, and coturn, used by the conformance netns lab
-#     (`just conformance-netns`; skip with SKIP_NETNS_LAB=1)
-#   - the conformance Shadow lab (`just conformance-shadow`) needs the Shadow
+#     (`just conformance::netns`; skip with SKIP_NETNS_LAB=1)
+#   - the conformance Shadow lab (`just conformance::shadow`) needs the Shadow
 #     network simulator, which this script does NOT install. Shadow ships no
 #     upstream prebuilt binary and is slow to build, so it is built once by the
 #     shadow-build workflow (scripts/build-shadow.sh) and published to the
@@ -124,7 +124,7 @@ fi
 if [ "${SKIP_NETNS_LAB:-0}" = "1" ]; then
   log "Skipping conformance netns-lab dependencies (SKIP_NETNS_LAB=1)"
 else
-  # The conformance netns lab (`just conformance-netns`, provisioned in Rust by
+  # The conformance netns lab (`just conformance::netns`, provisioned in Rust by
   # the conformance-netns executor in conformance/adapters/common;
   # README.md) provisions a routed network-namespace topology with `ip`
   # (iproute2) and `nft` (nftables) and relays through coturn's `turnserver`.
