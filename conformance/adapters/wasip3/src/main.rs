@@ -109,9 +109,10 @@ struct Cli {
 
     /// How many tests to run concurrently. Each test's peers are separate
     /// `wasmtime run` processes with their own signaling room and ephemeral
-    /// ports, so tests are independent; the default keeps the number of
-    /// concurrent processes (two per test) modest.
-    #[arg(long, default_value_t = 4)]
+    /// ports, so tests are independent; the default scales with the cores
+    /// available to this process (see
+    /// `conformance_adapter_common::default_jobs`).
+    #[arg(long, default_value_t = conformance_adapter_common::default_jobs())]
     jobs: usize,
 }
 

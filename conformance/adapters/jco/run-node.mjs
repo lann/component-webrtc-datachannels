@@ -14,6 +14,7 @@
 // `just conformance::jco-node` recipe supplies both.
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -30,6 +31,16 @@ globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
 
+// The default test concurrency: 2x the cores available to this process,
+// clamped to [2, 8]. The corpus is I/O-bound so the optimum exceeds the core
+// count (measured at 3x cores on the lighter Rust adapters), but each test
+// here runs inside a heavyweight JS runtime whose flake history is
+// load-induced timeouts, so the multiplier stays conservative: the previously
+// proven load (4) on 2-core CI runners, scaling up on larger machines.
+function defaultJobs() {
+  return Math.min(8, Math.max(2, 2 * availableParallelism()));
+}
+
 const { values } = parseArgs({
   options: {
     generated: { type: "string", default: join(ADAPTER_DIR, "generated") },
@@ -45,8 +56,8 @@ const { values } = parseArgs({
     },
     only: { type: "string", multiple: true, default: [] },
     // How many tests to run concurrently (each test's peers use their own
-    // signaling room, so tests are independent).
-    jobs: { type: "string", default: "4" },
+    // signaling room, so tests are independent); defaults to defaultJobs().
+    jobs: { type: "string" },
     // Single-instance interop mode: run exactly one guest instance for one
     // `--test`/`--role`/`--room` against an already-running `--server`, printing
     // the raw `test-result` (`{ "tag": ... }`) as JSON to stdout. Used by the
@@ -165,7 +176,7 @@ async function main() {
       base,
       newInstance,
       only: values.only,
-      jobs: Number(values.jobs),
+      jobs: values.jobs ? Number(values.jobs) : defaultJobs(),
       log: (msg) => process.stderr.write(msg),
     });
 

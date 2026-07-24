@@ -26,6 +26,7 @@
 // so the browser makes only same-origin requests and no CORS handling is needed.
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { availableParallelism } from "node:os";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,16 @@ import { chromium } from "playwright-core";
 
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
+
+// The default test concurrency: 2x the cores available to this process,
+// clamped to [2, 8]. The corpus is I/O-bound so the optimum exceeds the core
+// count (measured at 3x cores on the lighter Rust adapters), but each test
+// here runs inside a heavyweight JS runtime whose flake history is
+// load-induced timeouts, so the multiplier stays conservative: the previously
+// proven load (4) on 2-core CI runners, scaling up on larger machines.
+function defaultJobs() {
+  return Math.min(8, Math.max(2, 2 * availableParallelism()));
+}
 
 const { values } = parseArgs({
   options: {
@@ -48,8 +59,8 @@ const { values } = parseArgs({
     },
     only: { type: "string", multiple: true, default: [] },
     // How many tests to run concurrently (each test's peers use their own
-    // signaling room, so tests are independent).
-    jobs: { type: "string", default: "4" },
+    // signaling room, so tests are independent); defaults to defaultJobs().
+    jobs: { type: "string" },
     // Base URL of an already-running signaling server. When omitted, this
     // adapter spawns its own `conformance-signalingd`.
     server: { type: "string" },
@@ -359,7 +370,7 @@ async function main() {
       return;
     }
 
-    results = await page.evaluate(runInPage, { base, only: values.only, jobs: Number(values.jobs) });
+    results = await page.evaluate(runInPage, { base, only: values.only, jobs: values.jobs ? Number(values.jobs) : defaultJobs() });
   } finally {
     await browser.close();
     server.close();

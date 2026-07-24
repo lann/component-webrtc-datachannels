@@ -202,7 +202,8 @@ async function runTest(newInstance, base, testId, roomSeq) {
  *   factory producing a fresh guest instance
  * @param {string[]} [opts.only] run only these test ids (empty => all)
  * @param {number} [opts.jobs] how many tests to run concurrently; each test's
- *   peers use their own signaling room, so tests are independent
+ *   peers use their own signaling room, so tests are independent. The
+ *   launchers (run-node.mjs / run-browser.mjs) pass a core-scaled default
  * @param {(msg: string) => void} [opts.log] progress logger
  * @returns {Promise<Array<{ test_id: string, status: string, detail?: string }>>}
  */

@@ -142,8 +142,9 @@ struct Cli {
 
     /// How many tests to run concurrently. Each test's peers use their own
     /// signaling room and ephemeral ports, so tests are independent; the
-    /// default keeps the loopback handshakes lightly loaded.
-    #[arg(long, default_value_t = 4)]
+    /// default scales with the cores available to this process (see
+    /// `conformance_adapter_common::default_jobs`).
+    #[arg(long, default_value_t = conformance_adapter_common::default_jobs())]
     jobs: usize,
 }
 
