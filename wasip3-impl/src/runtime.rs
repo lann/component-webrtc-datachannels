@@ -309,7 +309,7 @@ impl Runtime {
 
     /// A cheap handle the exported resources use to nudge the pump after they
     /// mutate the core.
-    pub fn waker(&self) -> mpsc::UnboundedSender<()> {
+    pub fn pump_nudge(&self) -> mpsc::UnboundedSender<()> {
         self.wake_tx.clone()
     }
 

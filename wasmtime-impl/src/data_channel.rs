@@ -23,7 +23,6 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, Result};
 use futures::channel::mpsc::{self, UnboundedReceiver};
 use futures::channel::oneshot;
 use futures::future::Shared;
@@ -32,22 +31,17 @@ use futures::{FutureExt, StreamExt, TryFutureExt};
 use webrtc::data_channel::{DataChannel as WebrtcDataChannel, DataChannelEvent};
 
 use crate::error::{WebrtcError, WebrtcResult};
-use webrtc::peer_connection::{
-    PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
-    RTCIceServer, RTCIceTransportPolicy, SettingEngine,
-};
-use webrtc::runtime::default_runtime;
 
 /// A single inbound data-channel message together with its kind.
 ///
 /// WebRTC distinguishes binary from text (UTF-8) messages; the host preserves
 /// that distinction so `receive` can surface the correct `message` variant.
 #[derive(Clone, Debug)]
-pub struct InboundMessage {
+pub(crate) struct InboundMessage {
     /// Whether the message was sent as text (UTF-8) rather than binary.
-    pub is_string: bool,
+    pub(crate) is_string: bool,
     /// The raw message payload.
-    pub data: Vec<u8>,
+    pub(crate) data: Vec<u8>,
 }
 
 /// The default bound on inbound payload bytes buffered per channel while
@@ -69,7 +63,7 @@ pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
 /// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set to
 /// a positive integer, else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`].
-pub fn max_inbound_buffer_bytes() -> usize {
+pub(crate) fn max_inbound_buffer_bytes() -> usize {
     static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *LIMIT.get_or_init(|| {
         std::env::var(MAX_INBOUND_BUFFER_ENV)
@@ -84,7 +78,7 @@ pub fn max_inbound_buffer_bytes() -> usize {
 /// reserves capacity for each inbound message) and its readers (which release
 /// it as messages are consumed).
 #[derive(Debug)]
-pub struct InboundBudget {
+pub(crate) struct InboundBudget {
     /// The bound on buffered payload bytes.
     limit: usize,
     /// Payload bytes currently buffered and not yet consumed by a reader.
@@ -107,7 +101,7 @@ impl InboundBudget {
     /// Reserve `len` buffered bytes. Returns `false` — latching the overflow —
     /// if the reservation would exceed the bound or an overflow was already
     /// latched.
-    pub fn reserve(&self, len: usize) -> bool {
+    pub(crate) fn reserve(&self, len: usize) -> bool {
         if self.overflowed.load(Ordering::SeqCst) {
             return false;
         }
@@ -120,33 +114,33 @@ impl InboundBudget {
     }
 
     /// Release `len` buffered bytes after a reader consumed a message.
-    pub fn release(&self, len: usize) {
+    pub(crate) fn release(&self, len: usize) {
         self.buffered.fetch_sub(len, Ordering::SeqCst);
     }
 
     /// Whether an inbound message overflowed the buffer bound.
-    pub fn overflowed(&self) -> bool {
+    pub(crate) fn overflowed(&self) -> bool {
         self.overflowed.load(Ordering::SeqCst)
     }
 }
 
 /// A channel's inbound-message queue: the receiving half of the pump's message
 /// stream plus the shared [`InboundBudget`] its consumption releases.
-pub struct InboundQueue {
+pub(crate) struct InboundQueue {
     rx: UnboundedReceiver<InboundMessage>,
     budget: Arc<InboundBudget>,
 }
 
 impl InboundQueue {
     /// Build a queue over a raw receiver and its budget.
-    pub fn new(rx: UnboundedReceiver<InboundMessage>, budget: Arc<InboundBudget>) -> Self {
+    pub(crate) fn new(rx: UnboundedReceiver<InboundMessage>, budget: Arc<InboundBudget>) -> Self {
         Self { rx, budget }
     }
 
     /// The next buffered message, or `None` once the pump has stopped (the
     /// channel closed or its inbound buffer overflowed) and the backlog is
     /// drained. Releases the message's bytes from the budget.
-    pub async fn next(&mut self) -> Option<InboundMessage> {
+    pub(crate) async fn next(&mut self) -> Option<InboundMessage> {
         let message = self.rx.next().await?;
         self.budget.release(message.data.len());
         Some(message)
@@ -155,7 +149,7 @@ impl InboundQueue {
     /// Whether the channel's inbound buffer overflowed. When `true`, the queue
     /// ends after the pre-overflow backlog and readers should surface
     /// `error.receive-buffer-overflow` rather than `closed`.
-    pub fn overflowed(&self) -> bool {
+    pub(crate) fn overflowed(&self) -> bool {
         self.budget.overflowed()
     }
 }
@@ -164,18 +158,18 @@ impl InboundQueue {
 /// and its shared inbound-message receiver. Cheaply cloneable so it can be the
 /// resolved value of the shared wiring future.
 #[derive(Clone)]
-pub struct Wired {
+pub(crate) struct Wired {
     /// The open `webrtc-rs` data channel.
-    pub channel: Arc<dyn WebrtcDataChannel>,
+    pub(crate) channel: Arc<dyn WebrtcDataChannel>,
     /// Inbound messages, delivered one per `receive` call. Behind an async mutex
     /// so concurrent receivers serialize and each takes the next message.
-    pub incoming: Arc<AsyncMutex<InboundQueue>>,
+    pub(crate) incoming: Arc<AsyncMutex<InboundQueue>>,
 }
 
 /// A future resolving to a channel's wired transport parts (or a wiring
 /// [`WebrtcError`]), shared so every awaiting async method observes the same
 /// outcome.
-pub type WiredFuture = Shared<Pin<Box<dyn Future<Output = WebrtcResult<Wired>> + Send>>>;
+pub(crate) type WiredFuture = Shared<Pin<Box<dyn Future<Output = WebrtcResult<Wired>> + Send>>>;
 
 /// The receiving half of a connection-close signal, shared by every data
 /// channel a `peer-connection` resource owns.
@@ -187,33 +181,19 @@ pub type WiredFuture = Shared<Pin<Box<dyn Future<Output = WebrtcResult<Wired>> +
 /// observes it — pending `receive`s resolve with `error.closed` and later
 /// `send`s fail with it.
 #[derive(Clone)]
-pub struct CloseSignal {
+pub(crate) struct CloseSignal {
     flag: Arc<AtomicBool>,
     fired: Shared<oneshot::Receiver<()>>,
 }
 
 impl CloseSignal {
-    /// A signal that never fires, for channels not owned by a
-    /// `peer-connection` resource (the echo/manual demo hosts close their
-    /// connections through `Drop` instead).
-    pub fn inert() -> Self {
-        let (tx, rx) = oneshot::channel();
-        // Leak the sender so the receiver stays pending forever rather than
-        // resolving to a cancellation error.
-        std::mem::forget(tx);
-        Self {
-            flag: Arc::new(AtomicBool::new(false)),
-            fired: rx.shared(),
-        }
-    }
-
     /// Whether the owning connection has closed.
-    pub fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.flag.load(Ordering::SeqCst)
     }
 
     /// A future resolving once the owning connection closes.
-    pub fn fired(&self) -> Shared<oneshot::Receiver<()>> {
+    pub(crate) fn fired(&self) -> Shared<oneshot::Receiver<()>> {
         self.fired.clone()
     }
 }
@@ -222,14 +202,14 @@ impl CloseSignal {
 /// `peer-connection`. Cloneable so both the resource's `close` and the
 /// connection-state handler can fire it. Idempotent.
 #[derive(Clone)]
-pub struct CloseTrigger {
+pub(crate) struct CloseTrigger {
     flag: Arc<AtomicBool>,
     tx: Arc<Mutex<Option<oneshot::Sender<()>>>>,
 }
 
 impl CloseTrigger {
     /// Mark the connection closed and wake every waiter.
-    pub fn fire(&self) {
+    pub(crate) fn fire(&self) {
         self.flag.store(true, Ordering::SeqCst);
         if let Some(tx) = self.tx.lock().unwrap().take() {
             let _ = tx.send(());
@@ -238,7 +218,7 @@ impl CloseTrigger {
 }
 
 /// Create a connected [`CloseTrigger`]/[`CloseSignal`] pair.
-pub fn close_signal() -> (CloseTrigger, CloseSignal) {
+pub(crate) fn close_signal() -> (CloseTrigger, CloseSignal) {
     let (tx, rx) = oneshot::channel();
     let flag = Arc::new(AtomicBool::new(false));
     (
@@ -254,12 +234,12 @@ pub fn close_signal() -> (CloseTrigger, CloseSignal) {
 }
 
 /// The open signal and inbound-message stream produced by a channel's pump task.
-pub struct ChannelPump {
+pub(crate) struct ChannelPump {
     /// Inbound messages drained from the channel, in arrival order, bounded by
     /// the configured [`max_inbound_buffer_bytes`] bound.
-    pub incoming: InboundQueue,
+    pub(crate) incoming: InboundQueue,
     /// Resolves once the channel reports `open`.
-    pub open: oneshot::Receiver<()>,
+    pub(crate) open: oneshot::Receiver<()>,
 }
 
 /// Spawn the per-channel pump task that drives a `webrtc` 0.20 data channel.
@@ -274,7 +254,7 @@ pub struct ChannelPump {
 /// would exceed it latches the overflow on the shared [`InboundBudget`], closes
 /// the channel, and discards that and any later messages; readers drain the
 /// pre-overflow backlog and then surface `error.receive-buffer-overflow`.
-pub fn spawn_channel_pump(channel: Arc<dyn WebrtcDataChannel>) -> ChannelPump {
+pub(crate) fn spawn_channel_pump(channel: Arc<dyn WebrtcDataChannel>) -> ChannelPump {
     let (in_tx, in_rx) = mpsc::unbounded::<InboundMessage>();
     let (open_tx, open_rx) = oneshot::channel::<()>();
     let budget = Arc::new(InboundBudget::default());
@@ -314,7 +294,7 @@ pub fn spawn_channel_pump(channel: Arc<dyn WebrtcDataChannel>) -> ChannelPump {
 /// Drive an open (or soon-to-open) channel into an existing wiring `oneshot`,
 /// fulfilling it with the channel's transport parts once it opens, or
 /// [`WebrtcError::Closed`] if it closes first.
-pub fn spawn_channel_wiring(
+pub(crate) fn spawn_channel_wiring(
     channel: Arc<dyn WebrtcDataChannel>,
     wire_tx: oneshot::Sender<WebrtcResult<Wired>>,
 ) {
@@ -336,7 +316,7 @@ pub fn spawn_channel_wiring(
 /// with the channel's transport parts once it opens, or [`WebrtcError::Closed`]
 /// if it closes first. Used by the `peer-connection` resource's deferred and
 /// remote-opened channel paths.
-pub fn wire_open_channel(channel: Arc<dyn WebrtcDataChannel>) -> WiredFuture {
+pub(crate) fn wire_open_channel(channel: Arc<dyn WebrtcDataChannel>) -> WiredFuture {
     let (wire_tx, wired) = wiring_channel();
     spawn_channel_wiring(channel, wire_tx);
     wired
@@ -396,7 +376,7 @@ impl DataChannel {
 
     /// A clone of the shared wiring future, so an async method can await the
     /// channel's transport parts without holding the store borrow.
-    pub fn wired(&self) -> WiredFuture {
+    pub(crate) fn wired(&self) -> WiredFuture {
         self.wired.clone()
     }
 
@@ -406,7 +386,7 @@ impl DataChannel {
     /// stream) and `false` for every later caller. On the first call it also
     /// wakes any pending `receive` calls so they can fail with
     /// `receiving-via-stream` before `receive-via-stream` returns.
-    pub fn begin_stream_receiving(&self) -> bool {
+    pub(crate) fn begin_stream_receiving(&self) -> bool {
         let mut guard = self.stream_started_tx.lock().unwrap();
         match guard.take() {
             Some(tx) => {
@@ -419,18 +399,18 @@ impl DataChannel {
     }
 
     /// Whether `receive-via-stream` has claimed the inbound messages.
-    pub fn is_stream_receiving(&self) -> bool {
+    pub(crate) fn is_stream_receiving(&self) -> bool {
         self.stream_receiving.load(Ordering::SeqCst)
     }
 
     /// A future that resolves once `receive-via-stream` is called, used to wake
     /// pending `receive` calls.
-    pub fn stream_started(&self) -> Shared<oneshot::Receiver<()>> {
+    pub(crate) fn stream_started(&self) -> Shared<oneshot::Receiver<()>> {
         self.stream_started.clone()
     }
 
     /// The owning connection's close signal.
-    pub fn conn_closed(&self) -> CloseSignal {
+    pub(crate) fn conn_closed(&self) -> CloseSignal {
         self.conn_closed.clone()
     }
 }
@@ -439,189 +419,9 @@ impl DataChannel {
 /// wiring task fulfills. If the sender is dropped (the peer connection was torn
 /// down before the channel opened), the future resolves to
 /// [`WebrtcError::Closed`].
-pub fn wiring_channel() -> (oneshot::Sender<WebrtcResult<Wired>>, WiredFuture) {
+pub(crate) fn wiring_channel() -> (oneshot::Sender<WebrtcResult<Wired>>, WiredFuture) {
     let (tx, rx) = oneshot::channel::<WebrtcResult<Wired>>();
     let fut: Pin<Box<dyn Future<Output = WebrtcResult<Wired>> + Send>> =
         Box::pin(rx.unwrap_or_else(|_| Err(WebrtcError::Closed)));
     (tx, fut.shared())
-}
-
-/// Close each peer connection so `webrtc-rs` tears down its ICE/DTLS/SCTP
-/// background tasks.
-///
-/// [`PeerConnection::close`] is async, so the closes are spawned onto the
-/// current Tokio runtime when one is running; dropping the `Arc`s alone would
-/// leak those tasks for the process lifetime. Called from `Drop` impls, where
-/// awaiting is not possible. When no runtime is running (a resource dropped
-/// after the host's runtime has shut down), the closes run to completion on a
-/// dedicated thread with its own small runtime, so cleanup does not silently
-/// depend on the caller's runtime still being alive.
-pub fn close_peer_connections(connections: Vec<Arc<dyn PeerConnection>>) {
-    if connections.is_empty() {
-        return;
-    }
-    let close_all = async move {
-        for connection in connections {
-            let _ = connection.close().await;
-        }
-    };
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(close_all);
-    } else {
-        std::thread::spawn(move || {
-            if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                runtime.block_on(close_all);
-            }
-        });
-    }
-}
-
-/// Create a peer connection with an explicit [`WebrtcIceConfig`](crate::WebrtcIceConfig)
-/// controlling the UDP bind addresses, STUN/TURN servers, and ICE transport
-/// policy, giving the caller a chance to customize the `webrtc-rs`
-/// [`SettingEngine`] first and supplying the event `handler` that receives its
-/// callbacks (the `webrtc` 0.20 builder takes a single
-/// [`PeerConnectionEventHandler`] at build time). A default config binds IPv4
-/// loopback; the conformance netns lab (see `conformance/README.md`) overrides
-/// it per scenario to exercise host, server-reflexive, and relay candidate
-/// paths.
-pub(crate) async fn new_peer_connection_with(
-    configure: impl FnOnce(&mut SettingEngine),
-    ice: crate::WebrtcIceConfig,
-    handler: Arc<dyn PeerConnectionEventHandler>,
-) -> Result<Arc<dyn PeerConnection>> {
-    let mut setting = SettingEngine::default();
-    configure(&mut setting);
-    let runtime = default_runtime().ok_or_else(|| anyhow!("no async runtime found"))?;
-
-    // Bind the scenario-specified interface addresses, or the crate default.
-    let udp_addrs: Vec<String> = if ice.udp_addrs.is_empty() {
-        vec!["127.0.0.1:0".to_string()]
-    } else {
-        ice.udp_addrs.clone()
-    };
-
-    // Assemble the RTCConfiguration from the scenario's STUN/TURN servers and
-    // transport policy. An all-default config yields an empty builder, matching
-    // the previous `RTCConfigurationBuilder::new().build()`.
-    let mut config = RTCConfigurationBuilder::new();
-    if !ice.ice_servers.is_empty() {
-        config = config.with_ice_servers(
-            ice.ice_servers
-                .iter()
-                .map(|server| RTCIceServer {
-                    urls: server.urls.clone(),
-                    username: server.username.clone(),
-                    credential: server.credential.clone(),
-                })
-                .collect(),
-        );
-    }
-    if ice.relay_only {
-        config = config.with_ice_transport_policy(RTCIceTransportPolicy::Relay);
-    }
-
-    let pc = PeerConnectionBuilder::new()
-        .with_configuration(config.build())
-        .with_setting_engine(setting)
-        .with_handler(handler)
-        .with_runtime(runtime)
-        .with_udp_addrs(udp_addrs)
-        .build()
-        .await?;
-    Ok(Arc::new(pc))
-}
-
-/// A [`PeerConnectionEventHandler`] built from optional callback senders.
-///
-/// The `webrtc` 0.20 builder takes one handler at build time; this type lets the
-/// crate and its demo/test hosts assemble a handler from just the callbacks they
-/// need without each defining a bespoke trait impl.
-#[allow(clippy::type_complexity)]
-#[derive(Default)]
-pub struct CallbackHandler {
-    on_ice_candidate:
-        Option<Box<dyn Fn(webrtc::peer_connection::RTCPeerConnectionIceEvent) + Send + Sync>>,
-    on_gathering_complete: Option<Box<dyn Fn() + Send + Sync>>,
-    on_data_channel: Option<Box<dyn Fn(Arc<dyn WebrtcDataChannel>) + Send + Sync>>,
-    on_connection_state:
-        Option<Box<dyn Fn(webrtc::peer_connection::RTCPeerConnectionState) + Send + Sync>>,
-}
-
-impl CallbackHandler {
-    /// A handler with no callbacks registered.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Register a callback for each locally gathered ICE candidate.
-    pub fn on_ice_candidate(
-        mut self,
-        f: impl Fn(webrtc::peer_connection::RTCPeerConnectionIceEvent) + Send + Sync + 'static,
-    ) -> Self {
-        self.on_ice_candidate = Some(Box::new(f));
-        self
-    }
-
-    /// Register a callback fired once ICE gathering reaches `complete`.
-    pub fn on_gathering_complete(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
-        self.on_gathering_complete = Some(Box::new(f));
-        self
-    }
-
-    /// Register a callback for each data channel opened by the remote peer.
-    pub fn on_data_channel(
-        mut self,
-        f: impl Fn(Arc<dyn WebrtcDataChannel>) + Send + Sync + 'static,
-    ) -> Self {
-        self.on_data_channel = Some(Box::new(f));
-        self
-    }
-
-    /// Register a callback for peer-connection state transitions.
-    pub fn on_connection_state(
-        mut self,
-        f: impl Fn(webrtc::peer_connection::RTCPeerConnectionState) + Send + Sync + 'static,
-    ) -> Self {
-        self.on_connection_state = Some(Box::new(f));
-        self
-    }
-}
-
-#[async_trait::async_trait]
-impl PeerConnectionEventHandler for CallbackHandler {
-    async fn on_ice_candidate(&self, event: webrtc::peer_connection::RTCPeerConnectionIceEvent) {
-        if let Some(f) = &self.on_ice_candidate {
-            f(event);
-        }
-    }
-
-    async fn on_ice_gathering_state_change(
-        &self,
-        state: webrtc::peer_connection::RTCIceGatheringState,
-    ) {
-        if state == webrtc::peer_connection::RTCIceGatheringState::Complete {
-            if let Some(f) = &self.on_gathering_complete {
-                f();
-            }
-        }
-    }
-
-    async fn on_data_channel(&self, data_channel: Arc<dyn WebrtcDataChannel>) {
-        if let Some(f) = &self.on_data_channel {
-            f(data_channel);
-        }
-    }
-
-    async fn on_connection_state_change(
-        &self,
-        state: webrtc::peer_connection::RTCPeerConnectionState,
-    ) {
-        if let Some(f) = &self.on_connection_state {
-            f(state);
-        }
-    }
 }

@@ -575,65 +575,32 @@ impl HostPeerConnection for WasiWebrtcCtxView<'_> {
     }
 }
 
-/// A [`StreamProducer`] yielding one `ice-candidate` per locally gathered ICE
-/// candidate; the stream ends once gathering completes.
-struct LocalCandidateStream {
-    /// The candidate receiver, or `None` if `local-ice-candidates` was already
-    /// claimed (in which case the stream is empty).
-    rx: Option<UnboundedReceiver<LocalCandidate>>,
+/// A [`StreamProducer`] draining a take-once receiver: each received value is
+/// converted (with store access, so a converter may allocate resources) and
+/// yielded one at a time. The stream ends when the sender side hangs up. A
+/// `None` receiver — the stream was already claimed — is empty.
+///
+/// Backs both `peer-connection.local-ice-candidates` (converting
+/// [`LocalCandidate`] into the WIT `ice-candidate` record) and
+/// `peer-connection.incoming-data-channels` (pushing each [`DataChannel`] into
+/// the resource table).
+struct TakenReceiverStream<T, F> {
+    /// The receiver, or `None` if the stream was already claimed (in which
+    /// case this stream is empty).
+    rx: Option<UnboundedReceiver<T>>,
+    /// Converts a received value into the produced item.
+    convert: F,
 }
 
-impl<D: Send + 'static> StreamProducer<D> for LocalCandidateStream {
-    type Item = IceCandidate;
-    type Buffer = Option<IceCandidate>;
-
-    fn poll_produce<'a>(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        _store: StoreContextMut<'a, D>,
-        mut destination: Destination<'a, Self::Item, Self::Buffer>,
-        finish: bool,
-    ) -> Poll<Result<StreamResult>> {
-        let this = self.get_mut(); // safe: LocalCandidateStream is Unpin
-        let Some(rx) = this.rx.as_mut() else {
-            return Poll::Ready(Ok(StreamResult::Dropped));
-        };
-        match rx.poll_next_unpin(cx) {
-            Poll::Pending => {
-                if finish {
-                    Poll::Ready(Ok(StreamResult::Cancelled))
-                } else {
-                    Poll::Pending
-                }
-            }
-            Poll::Ready(None) => {
-                this.rx = None;
-                Poll::Ready(Ok(StreamResult::Dropped))
-            }
-            Poll::Ready(Some(candidate)) => {
-                destination.set_buffer(Some(IceCandidate {
-                    candidate: candidate.candidate,
-                    sdp_mid: candidate.sdp_mid,
-                    sdp_mline_index: candidate.sdp_mline_index,
-                }));
-                Poll::Ready(Ok(StreamResult::Completed))
-            }
-        }
-    }
-}
-
-/// A [`StreamProducer`] yielding one `data-channel` resource per channel opened
-/// by the remote peer. Producing a resource needs table access, so it is bound
-/// on [`WasiWebrtcView`].
-struct IncomingChannelStream {
-    /// The incoming-channel receiver, or `None` if `incoming-data-channels` was
-    /// already claimed (in which case the stream is empty).
-    rx: Option<UnboundedReceiver<DataChannel>>,
-}
-
-impl<D: WasiWebrtcView + 'static> StreamProducer<D> for IncomingChannelStream {
-    type Item = Resource<DataChannel>;
-    type Buffer = Option<Resource<DataChannel>>;
+impl<D, T, U, F> StreamProducer<D> for TakenReceiverStream<T, F>
+where
+    D: Send + 'static,
+    T: Send + 'static,
+    U: Send + Sync + 'static,
+    F: for<'a> FnMut(&mut StoreContextMut<'a, D>, T) -> Result<U> + Send + Unpin + 'static,
+{
+    type Item = U;
+    type Buffer = Option<U>;
 
     fn poll_produce<'a>(
         self: Pin<&mut Self>,
@@ -642,7 +609,7 @@ impl<D: WasiWebrtcView + 'static> StreamProducer<D> for IncomingChannelStream {
         mut destination: Destination<'a, Self::Item, Self::Buffer>,
         finish: bool,
     ) -> Poll<Result<StreamResult>> {
-        let this = self.get_mut(); // safe: IncomingChannelStream is Unpin
+        let this = self.get_mut(); // safe: TakenReceiverStream is Unpin
         let Some(rx) = this.rx.as_mut() else {
             return Poll::Ready(Ok(StreamResult::Dropped));
         };
@@ -658,9 +625,9 @@ impl<D: WasiWebrtcView + 'static> StreamProducer<D> for IncomingChannelStream {
                 this.rx = None;
                 Poll::Ready(Ok(StreamResult::Dropped))
             }
-            Poll::Ready(Some(channel)) => {
-                let resource = store.data_mut().webrtc().table.push(channel)?;
-                destination.set_buffer(Some(resource));
+            Poll::Ready(Some(value)) => {
+                let item = (this.convert)(&mut store, value)?;
+                destination.set_buffer(Some(item));
                 Poll::Ready(Ok(StreamResult::Completed))
             }
         }
@@ -673,7 +640,20 @@ impl<T: WasiWebrtcView + 'static> HostPeerConnectionWithStore<T> for WasiWebrtc 
         self_: Resource<PeerConnection>,
     ) -> Result<StreamReader<Resource<DataChannel>>> {
         let rx = access.get().table.get(&self_)?.take_incoming_channels();
-        StreamReader::new(access, IncomingChannelStream { rx })
+        StreamReader::new(
+            access,
+            TakenReceiverStream {
+                rx,
+                convert: |store: &mut StoreContextMut<'_, T>, channel| {
+                    store
+                        .data_mut()
+                        .webrtc()
+                        .table
+                        .push(channel)
+                        .map_err(Into::into)
+                },
+            },
+        )
     }
 
     fn local_ice_candidates(
@@ -681,7 +661,19 @@ impl<T: WasiWebrtcView + 'static> HostPeerConnectionWithStore<T> for WasiWebrtc 
         self_: Resource<PeerConnection>,
     ) -> Result<StreamReader<IceCandidate>> {
         let rx = access.get().table.get(&self_)?.take_local_candidates();
-        StreamReader::new(access, LocalCandidateStream { rx })
+        StreamReader::new(
+            access,
+            TakenReceiverStream {
+                rx,
+                convert: |_store: &mut StoreContextMut<'_, T>, candidate: LocalCandidate| {
+                    Ok(IceCandidate {
+                        candidate: candidate.candidate,
+                        sdp_mid: candidate.sdp_mid,
+                        sdp_mline_index: candidate.sdp_mline_index,
+                    })
+                },
+            },
+        )
     }
 
     async fn create_offer(

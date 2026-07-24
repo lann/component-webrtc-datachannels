@@ -35,9 +35,17 @@ use webrtc::peer_connection::{
     RTCSessionDescription,
 };
 
+use anyhow::{anyhow, Result};
+use webrtc::data_channel::DataChannel as WebrtcDataChannel;
+use webrtc::peer_connection::{
+    PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder, RTCIceServer,
+    RTCIceTransportPolicy, SettingEngine,
+};
+use webrtc::runtime::default_runtime;
+
 use crate::data_channel::{
-    close_peer_connections, close_signal, new_peer_connection_with, spawn_channel_wiring,
-    wire_open_channel, wiring_channel, CallbackHandler, CloseSignal, CloseTrigger,
+    close_signal, spawn_channel_wiring, wire_open_channel, wiring_channel, CloseSignal,
+    CloseTrigger,
 };
 use crate::error::{WebrtcError, WebrtcResult};
 use crate::{DataChannel, SettingEngineHook};
@@ -172,15 +180,9 @@ impl PeerConnection {
     /// Construct a peer connection, spawning the `webrtc-rs` build task.
     ///
     /// `hook` customizes the [`SettingEngine`](webrtc::peer_connection::SettingEngine)
-    /// before the connection is built. Requires a running Tokio runtime; without
-    /// one every subsequent operation fails.
-    pub fn new(hook: Option<SettingEngineHook>) -> Self {
-        Self::new_with(hook, crate::WebrtcIceConfig::default())
-    }
-
-    /// Like [`PeerConnection::new`] but with an explicit
-    /// [`WebrtcIceConfig`](crate::WebrtcIceConfig) applied when the connection is
-    /// built (bind addresses, STUN/TURN servers, relay-only policy).
+    /// before the connection is built, and `ice` (bind addresses, STUN/TURN
+    /// servers, relay-only policy) is applied when it is built. Requires a
+    /// running Tokio runtime; without one every subsequent operation fails.
     pub fn new_with(hook: Option<SettingEngineHook>, ice: crate::WebrtcIceConfig) -> Self {
         let (built_tx, built_rx) =
             oneshot::channel::<WebrtcResult<Arc<dyn WebrtcPeerConnection>>>();
@@ -530,4 +532,184 @@ fn to_rtc_description(kind: SdpKind, sdp: String) -> WebrtcResult<RTCSessionDesc
         SdpKind::Pranswer => RTCSessionDescription::pranswer(sdp),
     };
     result.map_err(WebrtcError::invalid_signaling)
+}
+
+/// Close each peer connection so `webrtc-rs` tears down its ICE/DTLS/SCTP
+/// background tasks.
+///
+/// [`WebrtcPeerConnection::close`] is async, so the closes are spawned onto the
+/// current Tokio runtime when one is running; dropping the `Arc`s alone would
+/// leak those tasks for the process lifetime. Called from `Drop` impls, where
+/// awaiting is not possible. When no runtime is running (a resource dropped
+/// after the host's runtime has shut down), the closes run to completion on a
+/// dedicated thread with its own small runtime, so cleanup does not silently
+/// depend on the caller's runtime still being alive.
+fn close_peer_connections(connections: Vec<Arc<dyn WebrtcPeerConnection>>) {
+    if connections.is_empty() {
+        return;
+    }
+    let close_all = async move {
+        for connection in connections {
+            let _ = connection.close().await;
+        }
+    };
+    if let Ok(handle) = Handle::try_current() {
+        handle.spawn(close_all);
+    } else {
+        std::thread::spawn(move || {
+            if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                runtime.block_on(close_all);
+            }
+        });
+    }
+}
+
+/// Create a peer connection with an explicit [`WebrtcIceConfig`](crate::WebrtcIceConfig)
+/// controlling the UDP bind addresses, STUN/TURN servers, and ICE transport
+/// policy, giving the caller a chance to customize the `webrtc-rs`
+/// [`SettingEngine`] first and supplying the event `handler` that receives its
+/// callbacks (the `webrtc` 0.20 builder takes a single
+/// [`PeerConnectionEventHandler`] at build time). A default config binds IPv4
+/// loopback; the conformance netns lab (see `conformance/README.md`) overrides
+/// it per scenario to exercise host, server-reflexive, and relay candidate
+/// paths.
+async fn new_peer_connection_with(
+    configure: impl FnOnce(&mut SettingEngine),
+    ice: crate::WebrtcIceConfig,
+    handler: Arc<dyn PeerConnectionEventHandler>,
+) -> Result<Arc<dyn WebrtcPeerConnection>> {
+    let mut setting = SettingEngine::default();
+    configure(&mut setting);
+    let runtime = default_runtime().ok_or_else(|| anyhow!("no async runtime found"))?;
+
+    // Bind the scenario-specified interface addresses, or the crate default.
+    let udp_addrs: Vec<String> = if ice.udp_addrs.is_empty() {
+        vec!["127.0.0.1:0".to_string()]
+    } else {
+        ice.udp_addrs.clone()
+    };
+
+    // Assemble the RTCConfiguration from the scenario's STUN/TURN servers and
+    // transport policy. An all-default config yields an empty builder, matching
+    // the previous `RTCConfigurationBuilder::new().build()`.
+    let mut config = RTCConfigurationBuilder::new();
+    if !ice.ice_servers.is_empty() {
+        config = config.with_ice_servers(
+            ice.ice_servers
+                .iter()
+                .map(|server| RTCIceServer {
+                    urls: server.urls.clone(),
+                    username: server.username.clone(),
+                    credential: server.credential.clone(),
+                })
+                .collect(),
+        );
+    }
+    if ice.relay_only {
+        config = config.with_ice_transport_policy(RTCIceTransportPolicy::Relay);
+    }
+
+    let pc = PeerConnectionBuilder::new()
+        .with_configuration(config.build())
+        .with_setting_engine(setting)
+        .with_handler(handler)
+        .with_runtime(runtime)
+        .with_udp_addrs(udp_addrs)
+        .build()
+        .await?;
+    Ok(Arc::new(pc))
+}
+
+/// A [`PeerConnectionEventHandler`] built from optional callback senders.
+///
+/// The `webrtc` 0.20 builder takes one handler at build time; this type
+/// assembles a handler from just the callbacks the connection needs without a
+/// bespoke trait impl per call site.
+#[allow(clippy::type_complexity)]
+#[derive(Default)]
+struct CallbackHandler {
+    on_ice_candidate:
+        Option<Box<dyn Fn(webrtc::peer_connection::RTCPeerConnectionIceEvent) + Send + Sync>>,
+    on_gathering_complete: Option<Box<dyn Fn() + Send + Sync>>,
+    on_data_channel: Option<Box<dyn Fn(Arc<dyn WebrtcDataChannel>) + Send + Sync>>,
+    on_connection_state:
+        Option<Box<dyn Fn(webrtc::peer_connection::RTCPeerConnectionState) + Send + Sync>>,
+}
+
+impl CallbackHandler {
+    /// A handler with no callbacks registered.
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a callback for each locally gathered ICE candidate.
+    fn on_ice_candidate(
+        mut self,
+        f: impl Fn(webrtc::peer_connection::RTCPeerConnectionIceEvent) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_ice_candidate = Some(Box::new(f));
+        self
+    }
+
+    /// Register a callback fired once ICE gathering reaches `complete`.
+    fn on_gathering_complete(mut self, f: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_gathering_complete = Some(Box::new(f));
+        self
+    }
+
+    /// Register a callback for each data channel opened by the remote peer.
+    fn on_data_channel(
+        mut self,
+        f: impl Fn(Arc<dyn WebrtcDataChannel>) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_data_channel = Some(Box::new(f));
+        self
+    }
+
+    /// Register a callback for peer-connection state transitions.
+    fn on_connection_state(
+        mut self,
+        f: impl Fn(webrtc::peer_connection::RTCPeerConnectionState) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_connection_state = Some(Box::new(f));
+        self
+    }
+}
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for CallbackHandler {
+    async fn on_ice_candidate(&self, event: webrtc::peer_connection::RTCPeerConnectionIceEvent) {
+        if let Some(f) = &self.on_ice_candidate {
+            f(event);
+        }
+    }
+
+    async fn on_ice_gathering_state_change(
+        &self,
+        state: webrtc::peer_connection::RTCIceGatheringState,
+    ) {
+        if state == webrtc::peer_connection::RTCIceGatheringState::Complete {
+            if let Some(f) = &self.on_gathering_complete {
+                f();
+            }
+        }
+    }
+
+    async fn on_data_channel(&self, data_channel: Arc<dyn WebrtcDataChannel>) {
+        if let Some(f) = &self.on_data_channel {
+            f(data_channel);
+        }
+    }
+
+    async fn on_connection_state_change(
+        &self,
+        state: webrtc::peer_connection::RTCPeerConnectionState,
+    ) {
+        if let Some(f) = &self.on_connection_state {
+            f(state);
+        }
+    }
 }

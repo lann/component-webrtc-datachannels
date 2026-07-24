@@ -237,40 +237,6 @@ same close path.
   through four codebases is today's discovery path. Add one table (AGENTS.md
   or a doc both it and README link).
 
-### E11. Dead code and module-placement sweep
-
-- `wasmtime-impl`: `CloseSignal::inert()` has zero callers and a doc
-  describing a demo-host architecture that no longer exists
-  (`wasmtime-impl/src/data_channel.rs:199`); `PeerConnection::new` is
-  uncalled (`peer_connection.rs:177-179`); the `wit-component` and tokio
-  `rt-multi-thread` dev-deps are vestigial (`Cargo.toml` — the crate has no
-  in-crate tests; add a doc pointer to where its tests actually live: the
-  conformance suite and `examples/wasmtime-demo/tests`). The private
-  `data_channel` module exposes ~a dozen `pub` items reachable by nobody —
-  make them `pub(crate)` — and hosts the peer-connection factory
-  (`new_peer_connection_with`, `close_peer_connections`, `CallbackHandler`,
-  `data_channel.rs:459-627`) that `peer_connection.rs` then imports from it;
-  move those into `peer_connection.rs` so the file names tell the truth. The
-  duplicated stream-producer state machines (`LocalCandidateStream` /
-  `IncomingChannelStream`, `wasmtime-impl/src/host.rs:580-668`) differ only
-  in item conversion — one generic producer removes ~50 lines. Crate docs
-  should also show the downstream `bindgen!` `with:` resource-mapping block
-  that every consumer currently hand-copies
-  (`examples/wasmtime-demo/src/main.rs` ≡
-  `conformance/adapters/wasmtime/src/lib.rs:32-40`).
-- `wasip3-impl`: `SansIoPeer::offerer` is dead (`wasip3-impl/src/peer.rs:118-134`);
-  the `lib.rs:28` re-exports are unreachable on a cdylib-only crate; rename
-  `SansIoPeer::answerer()` (it constructs *every* peer, including offerers —
-  `provider.rs:352`) to `new()`, and `Runtime::waker()`
-  (`runtime.rs:313`, an `mpsc::UnboundedSender<()>`) to something like
-  `pump_nudge()` so it stops colliding with `std::task::Waker` used in the
-  same file. `dead_shared()` (`provider.rs:716-728`) builds a full
-  DTLS-cert-bearing peer just to serve as an always-closed placeholder and
-  does it with `.expect("answerer construction is infallible")` — in exactly
-  the error-recovery path that exists because construction *can* fail
-  (`peer.rs:310-315` propagates two fallible `rtc` calls); make the peer
-  optional (`Option<SansIoPeer>` or a small enum) instead.
-
 ## F. Conformance suite
 
 ### F5. Interop barrier sentinel can be lost to the winner's immediate close
@@ -445,6 +411,5 @@ drifted rename fails fast with a clear message.
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
-   (F11), config consolidation + env-var index (E10), dead-code/module sweep
-   (E11), example de-duplication (D3), the remaining conformance-matrix gaps
-   (A3).
+   (F11), config consolidation + env-var index (E10), example de-duplication
+   (D3), the remaining conformance-matrix gaps (A3).
