@@ -137,10 +137,19 @@ via `CONFORMANCE_WASMTIME`). To run a single target in isolation, use the
 per-target recipes (`just conformance::jco-node`, `just conformance::jco-browser`,
 `just conformance::wasip3`, `just conformance::interop`).
 
-Within each adapter, tests run **in parallel by default** (4 at a time): every
-test's peers use fresh guest instances (or processes) and their own signaling
-room, so tests are independent. Each adapter exposes a `--jobs` flag to change
-the concurrency (`--jobs 1` restores serial execution). Every test attempt is
+Within each adapter, tests run **in parallel by default**: every test's peers
+use fresh guest instances (or processes) and their own signaling room, so
+tests are independent. The default concurrency scales with the cores available
+to the adapter process (respecting its CPU affinity mask): 3 × cores clamped
+to [2, 12] for the wasmtime and wasip3-guest adapters, and a more conservative
+2 × cores clamped to [2, 8] for the jco targets and the interop pairs, whose
+per-test Node/Chromium startup runs on the hang-guard clock. The multipliers
+come from measuring the loopback corpus pinned to 2 CPUs (matching hosted CI
+runners): wall time improves steeply up to 3 × cores — where it sits within
+~2s of the corpus's intrinsic floor, the fixed-length `error-timed-out`
+probe — and higher values buy <2s while adding contention. Each adapter
+exposes a `--jobs` flag to override the default (`--jobs 1` restores serial
+execution). Every test attempt is
 individually bounded by a hang guard (90s, one attempt — no retries; generous
 because peer-process startup and 4-wide CI contention are on the clock, while
 the hosts' shorter `wait-connected` timeouts classify genuine connection

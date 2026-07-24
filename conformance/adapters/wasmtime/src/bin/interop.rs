@@ -264,9 +264,11 @@ struct Cli {
 
     /// How many tests to run concurrently within a pair direction. Each test's
     /// peers use their own signaling room and ephemeral ports, so tests are
-    /// independent; the default keeps the number of concurrent peer processes
-    /// modest.
-    #[arg(long, default_value_t = 4)]
+    /// independent; the default scales conservatively with the available cores
+    /// because every attempt boots a peer runtime (Node or headless Chromium)
+    /// on the hang-guard clock (see
+    /// `conformance_adapter_common::default_jobs_process_heavy`).
+    #[arg(long, default_value_t = conformance_adapter_common::default_jobs_process_heavy())]
     jobs: usize,
 }
 

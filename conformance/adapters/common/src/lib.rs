@@ -410,6 +410,38 @@ pub async fn run_test(
 
 // ----- corpus runner ----------------------------------------------------------
 
+/// The default `--jobs` for adapters whose tests run in-process or as light
+/// subprocesses (the wasmtime and wasip3-guest loopback adapters):
+/// 3 × the cores available to this process, clamped to [2, 12].
+///
+/// The corpus is I/O-bound (handshakes, timers, and the fixed-length
+/// `error-timed-out` probe dominate wall time), so the optimum exceeds the
+/// core count. Measured on the loopback corpus pinned to 2 CPUs (`taskset`,
+/// matching hosted CI runners): wall time improves steeply up to 3 × cores
+/// and is within ~2s of the corpus's intrinsic floor there, while higher
+/// values buy <2s more and add contention that has previously produced
+/// hang-guard timeouts. `available_parallelism` respects the process's CPU
+/// affinity mask, so `taskset`/cgroup-limited environments size accordingly.
+pub fn default_jobs() -> usize {
+    scaled_jobs(3, 12)
+}
+
+/// The default `--jobs` for adapters that boot a heavyweight process per test
+/// attempt (a JSPI Node runtime or a headless Chromium for the jco targets and
+/// the interop pairs): 2 × the available cores, clamped to [2, 8].
+///
+/// These per-test runtimes put startup on the hang-guard clock, and their
+/// flake history is load-induced timeouts — so they keep the previously
+/// proven load on 2-core CI (4) while still scaling with larger machines.
+pub fn default_jobs_process_heavy() -> usize {
+    scaled_jobs(2, 8)
+}
+
+fn scaled_jobs(multiplier: usize, max: usize) -> usize {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (cores * multiplier).clamp(2, max)
+}
+
 /// Run `tests` (each via `run`, filtered by `only` when non-empty) concurrently,
 /// bounded by `jobs`, logging each result as it lands.
 ///
