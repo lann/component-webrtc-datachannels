@@ -3,11 +3,12 @@
 // instance through `rendezvous.js` (fetch against the local signaling server)
 // and `webrtc.js` (@roamhq/wrtc).
 //
-// Run two of these — an offerer and an answerer — against the same room:
+// Run two of these — an offerer and an answerer — against the same room
+// (or run both at once with `just examples::demo-node-remote`):
 //
 //   cargo run -p conformance-signalingd &   # or any server speaking the protocol
-//   node src/run-remote.mjs --role answerer --server http://127.0.0.1:8080 --room demo &
-//   node src/run-remote.mjs --role offerer  --server http://127.0.0.1:8080 --room demo
+//   npm run start-remote -- --role answerer --server http://127.0.0.1:8080 --room demo &
+//   npm run start-remote -- --role offerer  --server http://127.0.0.1:8080 --room demo
 import { parseArgs } from "node:util";
 
 import { remote } from "../generated-remote/echo-remote.js";

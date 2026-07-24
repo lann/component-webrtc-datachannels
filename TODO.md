@@ -433,25 +433,6 @@ conformance one is asserted by the suite. Fix: generate the flags from the
 WIT (or adopt blanket async in both pipelines), and add a CI check so a
 drifted rename fails fast with a clear message.
 
-### G4. jco-impl's npm entry points are broken or misleading
-
-- `npm start` and `npm test` run `node src/run.mjs` **without**
-  `--experimental-wasm-jspi` (`jco-impl/package.json:10-11`; same for
-  `start-remote`, line 15), which fails on Node 24 for a component
-  transpiled with `--async-mode jspi`; the justfile recipes knowingly bypass
-  them to add the flag (`examples/justfile:23, 89, 92`), and
-  `jco-impl/src/run.mjs:4`'s header recommends the broken `npm start` path.
-  Add the flag via the scripts (`node --experimental-wasm-jspi …` or
-  `NODE_OPTIONS`), and fix the header.
-- `test` ≡ `start` — `npm test` runs the demo, not a test; the actual test is
-  `test:browser`. Rename or repoint.
-- `build:component` / `build:component-remote` (`jco-impl/package.json`) are
-  npm scripts that `cd` out of the package to run cargo + wasm-tools,
-  wrapped by `just examples::build-component` (`examples/justfile:10-11`)
-  which `cd`s *into* jco-impl to run them — three layers where top and
-  bottom are both non-JS. Move the cargo/wasm-tools invocations directly
-  into the justfile recipes and keep npm scripts JS-only.
-
 ## Suggested priority
 
 1. Conformance-suite integrity: de-duplicate the jco host and port the
@@ -461,8 +442,8 @@ drifted rename fails fast with a clear message.
 2. Implementation contract gaps found incidentally: the wasip3 provider trio
    (E7), Wasmtime close-observation and `send-via-stream` buffering (E8),
    jco failed-state termination (E9).
-3. Cheap hygiene, high leverage for humans and agents: transpile-flag check
-   (G1), broken npm scripts (G4).
+3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
+   check (G1).
 4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
    (F11), config consolidation + env-var index (E10), dead-code/module sweep
    (E11), example de-duplication (D3), the remaining conformance-matrix gaps

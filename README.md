@@ -131,9 +131,9 @@ Node exposes on 24+ behind `--experimental-wasm-jspi`.
 ```sh
 cd jco-impl
 npm install
-npm run build:component   # build the guest .wasm component
-npm run transpile         # jco transpile with JSPI async + host maps
-node --experimental-wasm-jspi src/run.mjs
+just examples::build-component   # build the guest .wasm component (cargo + wasm-tools)
+npm run transpile                # jco transpile with JSPI async + host maps
+npm start
 ```
 
 The host builds two `RTCPeerConnection`s with `@roamhq/wrtc`, performs a real
@@ -146,7 +146,7 @@ transpiled component through that browser path and is what runs in CI:
 
 ```sh
 cd jco-impl
-npm run build:component && npm run transpile
+just examples::build-component && npm run transpile
 npm run test:browser     # headless Chrome (137+); set CHROME_PATH to override
 ```
 
@@ -158,5 +158,5 @@ cargo run --release --bin wasmtime-webrtc-host -- ../echo-demo/build/echo-demo.c
 #                                                                                       ^msg count ^msg size
 ```
 
-(Run the Node `build:component` step once first, or build the component
+(Run `just examples::build-component` once first, or build the component
 manually, to produce the `.wasm`.)
