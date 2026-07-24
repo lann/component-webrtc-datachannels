@@ -289,3 +289,16 @@ netns scenario="lan" peer_kind="wasmtime": build-guest build-signalingd \
 # privileges/tools as `netns`.
 [doc("Run the netns NAT matrix: stun-srflx then nat-symmetric (workstation-only)")]
 nat: (netns "stun-srflx") (netns "nat-symmetric")
+
+# Run the Shadow compatibility spike for the non-wasm reference peer
+# (conformance/adapters/reference): staged checks that Node + libwebrtc
+# (@roamhq/wrtc) run under the Shadow simulator, ending with the reference peer
+# against the native wasmtime conformance-peer over a simulated network path.
+# Shadow is x86-64-only, so this needs an x86-64 Linux machine with `shadow` on
+# PATH (scripts/download-shadow.sh or scripts/build-shadow.sh). Stages and
+# failure isolation are documented in shadow-spike.sh.
+[doc("Run the reference-peer Shadow compatibility spike (x86-64 only)")]
+shadow-reference-spike: build-guest build-signalingd \
+    (bin "conformance-adapter-wasmtime" "conformance-peer")
+    cd conformance/adapters/reference && npm install --no-fund --no-audit
+    conformance/adapters/reference/shadow-spike.sh
