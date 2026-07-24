@@ -195,6 +195,13 @@ pub struct Shared {
     pub peer: SansIoPeer,
     /// Every channel seen so far, in open order.
     pub channels: Vec<Channel>,
+    /// The ids of channels created locally via `create-data-channel`, so
+    /// `incoming-data-channels` can deliver only remote-created channels.
+    pub local_channels: Vec<RTCDataChannelId>,
+    /// Channels whose inbound messages `receive-via-stream` claimed before the
+    /// pump observed their open (they are not yet in `channels`); the claim is
+    /// applied to the tracked channel when its open event drains.
+    pub pending_stream_claims: Vec<RTCDataChannelId>,
     /// Whether the connection reached `connected`.
     pub connected: bool,
     /// Whether the connection failed.
@@ -286,6 +293,8 @@ impl Runtime {
         let shared = Rc::new(RefCell::new(Shared {
             peer,
             channels: Vec::new(),
+            local_channels: Vec::new(),
+            pending_stream_claims: Vec::new(),
             connected: false,
             failed: false,
             closed: false,
@@ -442,6 +451,10 @@ fn apply_event(s: &mut Shared, event: PeerEvent) {
                 // tracked already-closed, so `send`/`receive` on its handle
                 // observe `closed` rather than a spuriously usable channel.
                 channel.closed = s.closed || s.failed;
+                // Apply a `receive-via-stream` claim made while the channel was
+                // still opening (see `Shared::pending_stream_claims`).
+                channel.stream_claimed = s.pending_stream_claims.contains(&id);
+                s.pending_stream_claims.retain(|&claimed| claimed != id);
                 s.channels.push(channel);
             }
         }

@@ -31,6 +31,15 @@ struct Component;
 
 impl wasip3::exports::cli::run::Guest for Component {
     async fn run() -> Result<(), ()> {
+        // `--list-tests` prints the guest's corpus (one JSON array of test ids)
+        // and exits, so the orchestrator can verify its registered test list
+        // against the guest's list-tests export before running the corpus.
+        if std::env::args().skip(1).any(|arg| arg == "--list-tests") {
+            let ids: Vec<String> = runner::list_tests().into_iter().map(|t| t.id).collect();
+            println!("{}", serde_json::json!(ids));
+            return Ok(());
+        }
+
         let (test_id, config) = match parse_args(std::env::args().skip(1)) {
             Ok(parsed) => parsed,
             Err(usage) => {
@@ -39,6 +48,7 @@ impl wasip3::exports::cli::run::Guest for Component {
             }
         };
 
+        let role = config.role;
         let result = runner::run_test(test_id, config).await;
         let json = match &result {
             TestResult::Pass => serde_json::json!({ "tag": "pass" }),
@@ -50,8 +60,12 @@ impl wasip3::exports::cli::run::Guest for Component {
         // export, so its detached pump flushes the final sends (the barrier
         // sentinel, the SCTP/DTLS close handshake) only while this task
         // yields. Returning immediately would end the process and cut the
-        // pump off mid-teardown, stalling the remote peer.
-        wasip3::clocks::monotonic_clock::wait_for(CLOSE_GRACE_NANOS).await;
+        // pump off mid-teardown, stalling the remote peer. A `both`-role run
+        // holds both peers in this one process, so there is no remote peer to
+        // protect and the grace is skipped.
+        if !matches!(role, Role::Both) {
+            wasip3::clocks::monotonic_clock::wait_for(CLOSE_GRACE_NANOS).await;
+        }
         Ok(())
     }
 }

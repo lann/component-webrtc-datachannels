@@ -84,7 +84,6 @@ fn mailbox_error(detail: impl std::fmt::Display) -> Error {
 /// The outcome of one mailbox HTTP round trip.
 struct HttpOutcome {
     status: http::StatusCode,
-    done: bool,
     body: Vec<u8>,
 }
 
@@ -135,10 +134,6 @@ async fn round_trip(
         .map_err(|e| mailbox_error(format!("response-headers: {e:?}")))?;
 
     let status = response.status();
-    let done = response
-        .headers()
-        .get("x-done")
-        .is_some_and(|v| v.as_bytes() == b"true");
     let body = response
         .into_body()
         .collect()
@@ -146,7 +141,7 @@ async fn round_trip(
         .map_err(|e| mailbox_error(format!("collect: {e:?}")))?
         .to_bytes()
         .to_vec();
-    Ok(HttpOutcome { status, done, body })
+    Ok(HttpOutcome { status, body })
 }
 
 impl GuestSession for MailboxSession {
@@ -175,7 +170,7 @@ impl GuestSession for MailboxSession {
     async fn recv(&self) -> Result<Option<Vec<u8>>, Error> {
         let seq = self.recv_seq.get();
         let url = format!(
-            "{}/rooms/{}/{}?seq={}",
+            "{}/rooms/{}/{}?seq={}&wait=10000",
             self.base,
             self.room,
             self.peer_role(),
@@ -194,7 +189,9 @@ impl GuestSession for MailboxSession {
                     self.recv_seq.set(seq + 1);
                     return Ok(Some(outcome.body));
                 }
-                204 if outcome.done => return Ok(None),
+                // The peer marked its mailbox done at or before this seq (the
+                // protocol's only 204).
+                204 => return Ok(None),
                 304 => continue,
                 other => return Err(mailbox_error(format!("fetch returned {other}"))),
             }

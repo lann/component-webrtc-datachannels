@@ -230,7 +230,7 @@ async fn run_corpus(
         conformance_adapter_common::run_corpus(TWO_PEER_TESTS, &cli.only, cli.jobs, |test_id| {
             run_ice_test(cli, scenario, topology, peer_command, test_id, &room_seq)
         })
-        .await;
+        .await?;
 
     let report = AdapterReport {
         target: target.clone(),
@@ -267,12 +267,12 @@ async fn run_ice_test(
         let signaling_url = format!("http://{}:{}", topology.signaling_addr, port);
 
         // Bring up this attempt's signaling server; killed when `_signaling`
-        // drops at the end of the attempt.
-        let _signaling = start_signaling(cli, topology, port).context("signaling server")?;
-        // Let it bind before the peers connect: the mailbox clients retry a
-        // long-poll that finds no blob, but treat a failed HTTP round trip
-        // (server not yet listening) as fatal.
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // drops at the end of the attempt. `start_signaling` waits for the
+        // server's readiness line, so the peers never race the bind (the
+        // mailbox clients treat a failed HTTP round trip as fatal).
+        let _signaling = start_signaling(cli, topology, port)
+            .await
+            .context("signaling server")?;
 
         let offerer = run_peer(
             scenario,
@@ -340,14 +340,18 @@ async fn run_peer(
 }
 
 /// Start a signaling server on `port` inside the signaling namespace.
-fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard> {
-    let child = std::process::Command::new("ip")
+/// Spawn this attempt's signaling server inside the signaling namespace and
+/// wait — bounded — for the `listening on <url>` line it prints once bound
+/// (kept stable by `conformance-signalingd` for exactly this kind of
+/// consumer). Its stdout is forwarded to stderr so diagnostics stay visible.
+async fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard> {
+    let mut child = std::process::Command::new("ip")
         .args(["netns", "exec", &topology.signaling_ns])
         .arg(&cli.signaling_bin)
         .args(["--host", &topology.signaling_addr])
         .args(["--port", &port.to_string()])
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .with_context(|| {
@@ -356,6 +360,25 @@ fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard
                 cli.signaling_bin.display(),
                 topology.signaling_ns
             )
+        })?;
+
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            eprintln!("[signalingd] {line}");
+            if line.contains("listening on") {
+                let _ = ready_tx.send(());
+            }
+        }
+    });
+    tokio::task::spawn_blocking(move || ready_rx.recv_timeout(Duration::from_secs(10)))
+        .await
+        .context("joining signaling readiness wait")?
+        .map_err(|_| {
+            anyhow::anyhow!("signaling server did not report `listening on` within 10s")
         })?;
     Ok(Guard { child: Some(child) })
 }

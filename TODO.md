@@ -108,43 +108,6 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E7. wasip3-impl provider: three related channel-plumbing bugs
-
-All in `wasip3-impl/src/provider.rs`:
-
-1. **Incoming channels get a disconnected pump waker.** `pump_incoming`
-   receives the real waker but binds it as `_waker` and never uses it
-   (`provider.rs:581`); each remote-initiated `DataChannel` handle is built
-   with `waker: mpsc::unbounded().0` — a sender whose receiver is dropped
-   immediately (`provider.rs:613`). `send()` on such a channel nudges nobody,
-   so the outbound flush waits for the 50 ms tick (`runtime.rs:40`) or an
-   unrelated inbound datagram: up to 50 ms latency per send on answered
-   channels. Fix: pass the real waker through (the parameter is already
-   threaded; this looks like unfinished wiring). The dead-peer placeholder at
-   `provider.rs:370` is a separate, legitimate use of a disconnected sender.
-2. **`receive-via-stream` claims are lost while a channel is still
-   `Opening`.** The claim logic (`provider.rs:282-306`) does three separate
-   `channel_mut` lookups; when the channel is not yet tracked (state
-   `Opening` — the normal case right after `create-data-channel`), the
-   `stream_claimed` check is skipped *and* the flag is never set, yet a pump
-   is spawned and a stream returned. A second call in that window spawns a
-   competing pump (messages split arbitrarily between two streams), and later
-   `receive()` calls never get `error.receiving-via-stream` — violating the
-   once-only contract (`wit/webrtc.wit:237-241`). Fix: record pending claims
-   somewhere that survives the channel not being tracked yet (e.g. a
-   pending-claims set on `Shared`, applied in `apply_event`'s `ChannelOpen`).
-3. **`local_channel` is a single overwritten `Option`.**
-   `create_data_channel` overwrites it (`provider.rs:322, 399`) and
-   `incoming_data_channels` snapshots it once when the stream is taken
-   (`provider.rs:425`, filtered at `provider.rs:598`). With two locally
-   created channels the first is no longer filtered and is delivered on
-   `incoming-data-channels` as if remote-opened; taking the stream before
-   creating a channel mis-delivers the local channel too
-   (`wit/webrtc.wit:269-270` promises "channels opened by the remote peer").
-   Fix: a live set of locally created ids on `Shared`, consulted by
-   `pump_incoming`. The shipped consumer creates-then-takes with one channel,
-   which is what masks all three bugs today.
-
 ### E8. Wasmtime host: close observation and `send-via-stream` buffering
 
 All in `wasmtime-impl/src/host.rs` unless noted:
@@ -182,29 +145,6 @@ All in `wasmtime-impl/src/host.rs` unless noted:
    reserve the queue slot synchronously in the callback and fill the label
    afterwards (the `DataChannel::deferred` machinery already supports
    deferred wiring).
-
-### E9. jco host: a failed connection never terminates per the WIT
-
-In `jco-impl/webrtc.js` and its conformance twin
-`conformance/adapters/jco/webrtc.js` (see F6):
-
-- `#requireOpen` checks `#closed || connectionState === "closed"` but not
-  `"failed"` (`jco-impl/webrtc.js:331-335`), so methods on a
-  failed-but-not-closed connection proceed into the browser API and surface
-  as `other`/`invalid-signaling` instead of `error.closed`
-  (`wit/webrtc.wit:258-260`: the connection is terminally over when "closed
-  by `close` **or has failed**").
-- The `#channels` incoming stream is ended only from `close()`
-  (`jco-impl/webrtc.js:512`); a connection *failure* never ends it, so a
-  guest reading `incoming-data-channels` after a failure hangs forever —
-  the WIT promises the stream "ends when the connection closes or fails"
-  (`wit/webrtc.wit:269-270`). Same for the candidates stream.
-
-`waitConnected` already detects `failed` (`jco-impl/webrtc.js:461-464`), so
-the fix is to hoist that detection into a `connectionstatechange` handler
-that latches failure and runs the same stream-ending/`#closeHooks` teardown
-as `close()`. Coordinate with F5's deferred-teardown work, which touches the
-same close path.
 
 ### E10. Consolidate scattered configuration; publish the env-var contract
 
@@ -257,128 +197,37 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
-### F6. The jco host exists as two ~720-line copies that have already diverged
+### F7. Unify the remaining corpus mirrors (plan + params)
 
-`jco-impl/webrtc.js` (749 lines) and `conformance/adapters/jco/webrtc.js`
-(721 lines) are ~713 lines byte-identical — the full `DataChannelOptions` /
-`DataChannel` / `PeerConnection` surface plus all stream/queue helpers is
-copy-pasted, and nothing (test, script, or CI) checks the copies agree.
-The real divergences today:
+The test ids are now cross-checked (each full-corpus adapter verifies its
+registered list against the guest's `list-tests` export before running; the
+runner rejects results for unregistered ids and warns on missing cells in
+report-backed rows; empty `--only` selections are errors). Still mirrored by
+hand with no consistency check:
 
-- `[Symbol.dispose]` hooks on `DataChannel` and `PeerConnection`
-  (`jco-impl/webrtc.js:225-252, 497-509`) exist **only** in the jco-impl copy,
-  so the copy the conformance suite actually executes leaks `@roamhq/wrtc`
-  native ICE/DTLS/SCTP resources when a guest drops a resource without
-  calling `close`.
-- The only intended difference is one error-message path
-  (`resolveRTCPeerConnection`: "run `npm install` in jco-impl" vs "…in
-  conformance/adapters/jco").
+- the orchestration plan (guest `run()` dispatch, `plan_for()` in
+  `conformance/adapters/common/src/lib.rs`, `IN_PROCESS` in
+  `conformance/adapters/jco/driver.js`), and
+- the message params (`params_for()` / `paramsFor()`, plus re-defaulted
+  `4`/`256` in the peer binaries).
 
-Fix: extract a single shared module both locations import (parameterize or
-genericize the install-hint message), porting the `Symbol.dispose` hooks so
-both users get them. If a copy must remain for some
-structural reason, add a CI `diff` check with the allowlisted divergence.
-Splitting the WIT-stream interop shims (`streamItems` / `collectByteStream` /
-`toByteChunk` / `bytesToStream`, `jco-impl/webrtc.js:579-671`) and the
-generic stream helpers into their own module(s) first would make the shared
-core smaller and the split natural.
+The natural next step is to make `list-tests` authoritative for these too:
+extend `test-descriptor` with the plan (and params), have the adapters
+consume it, and delete the mirrors. Separately, `Missing` in a full-corpus
+loopback row could be escalated from a warning to a failure once expected
+coverage is expressible per target (the interop pairs legitimately run the
+two-peer subset).
 
-### F7. Wire up `list-tests` and make missing results loud
+### F11. jco in-process test timeouts cannot cancel the timed-out attempt
 
-The corpus is hand-mirrored with no consistency check: test ids exist in
-**four** places (`conformance/tests.toml`; guest `corpus()` at
-`conformance/guest/src/lib.rs:82-123`; `TESTS` at
-`conformance/adapters/common/src/lib.rs:164-194`; `TESTS` at
-`conformance/adapters/jco/driver.js:17-47`), the orchestration plan in three
-(guest `run()` dispatch `guest/src/lib.rs:126-154`; `plan_for()`
-`common/src/lib.rs:229-251`; `IN_PROCESS` `driver.js:50-69`), and message
-params in two plus stray re-defaults (`params_for()`
-`common/src/lib.rs:254-267`; `paramsFor()` `driver.js:80-97`; re-defaulted
-`4`/`256` in `conformance/adapters/wasmtime/src/bin/peer.rs:61-66` and
-`conformance/adapters/wasip3/driver/src/lib.rs:77-78`). The guest exports
-`list-tests` *specifically* so the registry can be cross-checked
-(`conformance/wit/world.wit:63-65`, `tests.toml:4`,
-`conformance/runner/src/registry.rs:5-7`) — and nothing ever calls it
-(`registry.get()` is `#[allow(dead_code)]` "used by later phases",
-`registry.rs:64-69`).
-
-The failure mode is silent: a test missing from one mirror renders as
-`Missing`, which is neutral (`conformance/runner/src/results.rs:62-79`
-renders "—"; the runner exits 0), and a typo'd `--only` filter selects
-nothing and passes (`common/src/lib.rs:433`; only the Shadow executor rejects
-an empty selection, `common/src/bin/shadow.rs:184-186`).
-
-Fix: (1) have each adapter call `list-tests` once and diff ids/tags against
-its local list (or have the runner require every adapter report to cover
-every registered test not excused by the manifest — a target that reported
-fewer results than the registry should at minimum warn, better fail);
-(2) reject empty `--only` selections in `run_corpus` like the Shadow executor
-does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
-params only.
-
-### F8. `patch-generated.mjs` fails open against a floating jco version
-
-`conformance/adapters/jco/patch-generated.mjs:21-28` regex-rewrites jco's
-*generated* borrow-cleanup loop to work around an upstream codegen bug. Two
-fragilities: the regex is whitespace/shape-sensitive against generated code,
-and when it matches nothing the script prints `rewrote 0 borrow-cleanup
-loop(s)` and **exits 0** — the failure then resurfaces at runtime as a
-cryptic `TypeError … Symbol(handle)` far from the cause. Meanwhile both
-package.jsons float jco (`"^1.19.0"`: `conformance/adapters/jco/package.json:13`,
-`jco-impl/package.json`) across the 1.25.2 the bug was observed on, so a
-routine `npm install`/`npm update` can move the resolved codegen out from
-under the regex with no signal.
-
-Fix: pin jco to an exact version in both package.jsons, and make the patch
-fail (or at minimum warn loudly) when the match count is 0 while a
-known-affected jco version is installed, so "fixed upstream" and "regex no
-longer matches the still-broken output" are distinguishable. Document in the
-script header why the `jco-impl` pipeline does not need the patch (different
-async mode) so the asymmetry is a decision, not a mystery.
-
-### F9. Three mailbox clients have drifted; the browser proxy strips protocol headers
-
-The signaling protocol has three independent client implementations with
-diverging behavior:
-
-- wasmtime host: `wait=10000`, treats **any** 204 as done, ignores `x-done`
-  (`conformance/adapters/wasmtime/src/lib.rs:219-249`).
-- jco host: `wait=10000`, ignores `x-done`
-  (`conformance/adapters/jco/signaling.js:72-98`).
-- wasip3 client: sends **no** `wait` param (falls back to the server's 25 s
-  default long-poll) and *requires* `x-done` on 204
-  (`conformance/adapters/wasip3/mailbox/src/lib.rs:140, 176-202`).
-
-Separately, the browser adapter's same-origin proxy forwards only
-`content-type` (`conformance/adapters/jco/run-browser.mjs:163, 171-173`),
-dropping `x-seq`/`x-done` — harmless today only because the jco client
-ignores headers; any header-dependent client routed through it would fail
-mid-handshake confusingly.
-
-Fix: pick one interpretation (per `conformance/signaling/PROTOCOL.md`), align
-the three clients on `wait` and `x-done` handling, and forward all upstream
-headers in the proxy (one line).
-
-### F11. Replace fixed sleeps with the health-poll pattern the suite already has
-
-- `conformance/adapters/common/src/bin/netns.rs:274` sleeps a fixed 500 ms
-  per test for signaling-server bind; `conformance/adapters/common/src/lab.rs:611`
-  sleeps 1 s for coturn. The suite already has the right pattern
-  (`waitHealthy` polling `/healthz`, `conformance/adapters/jco/run-node.mjs:99-121`;
-  `conformance/runner/src/signaling.rs:55-72`) — use it: the mailbox clients
-  do not retry transport failures, so slow server startup fails the test.
-- The wasip3 driver lingers `CLOSE_GRACE_NANOS` = 500 ms on **every**
-  invocation (`conformance/adapters/wasip3/driver/src/lib.rs:54, 61`),
-  including in-process `both`-role tests with no remote peer to protect —
-  ~20 s of pure sleep per corpus run. Skip the grace for `both`-role runs,
-  or replace the guess with an ack over the channel.
-- The jco in-process `withTimeout` (`conformance/adapters/jco/driver.js:127-133`)
-  abandons but cannot cancel the timed-out promise; wedged guest instances,
-  their `RTCPeerConnection`s and pending long-polls keep running in the same
-  process for the rest of the corpus and can degrade later tests with no
-  attribution. Consider per-test child processes for jco-node (matching the
-  other adapters' isolation) or at least noting the contamination risk in the
-  result document.
+The jco adapters' `withTimeout` (`conformance/adapters/jco/driver.js`)
+abandons but cannot cancel a timed-out test attempt: the wedged guest
+instances, their `RTCPeerConnection`s and pending long-polls keep running in
+the same Node/browser process for the rest of the corpus and can degrade
+later tests with no attribution (contrast: the wasmtime adapter drops the
+`Store`, and subprocess peers are `kill_on_drop`). Consider per-test child
+processes for jco-node (matching the other adapters' isolation) or at least
+noting the contamination risk in the result document.
 
 ## G. Development environment / CI
 
@@ -401,15 +250,12 @@ drifted rename fails fast with a clear message.
 
 ## Suggested priority
 
-1. Conformance-suite integrity: de-duplicate the jco host and port the
-   dispose hooks (F6), wire `list-tests` + loud missing results (F7), make
-   `patch-generated.mjs` fail closed and pin jco (F8), the jco close-drain
-   half of the barrier race (F5).
-2. Implementation contract gaps found incidentally: the wasip3 provider trio
-   (E7), Wasmtime close-observation and `send-via-stream` buffering (E8),
-   jco failed-state termination (E9).
+1. Conformance-suite integrity: wire `list-tests` + loud missing results
+   (F7), the jco close-drain half of the barrier race (F5).
+2. Implementation contract gaps found incidentally: Wasmtime
+   close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
-   (F11), config consolidation + env-var index (E10), example de-duplication
-   (D3), the remaining conformance-matrix gaps (A3).
+4. The rest as touched: config consolidation + env-var index (E10), example
+   de-duplication (D3), jco in-process timeout isolation (F11), the
+   remaining conformance-matrix gaps (A3).

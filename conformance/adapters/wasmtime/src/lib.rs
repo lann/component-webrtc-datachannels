@@ -403,3 +403,20 @@ async fn run_instance_in_store(
         TestResult::Skipped(reason) => TestOutcome::Skipped(reason),
     })
 }
+
+/// Instantiate the guest once and return the test ids from its `list-tests`
+/// export, so an adapter can verify its registered corpus mirrors the corpus
+/// the guest actually implements (see
+/// [`verify_corpus`](conformance_adapter_common::verify_corpus)).
+pub async fn list_guest_tests(engine: &Engine, component: &Component) -> Result<Vec<String>> {
+    let mut store = new_store(engine);
+    let mut linker: Linker<Ctx> = Linker::new(engine);
+    webrtc_host::add_to_linker(&mut linker)?;
+    add_mailbox_to_linker(&mut linker)?;
+    let instance = Conformance::instantiate_async(&mut store, component, &linker).await?;
+    let descriptors = instance
+        .conformance_suite_runner()
+        .call_list_tests(&mut store)
+        .await?;
+    Ok(descriptors.into_iter().map(|d| d.id).collect())
+}

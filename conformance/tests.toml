@@ -1,7 +1,10 @@
 # Conformance test registry
 #
 # The single source of truth for which conformance tests exist. The conformance
-# guest component mirrors these ids and tags via its `list-tests` export; the
+# guest component mirrors these ids and tags via its `list-tests` export — the
+# full-corpus adapters verify their registered test lists against that export
+# before every run, and the runner rejects results for ids this file does not
+# register. The
 # target manifests (`manifests.toml`) reference the `tags` here to declare
 # whole groups unsupported and the `id`s to declare expected failures. The
 # runner plans each target's test list from this file.
