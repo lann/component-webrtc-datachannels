@@ -109,17 +109,6 @@ once a release including it ships.
 
 ## F. Examples
 
-### F1. Demos count bytes but never verify content or ordering
-
-The **conformance suite** now verifies payload content, ordering, and message
-boundaries across all targets (`conformance/guest/src/lib.rs`), so divergence
-is caught in CI. The remaining gap is demo-local: `examples/echo-demo/src/lib.rs`
-tags each message with its index but `run` only counts messages/bytes and never
-validates payloads (the Wasmtime demo does not even assert `bytes_echoed`), and
-`examples/cli-signaling/src/lib.rs` does not verify the peer message. Low
-priority now that conformance covers the property; verify in the demos too or
-leave them as pure throughput demos.
-
 ### F3. Wire up `rendezvous` end-to-end (tracking)
 
 `demo:webrtc-echo/rendezvous` (`examples/echo-demo/wit/webrtc-echo-demo.wit`) is
@@ -162,4 +151,4 @@ flags from the WIT) so a drifted rename fails fast with a clear message.
 2. Strategic build-out: wire `rendezvous` (F3) and take `wasip3`'s
    WIT-speaking component to a real network (F4).
 3. Cheap hygiene: the transpile-flag CI check (G1), the remaining
-   conformance-matrix gaps (A3), demo payload verification (F1).
+   conformance-matrix gaps (A3).

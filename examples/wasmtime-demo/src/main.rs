@@ -136,6 +136,13 @@ async fn main() -> Result<()> {
                     stats.messages_received
                 )));
             }
+            let expected_bytes = u64::from(message_count) * u64::from(message_size);
+            if stats.bytes_echoed != expected_bytes {
+                return Err(wasmtime::Error::msg(format!(
+                    "expected {expected_bytes} echoed bytes, got {}",
+                    stats.bytes_echoed
+                )));
+            }
             println!("\nOK: every message round-tripped through the WebRTC data channel.");
         }
         Err(err) => {
