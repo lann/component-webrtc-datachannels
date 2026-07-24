@@ -163,8 +163,24 @@ impl PendingOps {
 
 impl Drop for Inner {
     fn drop(&mut self) {
+        // Mirror `close()`: fire the close signal (any surviving `data-channel`
+        // resources observe `error.closed`) and defer the network teardown by
+        // the same bounded drain, so a message handed to the transport just
+        // before the resource was dropped still flushes to the wire rather
+        // than being discarded with the SCTP send queue.
+        self.close_trigger.fire();
         let pc = self.pc.lock().unwrap().take();
-        close_peer_connections(pc.into_iter().collect());
+        if pc.is_none() {
+            return;
+        }
+        if let Ok(handle) = Handle::try_current() {
+            handle.spawn(async move {
+                tokio::time::sleep(CLOSE_DRAIN).await;
+                close_peer_connections(pc.into_iter().collect());
+            });
+        } else {
+            close_peer_connections(pc.into_iter().collect());
+        }
     }
 }
 

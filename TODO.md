@@ -159,6 +159,18 @@ matching deferred-teardown there must keep the local close observation
 immediate (the `#closed` gate) *and* mark the connection's channels closed
 at once, or the delayed teardown would regress `post-close-send`.
 
+The same race also reached the Wasmtime host through a second path, now
+fixed: dropping the `peer-connection` resource (a guest returning without
+calling `close`) tore the network down immediately, skipping the
+`CLOSE_DRAIN` grace that `close()` applies — the cli-signaling round trip
+flaked (~5-10% locally) with the offerer's `receive` failing `closed`
+because the answerer's just-sent reply was discarded with the SCTP send
+queue. `Drop` now mirrors `close()` (fire the signal, defer teardown by
+the drain), and the cli-signaling host binary lingers briefly after the
+guest returns so process exit does not cut the drain short. A
+flush-aware teardown (close once the SCTP queue is empty, bounded) would
+replace both graces.
+
 ### F7. Unify the remaining corpus mirrors (plan + params)
 
 The test ids are now cross-checked (each full-corpus adapter verifies its
