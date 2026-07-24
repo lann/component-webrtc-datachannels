@@ -230,29 +230,6 @@ fewer results than the registry should at minimum warn, better fail);
 does. With the cross-check in place, the JS/Rust mirrors can shrink to plan +
 params only.
 
-### F9. Three mailbox clients have drifted; the browser proxy strips protocol headers
-
-The signaling protocol has three independent client implementations with
-diverging behavior:
-
-- wasmtime host: `wait=10000`, treats **any** 204 as done, ignores `x-done`
-  (`conformance/adapters/wasmtime/src/lib.rs:219-249`).
-- jco host: `wait=10000`, ignores `x-done`
-  (`conformance/adapters/jco/signaling.js:72-98`).
-- wasip3 client: sends **no** `wait` param (falls back to the server's 25 s
-  default long-poll) and *requires* `x-done` on 204
-  (`conformance/adapters/wasip3/mailbox/src/lib.rs:140, 176-202`).
-
-Separately, the browser adapter's same-origin proxy forwards only
-`content-type` (`conformance/adapters/jco/run-browser.mjs:163, 171-173`),
-dropping `x-seq`/`x-done` — harmless today only because the jco client
-ignores headers; any header-dependent client routed through it would fail
-mid-handshake confusingly.
-
-Fix: pick one interpretation (per `conformance/signaling/PROTOCOL.md`), align
-the three clients on `wait` and `x-done` handling, and forward all upstream
-headers in the proxy (one line).
-
 ### F11. jco in-process test timeouts cannot cancel the timed-out attempt
 
 The jco adapters' `withTimeout` (`conformance/adapters/jco/driver.js`)
@@ -291,6 +268,6 @@ drifted rename fails fast with a clear message.
    close-observation and `send-via-stream` buffering (E8).
 3. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-4. The rest as touched: mailbox-client convergence (F9), sleep→health-poll
-   (F11), config consolidation + env-var index (E10), example de-duplication
-   (D3), the remaining conformance-matrix gaps (A3).
+4. The rest as touched: config consolidation + env-var index (E10), example
+   de-duplication (D3), jco in-process timeout isolation (F11), the
+   remaining conformance-matrix gaps (A3).
