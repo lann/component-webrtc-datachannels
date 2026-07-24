@@ -77,4 +77,7 @@ try {
   result = { tag: "fail", val: String(err?.message ?? err) };
 }
 console.log(JSON.stringify(result));
-process.exit(result.tag === "pass" ? 0 : 1);
+// Report pass/fail in the result line, not the exit status (matching the
+// single-peer contract); wrtc's worker threads keep the event loop alive, so
+// exit explicitly.
+process.exit(0);

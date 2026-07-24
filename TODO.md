@@ -177,6 +177,30 @@ All in `wasmtime-impl/src/host.rs` unless noted:
   through four codebases is today's discovery path. Add one table (AGENTS.md
   or a doc both it and README link).
 
+### E12. `rtc` sender breaks ordered delivery observed by libwebrtc receivers
+
+The non-wasm reference peer (libwebrtc via `@roamhq/wrtc`) intermittently
+(~10-25% of runs over loopback) receives an `ordered: true` channel's
+messages block-rotated — e.g. indexes `8..15,0..7` or `2..7,0,1,8..15` —
+from *both* `rtc`-based senders (the Wasmtime host on `webrtc` 0.20.0-rc.4
+and the in-guest `wasip3-impl` provider, so the defect is in the shared
+sans-I/O `rtc` core, not a driver). All messages arrive in a single 0-1 ms
+burst (no retransmission gap, so no loss involved), whole contiguous blocks
+swap rather than individual messages, and loopback UDP is FIFO — so the
+sender is emitting SCTP DATA whose ordering metadata cannot restore the
+application order (a per-chunk `U`-bit or stream-sequence-number assignment
+defect). `rtc`-based *receivers* mask it (rtc <-> rtc pairs pass `ordering`
+consistently), which is why no pre-reference pair ever caught it. Reproduce
+with `conformance-interop --pair wasmtime-x-reference --only ordering` in a
+loop; the reference peer logs the received index order under
+`REF_PEER_DEBUG=1`. Until it is fixed upstream, the `ordering` test carries
+the `ordered-delivery` tag and the four affected pair directions
+(`wasmtime`/`wasip3-guest` x `reference`, both orders) declare it
+unsupported in `conformance/manifests.toml` (a flaky failure cannot be an
+`expected-fail`: it would `unexpected-pass` on green runs). File the
+upstream `webrtc-rs/rtc` issue with the repro above, and drop the manifest
+entries once a fixed pin lands.
+
 ## F. Conformance suite
 
 ### F5. Interop barrier sentinel can be lost to the winner's immediate close

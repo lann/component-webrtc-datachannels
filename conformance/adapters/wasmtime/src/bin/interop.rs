@@ -1,20 +1,33 @@
 //! Cross-runtime interop orchestrator for the conformance suite.
 //!
-//! It runs the interop pairs — `wasmtime` <-> `jco-node`, `wasmtime` <->
-//! `jco-browser`, and `wasmtime` <-> `wasip3-guest` — each in both orders. One
-//! peer is a native wasmtime guest instance (provisioned by
-//! [`conformance_adapter_wasmtime`]) and the other is driven out-of-process:
-//! the jco-node peer via `conformance/adapters/jco/run-node.mjs --interop`,
-//! the jco-browser peer via `run-browser.mjs --interop` (one headless-Chromium
-//! instance per test), and the wasip3-guest peer via `wasmtime run` over the
-//! fully composed component ([`conformance_adapter_wasip3::Wasip3Peer`]). Both
-//! peers of a pair share one in-process `conformance-signalingd` room and
-//! connect over a real WebRTC data channel, so a green result proves the two
-//! runtimes are genuinely interoperable — not merely that each passes against
-//! itself.
+//! It anchors every target against the suite's **non-wasm reference peer**
+//! (`conformance/adapters/reference`: plain Node driving `RTCPeerConnection`,
+//! libwebrtc via `@roamhq/wrtc`) in both orders — `wasmtime`, `jco-node`, and
+//! `wasip3-guest` over the full two-peer corpus, `jco-browser` over the
+//! interop-handshake smoke test (one headless-Chromium instance per test).
+//! Because the reference side runs no wasm component and no WIT bindings, a
+//! green row proves the target's wire behavior against the ecosystem-defining
+//! WebRTC stack — not merely against another instance of this repository's
+//! shared guest — and a red one implicates the target, not the pair.
+//!
+//! Two implementation-vs-implementation pairs are retained: `wasmtime` <->
+//! `wasip3-guest` (webrtc-rs and the sans-I/O `rtc` stack, the two native
+//! stacks in this repository, meeting each other) and `wasmtime` <->
+//! `jco-node` (the wasm guest crossing the host-language boundary). The
+//! `reference` self-pair validates the reference peer itself over the same
+//! corpus, backing the `reference` matrix row.
+//!
+//! One peer per side runs either as a native wasmtime guest instance
+//! (provisioned by [`conformance_adapter_wasmtime`]) or out-of-process: the
+//! jco-node peer via `conformance/adapters/jco/run-node.mjs --interop`, the
+//! jco-browser peer via `run-browser.mjs --interop`, the wasip3-guest peer via
+//! `wasmtime run` over the fully composed component
+//! ([`conformance_adapter_wasip3::Wasip3Peer`]), and the reference peer via
+//! `node peer.mjs`. Both peers of a pair share one in-process
+//! `conformance-signalingd` room and connect over a real WebRTC data channel.
 //!
 //! It writes one adapter result document per direction
-//! (`wasmtime-x-jco-node.json`, `jco-node-x-wasmtime.json`, and so on) that
+//! (`wasmtime-x-reference.json`, `reference-x-wasmtime.json`, and so on) that
 //! the conformance runner classifies against the matching manifests, exactly
 //! like a single-target adapter.
 
@@ -42,121 +55,138 @@ use conformance_adapter_wasmtime::{build_engine, make_config, run_instance, Role
 /// tripping this bound.
 const TEST_TIMEOUT: Duration = Duration::from_secs(90);
 
-/// One direction of a pair: which runtime the non-wasmtime peer runs on, which
-/// role the wasmtime peer plays (the other peer plays the opposite), and the
-/// target id the result document records.
-struct Direction {
-    target: &'static str,
-    peer: PeerKind,
-    wasmtime_role: Role,
-}
+/// The corpus subset for the browser-backed reference pairs: each test boots
+/// its own headless Chromium, so they run the flagship handshake only, keeping
+/// the per-test browser cost flat while still anchoring Chrome's stack against
+/// the reference peer across the wire.
+const HANDSHAKE_ONLY: &[&str] = &["interop-handshake"];
 
-/// The runtime driving the non-wasmtime peer of a pair.
+/// One side of a pair: the runtime driving that peer.
 #[derive(Clone, Copy)]
-enum PeerKind {
+enum Side {
+    /// An in-process native wasmtime guest instance.
+    Wasmtime,
     /// The jco-node host, via `run-node.mjs --interop`.
     JcoNode,
     /// The jco host inside headless Chromium, via `run-browser.mjs --interop`.
     JcoBrowser,
     /// The composed wasip3-guest component, via `wasmtime run`.
     Wasip3,
+    /// The non-wasm reference peer, via `node peer.mjs`.
+    Reference,
 }
 
-/// The non-wasmtime peer's role, given the wasmtime peer's role.
-fn peer_role(wasmtime_role: Role) -> &'static str {
-    match wasmtime_role {
-        Role::Offerer => "answerer",
-        Role::Answerer => "offerer",
-        Role::Both => unreachable!("interop peers always run a single role"),
-    }
+/// One result document: a pair direction (`<offerer>-x-<answerer>`) or the
+/// reference self-pair, with the corpus subset it runs.
+struct Direction {
+    target: &'static str,
+    offerer: Side,
+    answerer: Side,
+    tests: &'static [&'static str],
 }
 
-/// Run the jco-node peer for one test/role/room via `run-node.mjs --interop`,
-/// parsing its single-line JSON `test-result` from stdout.
-async fn run_jco_peer(
-    cli: &Cli,
-    base_url: &str,
-    test_id: &str,
-    room: &str,
-    role: &str,
+/// The shared parameters of one interop test attempt (both sides see the same
+/// signaling server, room, and message corpus).
+struct Attempt<'a> {
+    base_url: &'a str,
+    test_id: &'a str,
+    room: &'a str,
     count: u32,
     size: u32,
-) -> Result<TestOutcome> {
-    let mut command = tokio::process::Command::new(&cli.node_bin);
-    command
-        .arg("--experimental-wasm-jspi")
-        .arg(&cli.jco_run_node)
-        .arg("--interop")
-        .args(["--server", base_url])
-        .args(["--test", test_id])
-        .args(["--room", room])
-        .args(["--role", role])
-        .args(["--message-count", &count.to_string()])
-        .args(["--message-size", &size.to_string()]);
-    run_peer_command(command, &format!("jco-node peer {test_id}/{role}")).await
 }
 
-/// Run the jco-browser peer for one test/role/room via
-/// `run-browser.mjs --interop`, parsing its single-line JSON `test-result`
-/// from stdout. Each invocation launches its own headless Chromium; a
-/// Chrome/Chromium binary must be discoverable (`CHROME_PATH` or a standard
-/// location — see the adapter).
-async fn run_jco_browser_peer(
-    cli: &Cli,
-    base_url: &str,
-    test_id: &str,
-    room: &str,
-    role: &str,
-    count: u32,
-    size: u32,
-) -> Result<TestOutcome> {
-    let mut command = tokio::process::Command::new(&cli.node_bin);
-    command
-        .arg(&cli.jco_run_browser)
-        .arg("--interop")
-        .args(["--server", base_url])
-        .args(["--test", test_id])
-        .args(["--room", room])
-        .args(["--role", role])
-        .args(["--message-count", &count.to_string()])
-        .args(["--message-size", &size.to_string()]);
-    run_peer_command(command, &format!("jco-browser peer {test_id}/{role}")).await
-}
-
-/// Run the non-wasmtime peer for one test/role/room, parsing its single-line
+/// Run one out-of-process peer for one test/role/room, parsing its single-line
 /// JSON `test-result` from stdout.
-#[allow(clippy::too_many_arguments)]
-async fn run_peer(
+async fn run_external_peer(
     cli: &Cli,
-    kind: PeerKind,
-    base_url: &str,
-    test_id: &str,
-    room: &str,
+    side: Side,
+    attempt: &Attempt<'_>,
     role: &str,
-    count: u32,
-    size: u32,
 ) -> Result<TestOutcome> {
-    match kind {
-        PeerKind::JcoNode => run_jco_peer(cli, base_url, test_id, room, role, count, size).await,
-        PeerKind::JcoBrowser => {
-            run_jco_browser_peer(cli, base_url, test_id, room, role, count, size).await
+    let test_id = attempt.test_id;
+    let shared_args = |command: &mut tokio::process::Command| {
+        command
+            .args(["--server", attempt.base_url])
+            .args(["--test", test_id])
+            .args(["--room", attempt.room])
+            .args(["--role", role])
+            .args(["--message-count", &attempt.count.to_string()])
+            .args(["--message-size", &attempt.size.to_string()]);
+    };
+    match side {
+        Side::Wasmtime => unreachable!("the wasmtime peer runs in-process"),
+        Side::JcoNode => {
+            let mut command = tokio::process::Command::new(&cli.node_bin);
+            command
+                .arg("--experimental-wasm-jspi")
+                .arg(&cli.jco_run_node)
+                .arg("--interop");
+            shared_args(&mut command);
+            run_peer_command(command, &format!("jco-node peer {test_id}/{role}")).await
         }
-        PeerKind::Wasip3 => {
+        Side::JcoBrowser => {
+            let mut command = tokio::process::Command::new(&cli.node_bin);
+            command.arg(&cli.jco_run_browser).arg("--interop");
+            shared_args(&mut command);
+            run_peer_command(command, &format!("jco-browser peer {test_id}/{role}")).await
+        }
+        Side::Wasip3 => {
             let peer = Wasip3Peer {
                 wasmtime_bin: cli.wasmtime_bin.clone(),
                 component: cli.wasip3_component.clone(),
             };
-            peer.run(base_url, test_id, room, role, count, size).await
+            peer.run(
+                attempt.base_url,
+                test_id,
+                attempt.room,
+                role,
+                attempt.count,
+                attempt.size,
+            )
+            .await
+        }
+        Side::Reference => {
+            let mut command = tokio::process::Command::new(&cli.node_bin);
+            command.arg(&cli.reference_peer);
+            shared_args(&mut command);
+            run_peer_command(command, &format!("reference peer {test_id}/{role}")).await
         }
     }
 }
 
-/// Fold results into the raw offerer/answerer order the [`fold_two`] helper
-/// expects, then classify: any fail loses, else any skip, else pass.
-fn fold_pair(wasmtime_role: Role, wasmtime: TestOutcome, peer: TestOutcome) -> TestOutcome {
-    match wasmtime_role {
-        Role::Offerer | Role::Both => fold_two(wasmtime, peer),
-        Role::Answerer => fold_two(peer, wasmtime),
+/// Run one side of a pair in the given role.
+async fn run_side(
+    cli: &Cli,
+    engine: &Engine,
+    component: &Component,
+    side: Side,
+    attempt: &Attempt<'_>,
+    role: Role,
+) -> Result<TestOutcome> {
+    match side {
+        Side::Wasmtime => {
+            run_instance(
+                engine,
+                component,
+                attempt.test_id,
+                make_config(
+                    role,
+                    attempt.base_url,
+                    attempt.room,
+                    attempt.count,
+                    attempt.size,
+                ),
+            )
+            .await
+        }
+        _ => {
+            let role = match role {
+                Role::Offerer => "offerer",
+                Role::Answerer => "answerer",
+                Role::Both => unreachable!("interop peers always run a single role"),
+            };
+            run_external_peer(cli, side, attempt, role).await
+        }
     }
 }
 
@@ -171,7 +201,6 @@ async fn run_interop_test(
     room_seq: &AtomicU64,
 ) -> RawResult {
     let (count, size) = params_for(test_id);
-    let peer_role = peer_role(direction.wasmtime_role);
 
     run_test(test_id, TEST_TIMEOUT, async || {
         let room = format!(
@@ -180,37 +209,42 @@ async fn run_interop_test(
             test_id,
             room_seq.fetch_add(1, Ordering::SeqCst)
         );
-
-        let wasmtime_peer = run_instance(
-            engine,
-            component,
-            test_id,
-            make_config(direction.wasmtime_role, base_url, &room, count, size),
-        );
-        let other_peer = run_peer(
-            cli,
-            direction.peer,
+        let attempt = Attempt {
             base_url,
             test_id,
-            &room,
-            peer_role,
+            room: &room,
             count,
             size,
+        };
+
+        let offerer = run_side(
+            cli,
+            engine,
+            component,
+            direction.offerer,
+            &attempt,
+            Role::Offerer,
+        );
+        let answerer = run_side(
+            cli,
+            engine,
+            component,
+            direction.answerer,
+            &attempt,
+            Role::Answerer,
         );
 
-        let (wasmtime_result, peer_result) = tokio::join!(wasmtime_peer, other_peer);
-        let wasmtime_result = wasmtime_result.context("wasmtime peer")?;
-        let peer_result = peer_result.context("interop peer")?;
-        Ok(fold_pair(
-            direction.wasmtime_role,
-            wasmtime_result,
-            peer_result,
+        let (offerer_result, answerer_result) = tokio::join!(offerer, answerer);
+        Ok(fold_two(
+            offerer_result.context("offerer peer")?,
+            answerer_result.context("answerer peer")?,
         ))
     })
     .await
 }
 
-/// Run the wasmtime <-> jco-node interop pair in both orders.
+/// Run the interop pairs (each target against the reference peer in both
+/// orders, plus the retained implementation pairs).
 #[derive(Debug, Parser)]
 #[command(name = "conformance-interop", version)]
 struct Cli {
@@ -229,8 +263,9 @@ struct Cli {
     #[arg(long, default_value = "loopback")]
     environment: String,
 
-    /// The Node binary that drives the jco-node peer. Must be JSPI-capable
-    /// (Node 24+). Overridable so CI can point at a specific toolchain node.
+    /// The Node binary that drives the jco-node, jco-browser, and reference
+    /// peers. Must be JSPI-capable (Node 24+) for the jco-node peer.
+    /// Overridable so CI can point at a specific toolchain node.
     #[arg(long, env = "CONFORMANCE_NODE", default_value = "node")]
     node_bin: String,
 
@@ -241,6 +276,11 @@ struct Cli {
     /// Path to the jco-browser adapter's `run-browser.mjs`.
     #[arg(long, default_value = "conformance/adapters/jco/run-browser.mjs")]
     jco_run_browser: PathBuf,
+
+    /// Path to the reference peer script (needs `npm install` in its
+    /// directory; see `just conformance::npm-reference`).
+    #[arg(long, default_value = "conformance/adapters/reference/peer.mjs")]
+    reference_peer: PathBuf,
 
     /// The `wasmtime` binary that drives the wasip3-guest peer (v46+).
     #[arg(long, env = "CONFORMANCE_WASMTIME", default_value = "wasmtime")]
@@ -286,35 +326,89 @@ async fn main() -> Result<()> {
     let base_url = server.base_url();
 
     let directions = [
+        // Reference anchoring: each target against the non-wasm reference
+        // peer, both orders.
+        Direction {
+            target: "wasmtime-x-reference",
+            offerer: Side::Wasmtime,
+            answerer: Side::Reference,
+            tests: TWO_PEER_TESTS,
+        },
+        Direction {
+            target: "reference-x-wasmtime",
+            offerer: Side::Reference,
+            answerer: Side::Wasmtime,
+            tests: TWO_PEER_TESTS,
+        },
+        Direction {
+            target: "jco-node-x-reference",
+            offerer: Side::JcoNode,
+            answerer: Side::Reference,
+            tests: TWO_PEER_TESTS,
+        },
+        Direction {
+            target: "reference-x-jco-node",
+            offerer: Side::Reference,
+            answerer: Side::JcoNode,
+            tests: TWO_PEER_TESTS,
+        },
+        Direction {
+            target: "jco-browser-x-reference",
+            offerer: Side::JcoBrowser,
+            answerer: Side::Reference,
+            tests: HANDSHAKE_ONLY,
+        },
+        Direction {
+            target: "reference-x-jco-browser",
+            offerer: Side::Reference,
+            answerer: Side::JcoBrowser,
+            tests: HANDSHAKE_ONLY,
+        },
+        Direction {
+            target: "wasip3-guest-x-reference",
+            offerer: Side::Wasip3,
+            answerer: Side::Reference,
+            tests: TWO_PEER_TESTS,
+        },
+        Direction {
+            target: "reference-x-wasip3-guest",
+            offerer: Side::Reference,
+            answerer: Side::Wasip3,
+            tests: TWO_PEER_TESTS,
+        },
+        // The reference self-pair: validates the reference peer itself and
+        // backs the `reference` matrix row (its Shadow-lab sibling is the
+        // `reference-shadow.json` document).
+        Direction {
+            target: "reference",
+            offerer: Side::Reference,
+            answerer: Side::Reference,
+            tests: TWO_PEER_TESTS,
+        },
+        // Retained implementation-vs-implementation pairs.
         Direction {
             target: "wasmtime-x-jco-node",
-            peer: PeerKind::JcoNode,
-            wasmtime_role: Role::Offerer,
+            offerer: Side::Wasmtime,
+            answerer: Side::JcoNode,
+            tests: TWO_PEER_TESTS,
         },
         Direction {
             target: "jco-node-x-wasmtime",
-            peer: PeerKind::JcoNode,
-            wasmtime_role: Role::Answerer,
-        },
-        Direction {
-            target: "wasmtime-x-jco-browser",
-            peer: PeerKind::JcoBrowser,
-            wasmtime_role: Role::Offerer,
-        },
-        Direction {
-            target: "jco-browser-x-wasmtime",
-            peer: PeerKind::JcoBrowser,
-            wasmtime_role: Role::Answerer,
+            offerer: Side::JcoNode,
+            answerer: Side::Wasmtime,
+            tests: TWO_PEER_TESTS,
         },
         Direction {
             target: "wasmtime-x-wasip3-guest",
-            peer: PeerKind::Wasip3,
-            wasmtime_role: Role::Offerer,
+            offerer: Side::Wasmtime,
+            answerer: Side::Wasip3,
+            tests: TWO_PEER_TESTS,
         },
         Direction {
             target: "wasip3-guest-x-wasmtime",
-            peer: PeerKind::Wasip3,
-            wasmtime_role: Role::Answerer,
+            offerer: Side::Wasip3,
+            answerer: Side::Wasmtime,
+            tests: TWO_PEER_TESTS,
         },
     ];
 
@@ -323,8 +417,19 @@ async fn main() -> Result<()> {
         if !cli.pairs.is_empty() && !cli.pairs.iter().any(|p| p == direction.target) {
             continue;
         }
+        // A global --only filter that misses this direction's subset entirely
+        // (e.g. a non-handshake test with the browser smoke pairs) skips the
+        // direction rather than erroring the run.
+        if !cli.only.is_empty()
+            && !direction
+                .tests
+                .iter()
+                .any(|t| cli.only.iter().any(|o| o == t))
+        {
+            continue;
+        }
         eprintln!("== interop {} ==", direction.target);
-        let results = run_corpus(TWO_PEER_TESTS, &cli.only, cli.jobs, |test_id| {
+        let results = run_corpus(direction.tests, &cli.only, cli.jobs, |test_id| {
             run_interop_test(
                 &cli, &engine, &component, &base_url, direction, test_id, &room_seq,
             )

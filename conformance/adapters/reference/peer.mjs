@@ -194,13 +194,19 @@ async function consumeSignaling(pc, mailbox) {
         break;
       case "offer":
         throw new Error("unexpected second offer");
-      case "candidate":
-        await pc.addIceCandidate({
-          candidate: signal.candidate,
-          sdpMid: signal.sdp_mid ?? null,
-          sdpMLineIndex: signal.sdp_mline_index ?? null,
-        });
+      case "candidate": {
+        // Include sdpMid/sdpMLineIndex only when the peer supplied them:
+        // node-webrtc rejects explicit nulls for sdpMLineIndex.
+        const init = { candidate: signal.candidate };
+        if (signal.sdp_mid != null) {
+          init.sdpMid = signal.sdp_mid;
+        }
+        if (signal.sdp_mline_index != null) {
+          init.sdpMLineIndex = signal.sdp_mline_index;
+        }
+        await pc.addIceCandidate(init);
         break;
+      }
       case "end-of-candidates":
         break;
       default:
@@ -213,11 +219,29 @@ function channelInit(testId) {
   return testId === "max-retransmits-accepted" ? { maxRetransmits: 0 } : {};
 }
 
+/** The RTCConfiguration for a run: the configured STUN/TURN server (if any)
+ * and the relay-only ICE transport policy. */
+function rtcConfiguration(config) {
+  const rtc = { iceServers: [] };
+  if (config.iceServerUrl) {
+    rtc.iceServers.push({
+      urls: [config.iceServerUrl],
+      username: config.iceUsername,
+      credential: config.iceCredential,
+    });
+  }
+  if (config.relayOnly) {
+    rtc.iceTransportPolicy = "relay";
+  }
+  return rtc;
+}
+
 /** Drive one side of the handshake to a connected, open data channel. The
  * receiver is constructed the moment the channel exists, so no message the
  * remote sends early is dropped. */
-async function handshake(testId, role, mailbox) {
-  const pc = new wrtc.RTCPeerConnection({ iceServers: [] });
+async function handshake(config, mailbox) {
+  const { test: testId, role } = config;
+  const pc = new wrtc.RTCPeerConnection(rtcConfiguration(config));
   const gathered = gatherCandidates(pc);
 
   let dc;
@@ -393,12 +417,17 @@ async function sendSequence(dc, count, size) {
 
 async function recvSequence(receiver, count) {
   const out = [];
+  const times = [];
+  const started = Date.now();
   for (let i = 0; i < count; i += 1) {
     const item = await receiveMessage(receiver);
+    times.push(Date.now() - started);
     out.push(
       item.kind === "binary" ? item.bytes : new TextEncoder().encode(item.text),
     );
   }
+  dbg("received indexes:", out.map((bytes) => payloadIndex(bytes)).join(","));
+  dbg("received at(ms):", times.join(","));
   return out;
 }
 
@@ -497,7 +526,7 @@ async function barrier(dc, receiver) {
 
 async function runTest(config) {
   const mailbox = new Mailbox(config.server, config.room, config.role);
-  const { pc, dc, receiver } = await handshake(config.test, config.role, mailbox);
+  const { pc, dc, receiver } = await handshake(config, mailbox);
   try {
     await exchange(config.test, config, dc, receiver);
     dbg("exchange complete; entering barrier");
@@ -516,6 +545,10 @@ function parseCli() {
       room: { type: "string", default: "r" },
       "message-count": { type: "string", default: "16" },
       "message-size": { type: "string", default: "512" },
+      "ice-server-url": { type: "string" },
+      "ice-username": { type: "string", default: "" },
+      "ice-credential": { type: "string", default: "" },
+      "relay-only": { type: "boolean", default: false },
     },
   });
   for (const flag of ["test", "role", "server"]) {
@@ -526,6 +559,9 @@ function parseCli() {
   if (!["offerer", "answerer"].includes(values.role)) {
     throw new Error(`--role must be offerer or answerer, got ${values.role}`);
   }
+  if (values["relay-only"] && !values["ice-server-url"]) {
+    throw new Error("--relay-only requires --ice-server-url");
+  }
   return {
     test: values.test,
     role: values.role,
@@ -533,6 +569,10 @@ function parseCli() {
     room: values.room,
     messageCount: Number(values["message-count"]),
     messageSize: Number(values["message-size"]),
+    iceServerUrl: values["ice-server-url"],
+    iceUsername: values["ice-username"],
+    iceCredential: values["ice-credential"],
+    relayOnly: values["relay-only"],
   };
 }
 
@@ -548,5 +588,8 @@ try {
   result = { tag: "fail", val: describeError(err) };
 }
 console.log(JSON.stringify(result));
-// wrtc's worker threads keep the event loop alive; exit explicitly.
-process.exit(result.tag === "pass" ? 0 : 1);
+// The single-peer contract reports pass/fail in the result line, not the exit
+// status (a nonzero exit is an adapter error, and Shadow flags it as an
+// unexpected final state). wrtc's worker threads keep the event loop alive,
+// so exit explicitly.
+process.exit(0);

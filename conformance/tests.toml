@@ -53,7 +53,7 @@ description = "Payloads near SCTP practical limits round-trip (parameterized)."
 
 [[test]]
 id = "ordering"
-tags = ["data-channel"]
+tags = ["data-channel", "ordered-delivery"]
 description = "With ordered:true, indexed payloads arrive in order."
 
 [[test]]
