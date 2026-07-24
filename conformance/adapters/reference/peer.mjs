@@ -15,6 +15,7 @@
 //     --server http://127.0.0.1:8080 --room r --message-count 16 --message-size 512
 
 import { parseArgs } from "node:util";
+import http from "node:http";
 import process from "node:process";
 
 const wrtc = (await import("@roamhq/wrtc")).default;
@@ -40,7 +41,33 @@ function describeError(err) {
 
 // --- mailbox client (PROTOCOL.md) -------------------------------------------
 
-/** A fetch-based client of one conformance-signalingd room, bound to a role. */
+// node:http rather than fetch: undici unconditionally enables TCP keepalive
+// on new connections, and environments without that socket option (Shadow
+// returns ENOPROTOOPT) fail the whole connect. A non-keepalive agent issues
+// plain connect/send/recv only.
+const httpAgent = new http.Agent({ keepAlive: false });
+
+/** One HTTP round trip: resolves to { status, body } with body as bytes. */
+function roundTrip(url, method, body) {
+  return new Promise((resolve, reject) => {
+    const req = http.request(url, { method, agent: httpAgent }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () =>
+        resolve({ status: res.statusCode, body: Buffer.concat(chunks) }),
+      );
+      res.on("error", reject);
+    });
+    req.on("error", reject);
+    if (body !== undefined) {
+      req.setHeader("content-type", "application/octet-stream");
+      req.write(body);
+    }
+    req.end();
+  });
+}
+
+/** A client of one conformance-signalingd room, bound to a role. */
 class Mailbox {
   #base;
   #room;
@@ -57,49 +84,47 @@ class Mailbox {
 
   /** Publish the next blob to this role's mailbox. */
   async send(bytes) {
-    const res = await fetch(`${this.#base}/rooms/${this.#room}/${this.#role}`, {
-      method: "POST",
-      headers: { "content-type": "application/octet-stream" },
-      body: bytes,
-    });
-    if (!res.ok) {
-      throw new Error(`mailbox send: HTTP ${res.status}`);
+    const { status } = await roundTrip(
+      `${this.#base}/rooms/${this.#room}/${this.#role}`,
+      "POST",
+      bytes,
+    );
+    if (status !== 200) {
+      throw new Error(`mailbox send: HTTP ${status}`);
     }
-    await res.arrayBuffer();
   }
 
   /** Fetch the next blob from the peer's mailbox, or undefined at end. */
   async recv() {
     for (;;) {
-      const res = await fetch(
+      const { status, body } = await roundTrip(
         `${this.#base}/rooms/${this.#room}/${this.#peerRole}` +
           `?seq=${this.#recvSeq}&wait=10000`,
+        "GET",
       );
-      if (res.status === 200) {
+      if (status === 200) {
         this.#recvSeq += 1;
-        return new Uint8Array(await res.arrayBuffer());
+        return new Uint8Array(body);
       }
-      await res.arrayBuffer();
-      if (res.status === 204) {
+      if (status === 204) {
         return undefined; // peer's mailbox is done
       }
-      if (res.status === 304) {
+      if (status === 304) {
         continue; // not yet; retry the same seq
       }
-      throw new Error(`mailbox recv: HTTP ${res.status}`);
+      throw new Error(`mailbox recv: HTTP ${status}`);
     }
   }
 
   /** Mark this role's mailbox done. */
   async done() {
-    const res = await fetch(
+    const { status } = await roundTrip(
       `${this.#base}/rooms/${this.#room}/${this.#role}/done`,
-      { method: "POST" },
+      "POST",
     );
-    if (!res.ok) {
-      throw new Error(`mailbox done: HTTP ${res.status}`);
+    if (status !== 200) {
+      throw new Error(`mailbox done: HTTP ${status}`);
     }
-    await res.arrayBuffer();
   }
 }
 
