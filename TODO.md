@@ -33,36 +33,6 @@ confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
   supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
   in a namespace) is deferred.
 
-## D. Examples
-
-### D3. De-duplicate example guest helpers and the wasmtime-demo binaries
-
-- Near-identical helpers are copied across example guests:
-  `collect_candidates` (`examples/echo-demo/src/lib.rs:156`,
-  `examples/webrtc-consumer/src/lib.rs:187`,
-  `examples/echo-remote/src/lib.rs:285`), `first_incoming`
-  (`examples/cli-signaling/src/lib.rs:170`,
-  `examples/webrtc-consumer/src/lib.rs:177`, plus inline in echo-demo), and
-  the wasi-stdout `print` helper (`examples/cli-signaling/src/lib.rs:290` ≡
-  `examples/webrtc-consumer/src/lib.rs:204`, doc comment included). A tiny
-  shared demo-util crate ends the drift; if the duplication is intentional
-  (each example maximally self-contained), say so once in `examples/`.
-- `examples/wasmtime-demo/src/lib.rs` is a doc-comment-only empty lib while
-  the binaries duplicate the glue it should host: `engine()` and
-  `webrtc_ctx()` with the `WEBRTC_INCLUDE_LOOPBACK` hook are repeated in
-  `src/main.rs`, `src/bin/cli-signaling.rs`, and `src/bin/echo-remote.rs`.
-  Move them into the lib.
-- `examples/webrtc-consumer/src/lib.rs:87-90` decides retryability by
-  substring-matching a `Debug` rendering (`contains("wait-connected") &&
-  contains("TimedOut")`); a context-string or variant rename silently
-  disables the retry. Match on the typed WIT error variant before converting
-  to `anyhow` (the conversion is the `anyhow!("… wait-connected: {e:?}")`
-  formatting at the call sites).
-- `examples/wasmtime-demo/src/main.rs`: the default component path is
-  CWD-relative (`../echo-demo/build/…`), so `cargo run --bin
-  wasmtime-webrtc-host` only works from `examples/wasmtime-demo/`. Resolve
-  relative to `CARGO_MANIFEST_DIR` or make the argument required.
-
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -228,6 +198,6 @@ drifted rename fails fast with a clear message.
    (F7), the jco close-drain half of the barrier race (F5).
 2. Cheap hygiene, high leverage for humans and agents: the transpile-flag
    check (G1).
-3. The rest as touched: config consolidation + env-var index (E10), example
-   de-duplication (D3), jco in-process timeout isolation (F11), the
-   remaining conformance-matrix gaps (A3).
+3. The rest as touched: config consolidation + env-var index (E10), jco
+   in-process timeout isolation (F11), the remaining conformance-matrix
+   gaps (A3).
