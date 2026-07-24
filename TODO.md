@@ -84,16 +84,19 @@ once a release including it ships.
 
 The interop "attempt timed-out" flake family is now diagnosed (via the
 phase-marker logs): in a two-peer test the side that finishes its barrier
-first closes immediately, and the wasmtime host's `close()` tears the
-connection down without draining — the just-sent barrier sentinel can be
-discarded before it reaches the wire, leaving the slower peer (observed:
-the jco-browser offerer, its wasmtime partner passing in ~2s) waiting for
-a sentinel that never arrives; the browser does not surface the dirty
-teardown as a channel close within the 90s guard. Fix candidates: a
-bounded close-drain in the wasmtime host mirroring `wasip3-impl`'s
-`CLOSE_DRAIN` (flush queued sends before tearing down), or making the
-conformance barrier ack-acked so neither side closes before both
-sentinels are confirmed received.
+first closes immediately, and a close that tears the connection down
+without draining can discard the just-sent barrier sentinel before it
+reaches the wire, leaving the slower peer waiting for a sentinel that
+never arrives (the browser does not surface the dirty teardown as a
+channel close within the 90s guard). The **wasmtime host** now defers its
+network teardown by a bounded `CLOSE_DRAIN` grace (the close is still
+observed locally at once), mirroring `wasip3-impl`'s drain — which covers
+every observed instance (wasmtime answerer + jco peer). Still open: the
+**jco host**'s `close()` calls `pc.close()` immediately, so the symmetric
+race (jco answerer strands a wasmtime offerer) remains possible; a
+matching deferred-teardown there must keep the local close observation
+immediate (the `#closed` gate) *and* mark the connection's channels closed
+at once, or the delayed teardown would regress `post-close-send`.
 
 ## G. Development environment / CI
 
