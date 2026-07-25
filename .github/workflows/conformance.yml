@@ -10,7 +10,8 @@ name: Conformance
 # The `matrix` job runs the loopback scenarios across all enabled targets,
 # including the interop matrix, uploading the matrix artifact and
 # failing on any unexpected status. The `shadow-lab` job runs the two-peer
-# corpus for the wasmtime, wasip3-guest, and reference targets over a routed,
+# corpus for the wasmtime, wasip3-guest, and reference targets — plus the
+# wasmtime <-> wasip3-guest interop pair in both orders — over a routed,
 # non-loopback path inside the Shadow network simulator, which needs no root
 # or network namespaces and is deterministic.
 #
@@ -203,7 +204,8 @@ jobs:
         run: just conformance::run-shadow
 
       # Classify the Shadow results (<target>-shadow.json for wasmtime,
-      # wasip3-guest, and reference) against the manifests and render the
+      # wasip3-guest, reference, and the wasmtime <-> wasip3-guest interop
+      # pair in both orders) against the manifests and render the
       # environment-columned matrix; exits nonzero on any failure.
       - name: Classify Shadow matrix
         run: just conformance::classify-shadow

@@ -22,16 +22,23 @@ pairs (every target against the non-wasm libwebrtc reference peer in both
 orders, the reference self-pair, and the retained `wasmtime`<->`jco-node`
 and `wasmtime`<->`wasip3-guest` pairs) — all run in CI over loopback via
 `just conformance` — plus the Shadow lab in CI (non-loopback,
-deterministic) and the workstation-only netns lab (`just conformance::netns`
+deterministic: the single-runtime targets and the
+`wasmtime`<->`wasip3-guest` interop pair in both orders via the executor's
+per-role `--offerer-kind`/`--answerer-kind`) and the workstation-only netns
+lab (`just conformance::netns`
 / `just conformance::nat`) covering `lan`, `stun-srflx` (behind a one-to-one
 full-cone NAT), `turn-relay`, and `nat-symmetric`. Still open, each a
 concrete extension of the existing machinery:
 
-- **Non-loopback interop.** The interop pairs run over loopback only; the
-  labs place single-runtime peers. Teach the netns executor to place the
-  two peers of an interop pair in separate namespaces (the target-neutral
-  `PeerCommand` placement in `conformance/adapters/common/src/peer_command.rs`
-  already abstracts the per-peer invocation).
+- **Non-loopback interop beyond the wasm pair.** The Shadow lab covers the
+  `wasmtime`<->`wasip3-guest` pair; the reference-anchored directions still
+  run over loopback only. Run the reference interop pairs under Shadow
+  (libwebrtc already runs there as a single-runtime target), and teach the
+  netns executor per-role peer kinds for the STUN/TURN/NAT scenarios the
+  simulator cannot model (the target-neutral `PeerCommand` placement in
+  `conformance/adapters/common/src/peer_command.rs` already abstracts the
+  per-peer invocation; the Shadow executor's per-role flags are the
+  pattern).
 - **jco-node netns peer.** Add a per-peer Node runner placeable in a
   namespace (the missing `--peer-kind`), unlocking both lab coverage for
   the jco host and jco directions for non-loopback interop.

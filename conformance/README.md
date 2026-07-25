@@ -276,7 +276,10 @@ coverage comes from the Shadow lab (`shadow-lab` in
 [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml)),
 which needs no root or network namespaces; the netns lab remains the
 higher-fidelity environment for exercising the STUN/TURN/NAT candidate paths
-on a real kernel.
+on a real kernel. When adding non-loopback coverage, prefer the Shadow lab —
+whatever runs there runs in CI, gated on every change — and reserve the netns
+lab for what genuinely needs a real kernel network stack: the NAT behaviors
+(nftables conntrack) and a real coturn relay.
 
 ## Shadow lab (`just conformance::shadow`)
 
@@ -307,6 +310,15 @@ per-role peer command template:
 - `reference` runs the non-wasm reference peer (`conformance-reference-peer`);
   libwebrtc gathers candidates from the simulated host's own interface, so no
   bind address is passed.
+
+The `--offerer-kind` / `--answerer-kind` flags override `--peer-kind` per
+role, placing an **interop pair** — the two peers of each test running
+different targets on separate simulated hosts. The `shadow` recipe uses this
+to run the wasmtime <-> wasip3-guest pair in both orders
+(`wasmtime-x-wasip3-guest-shadow.json` / `wasip3-guest-x-wasmtime-shadow.json`),
+giving the implementation pair non-loopback coverage in CI; the loopback
+interop matrix (`conformance-interop`) remains the pair coverage for the
+Node-hosted and reference targets.
 
 Run the Shadow targets from the repository root (needs `shadow` on `PATH`). Shadow
 ships no upstream prebuilt binary, so install it into `~/.local` by downloading

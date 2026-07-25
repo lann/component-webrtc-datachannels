@@ -218,7 +218,8 @@ just conformance
 just conformance::netns lan
 
 # Conformance Shadow lab (the two-peer corpus for the wasmtime,
-# wasip3-guest, and reference targets over a non-loopback path inside the
+# wasip3-guest, and reference targets plus the wasmtime<->wasip3-guest
+# interop pair in both orders, over a non-loopback path inside the
 # Shadow discrete-event network simulator — deterministic, no root or
 # network namespaces). Needs `shadow` on PATH (install with
 # scripts/download-shadow.sh or scripts/build-shadow.sh):
