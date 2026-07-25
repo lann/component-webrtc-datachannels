@@ -63,36 +63,15 @@ let maxInboundBuffered = DEFAULT_MAX_INBOUND_BUFFERED;
 /**
  * Set the per-channel inbound buffer bound, in payload bytes. This module
  * reads no ambient configuration (no environment variables or globals): a
- * host that offers the bound as a knob — for example the conventional
- * `WEBRTC_MAX_INBOUND_BUFFER_BYTES` environment variable, validated with
- * `parseMaxInboundBufferBytes` — applies it here before creating
- * connections. Channels capture the bound at creation. Throws on anything
- * but a positive finite number.
+ * host that offers the bound as a knob reads and validates the value itself
+ * and applies it here. Channels capture the bound at creation. Throws on
+ * anything but a positive finite number.
  */
 export function setMaxInboundBufferBytes(bytes) {
   if (!(Number.isFinite(bytes) && bytes > 0)) {
     throw new Error(`invalid inbound buffer bound ${bytes}: expected a positive byte count`);
   }
   maxInboundBuffered = bytes;
-}
-
-/**
- * Validate a `WEBRTC_MAX_INBOUND_BUFFER_BYTES` value: `undefined` for an
- * absent or empty value (the knob is unset), the byte count for a positive
- * number, and a throw otherwise — a host honoring the knob should fail loud
- * on a malformed value rather than silently revert to the default (the knob
- * is primarily a test knob, and a typo that silently restored the 8 MiB
- * bound would invalidate exactly the test that set it).
- */
-export function parseMaxInboundBufferBytes(raw) {
-  if (raw === undefined || raw === "") return undefined;
-  const configured = Number(raw);
-  if (!(configured > 0)) {
-    throw new Error(
-      `invalid WEBRTC_MAX_INBOUND_BUFFER_BYTES ${JSON.stringify(raw)}: expected a positive byte count`,
-    );
-  }
-  return configured;
 }
 
 /** The UTF-8 byte length of a string payload (the WIT bound counts bytes). */
