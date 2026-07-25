@@ -91,11 +91,13 @@ sequence numbers in application send order) while a bare `onmessage` handler
 still observed the permutation — so the defect is in **`@roamhq/wrtc`'s
 (node-webrtc's) native→JS message dispatch**, above SCTP: an SCTP-conformant
 receiver cannot deliver `U = 0` chunks of one stream out of SSN order. The
-trigger profile (contiguous displaced head, open-adjacent window, a 50 ms
-post-open sender delay makes it vanish) suggests a queue-then-flush race for
-messages arriving before the JS listener is fully registered. Both of this
-repository's senders were exonerated: the wasmtime host and the wasip3-impl
-provider pass explicit `ordered: true` and emit correct metadata.
+root cause is visible in node-webrtc's `rtc_data_channel.cc`: the JS
+wrapper's constructor re-registers the libwebrtc observer (new messages then
+dispatch directly to the JS loop) *before* re-dispatching the backlog the
+temporary pre-wrapper observer cached, so open-adjacent arrivals overtake
+every earlier message. Both of this repository's senders were exonerated:
+the wasmtime host and the wasip3-impl provider pass explicit
+`ordered: true` and emit correct metadata.
 
 The same investigation found a real but distinct upstream `rtc` bug this
 suite does *not* hit: `create_data_channel(label, None)` (derived
