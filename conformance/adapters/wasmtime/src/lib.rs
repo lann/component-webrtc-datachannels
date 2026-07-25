@@ -321,11 +321,19 @@ pub fn new_store_with_ice(engine: &Engine, ice: WebrtcIceConfig, disable_mdns: b
 /// panics: silently reverting to the default bound would invalidate exactly
 /// the overflow test that set it.
 fn apply_env_buffer_bound(webrtc: &mut WasiWebrtcCtx) {
-    let bound = std::env::var(webrtc_host::MAX_INBOUND_BUFFER_ENV).ok();
-    if let Some(bytes) = webrtc_host::parse_max_inbound_buffer_bytes(bound.as_deref())
-        .unwrap_or_else(|e| panic!("{e}"))
-    {
-        webrtc.set_max_inbound_buffer_bytes(bytes);
+    let env = conformance_adapter_common::MAX_INBOUND_BUFFER_ENV;
+    match std::env::var(env) {
+        Ok(value) if !value.is_empty() => {
+            let bytes = value
+                .parse::<usize>()
+                .ok()
+                .filter(|&bytes| bytes > 0)
+                .unwrap_or_else(|| {
+                    panic!("invalid {env} {value:?}: expected a positive byte count")
+                });
+            webrtc.set_max_inbound_buffer_bytes(bytes);
+        }
+        _ => {}
     }
 }
 

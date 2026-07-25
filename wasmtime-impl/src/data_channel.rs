@@ -62,38 +62,6 @@ const CLOSE_FLUSH_BOUND: std::time::Duration = std::time::Duration::from_secs(1)
 /// [`WasiWebrtcCtx::set_max_inbound_buffer_bytes`](crate::WasiWebrtcCtx::set_max_inbound_buffer_bytes).
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
-/// The conventional environment variable naming an inbound-buffer-bound
-/// override (a byte count). Primarily a test knob: the conformance suite
-/// shrinks the bound so its overflow probe needs only a small flood.
-///
-/// The library itself never reads it — hosts that honor the variable read it
-/// from their own environment, validate the value with
-/// [`parse_max_inbound_buffer_bytes`], and apply the result via
-/// [`WasiWebrtcCtx::set_max_inbound_buffer_bytes`](crate::WasiWebrtcCtx::set_max_inbound_buffer_bytes).
-pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
-
-/// Validate a [`MAX_INBOUND_BUFFER_ENV`] override value: `Ok(None)` for an
-/// absent or empty value (the variable is unset), `Ok(Some(bytes))` for a
-/// positive byte count, and an error otherwise — a host honoring the variable
-/// should fail loud on a malformed value rather than silently revert to the
-/// default (the variable is primarily a test knob, and a typo that silently
-/// restored the 8 MiB bound would invalidate exactly the test that set it).
-pub fn parse_max_inbound_buffer_bytes(value: Option<&str>) -> wasmtime::Result<Option<usize>> {
-    match value {
-        Some(value) if !value.is_empty() => value
-            .parse::<usize>()
-            .ok()
-            .filter(|&bytes| bytes > 0)
-            .map(Some)
-            .ok_or_else(|| {
-                wasmtime::Error::msg(format!(
-                    "invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count"
-                ))
-            }),
-        _ => Ok(None),
-    }
-}
-
 /// The buffered-byte accounting shared between a channel's pump (which
 /// reserves capacity for each inbound message) and its readers (which release
 /// it as messages are consumed).
