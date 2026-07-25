@@ -35,10 +35,9 @@ impl Wasip3Peer {
     /// signaling server at `server`, parsing the driver's single-line JSON
     /// `test-result` from stdout.
     ///
-    /// The flags mirror `just examples::test-webrtc-composed` plus `-S http` for the
-    /// in-guest mailbox client: the component-model async ABI, the WASIp3 host
-    /// APIs, and network access for the provider's `wasi:sockets` UDP and the
-    /// mailbox's outgoing HTTP.
+    /// The component runs under the shared
+    /// [`conformance_adapter_common::COMPOSED_WASMTIME_RUN_FLAGS`], with the
+    /// conformance inbound-buffer bound applied through the environment.
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         &self,
@@ -60,18 +59,7 @@ impl Wasip3Peer {
             command.env("WASMTIME_LOG", "wasmtime_wasi_http=warn");
         }
         command
-            .arg("run")
-            .args(["-W", "component-model-async=y"])
-            .args([
-                "-S",
-                "cli",
-                "-S",
-                "p3",
-                "-S",
-                "http",
-                "-S",
-                "inherit-network",
-            ])
+            .args(conformance_adapter_common::COMPOSED_WASMTIME_RUN_FLAGS)
             .args([
                 "--env",
                 &format!(

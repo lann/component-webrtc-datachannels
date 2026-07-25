@@ -38,7 +38,10 @@ mod host;
 mod peer_connection;
 mod state_watch;
 
-pub use data_channel::{DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES, MAX_INBOUND_BUFFER_ENV};
+pub use data_channel::{
+    max_inbound_buffer_bytes_from_env, DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES,
+    MAX_INBOUND_BUFFER_ENV,
+};
 pub use error::{WebrtcError, WebrtcResult};
 pub use peer_connection::PeerConnection;
 
@@ -107,8 +110,9 @@ impl WebrtcIceConfig {
 /// [`set_connect_timeout`](Self::set_connect_timeout)); and the per-channel
 /// inbound buffer bound (see
 /// [`set_max_inbound_buffer_bytes`](Self::set_max_inbound_buffer_bytes)). The
-/// crate itself hardcodes no environment-driven ICE behavior, leaving loopback
-/// and similar tweaks to demo/test hosts.
+/// crate reads no ambient environment: every knob is set through this context
+/// by the embedding host, which owns any env-driven configuration (loopback
+/// ICE tweaks, the conventional [`MAX_INBOUND_BUFFER_ENV`] buffer override).
 #[derive(Clone)]
 #[non_exhaustive]
 pub struct WasiWebrtcCtx {
@@ -124,7 +128,7 @@ impl Default for WasiWebrtcCtx {
             setting_engine_hook: None,
             ice_config: WebrtcIceConfig::default(),
             connect_timeout: peer_connection::DEFAULT_CONNECT_TIMEOUT,
-            max_inbound_buffer_bytes: data_channel::max_inbound_buffer_bytes(),
+            max_inbound_buffer_bytes: data_channel::DEFAULT_MAX_INBOUND_BUFFER_BYTES,
         }
     }
 }
@@ -205,8 +209,10 @@ impl WasiWebrtcCtx {
 
     /// Set the per-channel inbound buffer bound, in payload bytes (see the
     /// `data-channel` WIT docs for the overflow contract). Default:
-    /// [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`], overridable process-wide through
-    /// the [`MAX_INBOUND_BUFFER_ENV`] environment variable (read once).
+    /// [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. Hosts honoring the conventional
+    /// [`MAX_INBOUND_BUFFER_ENV`] environment variable read it through
+    /// [`max_inbound_buffer_bytes_from_env`] and apply the result here; the
+    /// crate itself never reads the environment.
     pub fn set_max_inbound_buffer_bytes(&mut self, bytes: usize) {
         self.max_inbound_buffer_bytes = bytes;
     }

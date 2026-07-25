@@ -35,7 +35,7 @@
 //!   The executor also arms the peer's Shadow syscall shim by setting
 //!   [`SHADOW_SYSCALL_SHIM_ENV`] in each simulated peer's environment.
 //! - `wasip3-guest` runs the fully composed wasip3 conformance component under
-//!   `wasmtime run` (the same invocation as the loopback adapter), pointing the
+//!   `wasmtime run` (the shared composed-component flags), pointing the
 //!   in-guest provider at the host's simulated address through the
 //!   `WEBRTC_UDP_BIND_ADDR` environment variable. The sans-I/O stack has no
 //!   mDNS, so no equivalent of `--disable-mdns` is needed.

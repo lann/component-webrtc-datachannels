@@ -73,7 +73,7 @@ discarded without API cost.
   `jco-browser` over the `interop-handshake` smoke test, one headless-Chromium
   instance per test), so a red pair cell implicates the target's stack rather
   than a second guest instance. It also runs the `reference` self-pair
-  (validating the reference peer itself) and the retained
+  (validating the reference peer itself) and the direct
   implementation-vs-implementation pairs `wasmtime`<->`jco-node` and
   `wasmtime`<->`wasip3-guest`, each in both orders. Classified against the
   `reference` and pair entries in `manifests.toml`. The first build downloads
@@ -122,7 +122,7 @@ writes `conformance/results/wasmtime.json`), transpiles the guest for the jco
 adapters and runs the `jco-node` and `jco-browser` targets, composes and runs
 the `wasip3-guest` target under `wasmtime run`, runs the interop pairs (every
 target against the reference peer in both orders, the `reference` self-pair,
-and the retained `wasmtime`<->`jco-node` and `wasmtime`<->`wasip3-guest`
+and the direct `wasmtime`<->`jco-node` and `wasmtime`<->`wasip3-guest`
 implementation pairs), then invokes
 `conformance-runner`, which reads the test registry, the target manifests,
 and those adapter result documents, starts and health-checks a standalone

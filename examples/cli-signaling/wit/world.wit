@@ -7,7 +7,8 @@ package demo:cli-signaling@0.1.0;
 /// `local-ice-candidates` to its end (the end-of-gathering signal) and embeds
 /// the candidates into the SDP it shows the user, so a whole connection needs
 /// just two copy/pasted messages. Its `wasi:cli@0.3` run export and stdio
-/// imports come from the `wasip3` crate rather than this world.
+/// imports are declared by the component's own language bindings rather than
+/// this world.
 world cli-signaling {
     import lann:webrtc-datachannels/connections@0.1.0;
 }

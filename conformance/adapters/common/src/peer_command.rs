@@ -212,26 +212,20 @@ impl PeerCommand {
                          is supported for this peer kind"
                     );
                 }
-                // Mirror the loopback wasip3 adapter's `wasmtime run`
-                // invocation, plus the provider's bind-address environment
-                // variable pointing it at this peer's address.
-                let mut args = vec![
-                    wasmtime_bin.to_string_lossy().into_owned(),
-                    "run".to_string(),
-                    "-W".to_string(),
-                    "component-model-async=y".to_string(),
-                    "-S".to_string(),
-                    "cli".to_string(),
-                    "-S".to_string(),
-                    "p3".to_string(),
-                    "-S".to_string(),
-                    "http".to_string(),
-                    "-S".to_string(),
-                    "inherit-network".to_string(),
+                // The shared composed-component `wasmtime run` prefix, plus
+                // the provider's bind-address environment variable pointing
+                // it at this peer's address.
+                let mut args = vec![wasmtime_bin.to_string_lossy().into_owned()];
+                args.extend(
+                    crate::COMPOSED_WASMTIME_RUN_FLAGS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                args.extend([
                     "--env".to_string(),
                     format!("WEBRTC_UDP_BIND_ADDR={}", run.bind_addr),
                     component.to_string_lossy().into_owned(),
-                ];
+                ]);
                 args.extend(shared_peer_args);
                 args
             }

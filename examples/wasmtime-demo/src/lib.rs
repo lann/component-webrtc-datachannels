@@ -20,17 +20,24 @@ pub fn engine() -> Result<Engine> {
     Engine::new(&config)
 }
 
-/// Build the WebRTC context, opting into loopback ICE candidates when the
-/// `WEBRTC_INCLUDE_LOOPBACK` environment variable is set. This env-driven
-/// tweak is demo-only glue (the crate exposes it as a `SettingEngine` hook):
-/// peers running on the same host without another mutually reachable address
-/// need it to pair.
+/// Build the WebRTC context from the demo hosts' environment surface: the
+/// `WEBRTC_INCLUDE_LOOPBACK` variable opts into loopback ICE candidates
+/// (peers running on the same host without another mutually reachable address
+/// need it to pair), and the conventional `WEBRTC_MAX_INBOUND_BUFFER_BYTES`
+/// variable overrides the inbound buffer bound. These env-driven tweaks are
+/// host glue: the host crate itself reads no environment, so a malformed
+/// value fails loud here.
 pub fn webrtc_ctx() -> WasiWebrtcCtx {
     let mut ctx = WasiWebrtcCtx::new();
     if std::env::var_os("WEBRTC_INCLUDE_LOOPBACK").is_some() {
         ctx.set_setting_engine_hook(|engine| {
             engine.set_include_loopback_candidate(true);
         });
+    }
+    if let Some(bytes) = wasmtime_webrtc_datachannels::max_inbound_buffer_bytes_from_env()
+        .unwrap_or_else(|e| panic!("{e}"))
+    {
+        ctx.set_max_inbound_buffer_bytes(bytes);
     }
     ctx
 }

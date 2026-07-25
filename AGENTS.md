@@ -209,7 +209,7 @@ just test
 # conformance guest, runs every enabled adapter (wasmtime, jco-node,
 # jco-browser, wasip3-guest) plus the interop pairs (every target against the
 # non-wasm reference peer in both orders, the reference self-pair, and the
-# retained implementation pairs), and renders
+# direct implementation pairs), and renders
 # conformance/matrix.md. Needs Node 24+ and a Chrome 137+ binary:
 just conformance
 
@@ -326,7 +326,7 @@ documented at its use site):
 | Variable | Read by | Effect |
 | --- | --- | --- |
 | `WEBRTC_UDP_BIND_ADDR` | `wasip3-impl` provider | IP address the in-guest `peer-connection` binds its UDP socket to (and derives its host candidate from); default IPv4 loopback. An unparsable value constructs dead connections (methods fail `closed`; the cause is printed to stderr). |
-| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations (env var in the Rust impls and under Node; a `globalThis` global of the same name in browsers) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. Latched at first read in the Rust impls. |
+| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations (the `wasip3-impl` guest and the jco host read it directly — env var under Node, a `globalThis` global of the same name in browsers; the `wasmtime-impl` library reads no environment, so its hosts — the demo binaries and the conformance adapter — wire the variable through `WasiWebrtcCtx`) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. Latched at first read everywhere. |
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
 | `CONFORMANCE_WASMTIME` | conformance wasip3 adapter, interop, netns/Shadow executors | Path of the `wasmtime` binary used to run composed components (default: `wasmtime` on `PATH`). |
 | `CONFORMANCE_NODE` | conformance interop binary | Path of the Node binary for jco peers (default: `node`). |
@@ -334,6 +334,16 @@ documented at its use site):
 | `CHROME_PATH` / `CHROME_BIN` / `PUPPETEER_EXECUTABLE_PATH` | the browser test and browser conformance adapter | Chrome/Chromium binary override (first set one wins; else auto-detected). |
 | `WASMTIME_LOG` | conformance wasip3 adapter | Forwarded to the spawned `wasmtime` peers (defaulted to surface `wasmtime-wasi-http` warnings). |
 | `SKIP_NODE`, `SKIP_NETNS_LAB` | `scripts/setup.sh` | Skip the npm installs / the netns-lab tooling install. |
+
+Every env var is an undeclared API each deployer must discover, and this
+table is its only registry — so add no new implementation-level env var
+without first considering the proper channel: `WasiWebrtcCtx` on the Wasmtime
+host, an exported configure hook for the jco module (`jco --map` gives no
+instantiation-time config channel), or the WIT surface itself (as
+`peer-connection-config` demonstrates for in-guest configuration).
+`WEBRTC_UDP_BIND_ADDR` is environment-shaped on purpose: the bind address is
+deployment topology, owned by whoever runs the process, not by the guest —
+which is why it is not a `peer-connection-config` field.
 
 ## Real signaling (`rendezvous`): the two-process echo demo
 

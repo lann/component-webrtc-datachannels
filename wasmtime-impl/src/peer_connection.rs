@@ -59,8 +59,7 @@ pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// after the close is observed locally, so messages already handed to the
 /// transport flush to the wire before teardown discards the SCTP send queue.
 /// Long enough for queued sends on any sane path, short enough that an
-/// unresponsive peer cannot hold resources meaningfully longer; matches the
-/// in-guest `wasip3-impl` driver's drain bound.
+/// unresponsive peer cannot hold resources meaningfully longer.
 const CLOSE_DRAIN: Duration = Duration::from_secs(1);
 
 /// The connection lifecycle as observed by the host, backing
@@ -517,8 +516,7 @@ impl PeerConnection {
     /// bounded [`CLOSE_DRAIN`] grace: `webrtc-rs`'s `close()` discards the
     /// SCTP send queue, so a message accepted by `send` just before `close`
     /// (for example a rendezvous sentinel the remote peer still needs) would
-    /// otherwise be lost before it reaches the wire. Mirrors the bounded
-    /// close-drain of the in-guest `wasip3-impl` driver.
+    /// otherwise be lost before it reaches the wire.
     pub fn close(&self) {
         // Fire the close signal first so pending channel operations resolve
         // with `error.closed` (the `webrtc` 0.20 wrapper reports nothing to the

@@ -56,33 +56,41 @@ const CLOSE_FLUSH_BOUND: std::time::Duration = std::time::Duration::from_secs(1)
 /// matches the W3C `RTCDataChannel` floor, where none is possible), so this
 /// bound is what protects host memory from a slow guest reader: when it would
 /// be exceeded the channel is closed and, once the buffered backlog drains,
-/// `receive` fails with `error.receive-buffer-overflow`. Mirrors the outbound
-/// SCTP send-buffer bound the jco hosts use. Overridable through
-/// [`MAX_INBOUND_BUFFER_ENV`].
+/// `receive` fails with `error.receive-buffer-overflow`. The value is the
+/// 8 MiB convention the WIT inbound-buffering contract documents. Embedders
+/// override it per context through
+/// [`WasiWebrtcCtx::set_max_inbound_buffer_bytes`](crate::WasiWebrtcCtx::set_max_inbound_buffer_bytes).
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
-/// The environment variable overriding [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]
-/// (a byte count). Primarily a test knob: the conformance suite shrinks the
-/// bound so its overflow probe needs only a small flood.
+/// The conventional environment variable naming an inbound-buffer-bound
+/// override (a byte count). Primarily a test knob: the conformance suite
+/// shrinks the bound so its overflow probe needs only a small flood.
+///
+/// The library itself never reads it — hosts that honor the variable read it
+/// through [`max_inbound_buffer_bytes_from_env`] and apply the result via
+/// [`WasiWebrtcCtx::set_max_inbound_buffer_bytes`](crate::WasiWebrtcCtx::set_max_inbound_buffer_bytes).
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
-/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set,
-/// else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. A set-but-invalid value (not a
-/// positive integer) panics rather than silently reverting to the default:
-/// the variable is primarily a test knob, and a typo that silently restores
-/// the 8 MiB bound would invalidate exactly the test that set it.
-pub(crate) fn max_inbound_buffer_bytes() -> usize {
-    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| match std::env::var(MAX_INBOUND_BUFFER_ENV) {
+/// Read the [`MAX_INBOUND_BUFFER_ENV`] override from the process environment:
+/// `Ok(None)` when the variable is unset or empty, `Ok(Some(bytes))` for a
+/// positive byte count, and an error otherwise — a host honoring the variable
+/// should fail loud on a malformed value rather than silently revert to the
+/// default (the variable is primarily a test knob, and a typo that silently
+/// restored the 8 MiB bound would invalidate exactly the test that set it).
+pub fn max_inbound_buffer_bytes_from_env() -> wasmtime::Result<Option<usize>> {
+    match std::env::var(MAX_INBOUND_BUFFER_ENV) {
         Ok(value) if !value.is_empty() => value
-            .parse()
+            .parse::<usize>()
             .ok()
             .filter(|&bytes| bytes > 0)
-            .unwrap_or_else(|| {
-                panic!("invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count")
+            .map(Some)
+            .ok_or_else(|| {
+                wasmtime::Error::msg(format!(
+                    "invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count"
+                ))
             }),
-        _ => DEFAULT_MAX_INBOUND_BUFFER_BYTES,
-    })
+        _ => Ok(None),
+    }
 }
 
 /// The buffered-byte accounting shared between a channel's pump (which

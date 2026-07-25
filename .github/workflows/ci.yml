@@ -96,8 +96,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Node 24+ so `node --experimental-wasm-jspi` has JSPI
-          # (WebAssembly.Suspending); matches the conformance workflow and the
-          # documented prerequisite in AGENTS.md.
+          # (WebAssembly.Suspending).
           node-version: "24"
           # Cache the Node host's npm downloads so `npm install` in setup.sh
           # restores from cache instead of refetching every run.

@@ -256,7 +256,7 @@ interface connections {
     /// cannot provide it; other implementations deliberately match that floor
     /// so the same guest behaves compatibly everywhere.) Instead, every
     /// implementation buffers inbound messages up to an implementation-defined
-    /// bound (8 MiB of payload bytes in the provided implementations). If the
+    /// bound (8 MiB of payload bytes by convention). If the
     /// buffer overflows, the channel is closed: messages buffered before the
     /// overflow remain receivable, later messages are discarded, and once the
     /// buffered backlog is drained `receive` fails with
@@ -396,11 +396,9 @@ interface connections {
     ///
     /// This is the guest-driven connection surface: it mirrors enough of
     /// `RTCPeerConnection` to drive a real SDP offer/answer exchange and
-    /// trickle ICE. It is implemented by the Wasmtime host, the conformance
-    /// jco host, and the in-guest `wasip3-impl` provider, and is exercised
-    /// across all of them by the conformance suite. See the demo `rendezvous`
-    /// interface for the transport that would carry these blobs between remote
-    /// peers.
+    /// trickle ICE. The signaling blobs it produces and consumes are opaque
+    /// to this interface; whatever out-of-band transport the embedding
+    /// provides carries them between the two peers.
     ///
     /// # Lifecycle
     ///
@@ -476,9 +474,9 @@ interface connections {
         /// Transient granularity is implementation-defined: an implementation
         /// may never emit `disconnected` (or may pass through `connecting`
         /// unobserved) — guests must not depend on seeing any non-terminal
-        /// state. This complements the **latched** `wait-connected`, whose
-        /// semantics are unchanged: a connection that connected and later
-        /// failed reports `failed` here while `wait-connected` still
+        /// state. This complements the **latched** `wait-connected`, which is
+        /// unaffected by taking this stream: a connection that connected and
+        /// later failed reports `failed` here while `wait-connected` still
         /// resolves `ok`.
         ///
         /// The stream may be taken **once**: the first call returns it, and

@@ -66,8 +66,8 @@ pub struct InboundMessage {
 /// future resolves as soon as the version has advanced past it, so a
 /// notification between the check and the await is never lost. The pump
 /// notifies after applying core events; `begin_close` and the
-/// `receive-via-stream` claim notify directly. This replaces fixed-interval
-/// polling, so idle waiters wake only on actual state changes.
+/// `receive-via-stream` claim notify directly, so idle waiters wake only on
+/// actual state changes, never on a timer.
 #[derive(Default)]
 pub struct StateWatch {
     version: Cell<u64>,
@@ -126,7 +126,8 @@ impl Future for Changed {
 /// matches the W3C `RTCDataChannel` floor, where none is possible), so this
 /// bound is what protects memory from a slow reader: when it would be exceeded
 /// the channel is closed and, once the buffered backlog drains, `receive`
-/// fails with `error.receive-buffer-overflow`. Matches the other hosts' bound.
+/// fails with `error.receive-buffer-overflow`. The value is the 8 MiB
+/// convention the WIT inbound-buffering contract documents.
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
 /// The environment variable overriding [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]

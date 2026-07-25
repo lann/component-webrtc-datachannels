@@ -10,7 +10,7 @@
 //! WebRTC stack — not merely against another instance of this repository's
 //! shared guest — and a red one implicates the target, not the pair.
 //!
-//! Two implementation-vs-implementation pairs are retained: `wasmtime` <->
+//! Two implementation-vs-implementation pairs run directly: `wasmtime` <->
 //! `wasip3-guest` (webrtc-rs and the sans-I/O `rtc` stack, the two native
 //! stacks in this repository, meeting each other) and `wasmtime` <->
 //! `jco-node` (the wasm guest crossing the host-language boundary). The
@@ -42,18 +42,13 @@ use wasmtime::Engine;
 
 use conformance_adapter_common::{
     fold_two, params_for, run_corpus, run_peer_command, run_test, write_report, AdapterReport,
-    RawResult, TestOutcome, TWO_PEER_TESTS,
+    RawResult, TestOutcome, LOOPBACK_TEST_TIMEOUT, TWO_PEER_TESTS,
 };
 use conformance_adapter_wasip3::Wasip3Peer;
 use conformance_adapter_wasmtime::{build_engine, make_config, run_instance, Role};
 
-/// The hang guard for one test. Generous: everything is on the clock —
-/// including out-of-process peer startup (a fresh Node process compiling the
-/// JSPI wasm, or a whole headless Chromium) under 4-wide CI contention — while
-/// the hosts' shorter `wait-connected` timeouts (20-30s) fire first, so a
-/// genuine connection failure still surfaces as a WIT outcome rather than
-/// tripping this bound.
-const TEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The hang guard for one test (see [`LOOPBACK_TEST_TIMEOUT`]).
+const TEST_TIMEOUT: Duration = LOOPBACK_TEST_TIMEOUT;
 
 /// The corpus subset for the browser-backed reference pairs: each test boots
 /// its own headless Chromium, so they run the flagship handshake only, keeping
@@ -243,7 +238,7 @@ async fn run_interop_test(
 }
 
 /// Run the interop pairs (each target against the reference peer in both
-/// orders, plus the retained implementation pairs).
+/// orders, plus the direct implementation pairs).
 #[derive(Debug, Parser)]
 #[command(name = "conformance-interop", version)]
 struct Cli {
@@ -383,7 +378,7 @@ async fn main() -> Result<()> {
             answerer: Side::Reference,
             tests: TWO_PEER_TESTS,
         },
-        // Retained implementation-vs-implementation pairs.
+        // Direct implementation-vs-implementation pairs.
         Direction {
             target: "wasmtime-x-jco-node",
             offerer: Side::Wasmtime,

@@ -286,6 +286,34 @@ pub fn params_for(test_id: &str) -> (u32, u32) {
 /// of the corpus).
 pub const CONFORMANCE_MAX_INBOUND_BUFFER_BYTES: u32 = 512 * 1024;
 
+/// The per-test hang guard shared by the loopback adapters. Generous:
+/// everything an attempt does is on the clock — including any out-of-process
+/// peer startup (a `wasmtime run` of a composed component, a fresh Node
+/// process compiling JSPI wasm, or a whole headless Chromium) under 4-wide CI
+/// contention — while the implementations' shorter `wait-connected` timeouts
+/// (20-30s) fire first, so a genuine connection failure still surfaces as a
+/// WIT outcome rather than tripping this bound.
+pub const LOOPBACK_TEST_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// The `wasmtime run` invocation prefix (subcommand and flags) shared by every
+/// runner of the composed wasip3 conformance component: the component-model
+/// async ABI plus the WASIp3 host APIs (`cli`, `p3`, `http`) and network
+/// access for the provider's `wasi:sockets` UDP and the mailbox's outgoing
+/// HTTP.
+pub const COMPOSED_WASMTIME_RUN_FLAGS: &[&str] = &[
+    "run",
+    "-W",
+    "component-model-async=y",
+    "-S",
+    "cli",
+    "-S",
+    "p3",
+    "-S",
+    "http",
+    "-S",
+    "inherit-network",
+];
+
 /// The environment variable naming the implementations' inbound-buffer bound.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
@@ -443,8 +471,9 @@ pub fn default_jobs() -> usize {
 /// the interop pairs): 2 × the available cores, clamped to [2, 8].
 ///
 /// These per-test runtimes put startup on the hang-guard clock, and their
-/// flake history is load-induced timeouts — so they keep the previously
-/// proven load on 2-core CI (4) while still scaling with larger machines.
+/// flake history is load-induced timeouts — so the multiplier is
+/// conservative: 4 jobs on 2-core CI (the load proven stable there), scaling
+/// with larger machines.
 pub fn default_jobs_process_heavy() -> usize {
     scaled_jobs(2, 8)
 }
