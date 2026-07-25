@@ -28,7 +28,9 @@
 //! Scope: IPv4 options only, and exactly the syscalls quinn-udp 0.6 uses. If
 //! a future `webrtc`/quinn-udp bump grows the syscall surface, the symptom is
 //! the peer aborting (targeted `setsockopt`) or Shadow's "unsupported syscall"
-//! warning plus a hang, and this module is where to extend the bridge.
+//! warning plus a hang, and this module is where to extend the bridge. If
+//! Shadow instead grows support for these syscalls (or an upstream
+//! quinn-udp/webrtc release tolerates their absence), this shim can be retired.
 
 use std::ffi::{c_int, c_uint, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};

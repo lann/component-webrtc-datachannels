@@ -90,39 +90,6 @@ conformance tree for:
 
 ## E. Implementations
 
-### E5. Retire the Shadow syscall shim once upstream closes the gap
-
-`webrtc` is at `0.20.0-rc.4`; its quinn-udp GSO/GRO UDP batching
-([`webrtc-rs/webrtc#820`](https://github.com/webrtc-rs/webrtc/pull/820))
-needs syscalls the Shadow simulator does not implement — Shadow rejects the
-`IPPROTO_IP` receive-metadata `setsockopt`s (`IP_PKTINFO` et al.) with
-`ENOPROTOOPT`, which quinn-udp treats as fatal to socket construction, and
-does not implement `recvmmsg` (`ENOSYS`), which quinn-udp's Linux receive
-path calls with no fallback. The conformance Shadow lab bridges this with
-an in-binary syscall shim compiled into its `conformance-peer` build
-(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, armed by the
-`CONFORMANCE_SHADOW_SYSCALL_SHIM` environment variable the Shadow executor
-sets on its simulated peers): each override forwards the call and stubs only
-Shadow's documented failure; anything unexpected aborts the peer. Loopback
-and netns paths never set the variable and get pure pass-through.
-
-The shim is a bridge, not a fix. Retire it when any upstream lands and
-reaches a published release:
-
-- **quinn-udp**: tolerate the receive-metadata option failures (a branch
-  exists:
-  [`lann/quinn#tolerate-unsupported-recv-cmsg-options`](https://github.com/lann/quinn/tree/tolerate-unsupported-recv-cmsg-options))
-  *and* restore a `recvmmsg` `ENOSYS` fallback (existed pre-0.6; both are
-  needed).
-- **webrtc**: degrade `wrap_udp_socket` to a plain socket when
-  `UdpSocketState::new` fails, honoring #820's per-packet-fallback promise.
-- **Shadow**: implement `recvmmsg` (loop the existing `recvmsg` handler)
-  and the `IP_PKTINFO`/`IP_MTU_DISCOVER`/`IP_RECVTOS` options.
-
-If a future `webrtc` bump grows the syscall surface again, the shim aborts
-(unexpected `setsockopt` errno) or the lab hangs with Shadow's "unsupported
-syscall" warning — extend the shim or fix upstream, per its module docs.
-
 ### E6. Unwind the `rtc` git pin once upstream ships a release
 
 The `rtc` dependency is pinned to an upstream `master` commit (`Cargo.toml`

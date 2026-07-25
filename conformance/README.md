@@ -334,8 +334,9 @@ received and stub only Shadow's documented failure (`ENOPROTOOPT` for the
 `recvmsg`); an unexpected error aborts the peer instead of being masked. The
 stubs engage only when the `CONFORMANCE_SHADOW_SYSCALL_SHIM` environment
 variable is set, which the executor does for the peer processes it places
-inside the simulation — every other environment gets pure pass-through. TODO
-item E5 tracks the upstream fixes that would retire the shim.
+inside the simulation — every other environment gets pure pass-through. If
+Shadow (or quinn-udp/webrtc upstream) grows support for these syscalls, the
+shim can be retired.
 
 CI runs the Shadow lab in a dedicated job (`shadow-lab` in
 [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml));
