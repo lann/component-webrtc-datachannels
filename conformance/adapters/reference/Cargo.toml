@@ -1,0 +1,19 @@
+[package]
+name = "conformance-adapter-reference"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The non-wasm reference peer for the conformance suite: a native binary driving Google's libwebrtc (via LiveKit's Rust bindings) through the suite's mailbox signaling and two-peer test corpus, with no wasm component on its side of the wire."
+
+[[bin]]
+name = "conformance-reference-peer"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libwebrtc = "0.3.42"
+reqwest = { version = "0.12", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }

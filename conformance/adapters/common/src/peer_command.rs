@@ -70,8 +70,8 @@ pub enum PeerKind {
     Wasmtime,
     /// The composed wasip3 conformance component under `wasmtime run`.
     Wasip3Guest,
-    /// The non-wasm reference peer: plain Node driving `RTCPeerConnection`
-    /// (libwebrtc via `@roamhq/wrtc`) directly.
+    /// The non-wasm reference peer: a native binary driving Google's
+    /// libwebrtc (via LiveKit's Rust bindings) directly.
     Reference,
 }
 
@@ -116,25 +116,23 @@ pub enum PeerCommand {
         wasmtime_bin: PathBuf,
         component: PathBuf,
     },
-    /// `node <peer.mjs> …` — libwebrtc gathers candidates from the host's own
-    /// interfaces, so the placement's bind address is not passed (each lab
-    /// host has exactly one routable address).
-    Reference { node_bin: PathBuf, script: PathBuf },
+    /// `conformance-reference-peer …` — libwebrtc gathers candidates from the
+    /// host's own interfaces, so the placement's bind address is not passed
+    /// (each lab host has exactly one routable address).
+    Reference { peer_bin: PathBuf },
 }
 
 impl PeerCommand {
     /// Resolve `kind`'s binaries and components to absolute paths. `guest` and
     /// `peer_bin` serve the `wasmtime` kind; `wasmtime_bin` (a path or a bare
     /// name looked up on `PATH`) and `component` serve the `wasip3-guest`
-    /// kind; `node_bin` (path or bare name) and `reference_peer` serve the
-    /// `reference` kind.
+    /// kind; `reference_peer` serves the `reference` kind.
     pub fn resolve(
         kind: PeerKind,
         peer_bin: &Path,
         guest: &Path,
         wasmtime_bin: &str,
         component: &Path,
-        node_bin: &str,
         reference_peer: &Path,
     ) -> Result<Self> {
         Ok(match kind {
@@ -147,8 +145,7 @@ impl PeerCommand {
                 component: absolute(component)?,
             },
             PeerKind::Reference => PeerCommand::Reference {
-                node_bin: resolve_bin(node_bin)?,
-                script: absolute(reference_peer)?,
+                peer_bin: absolute(reference_peer)?,
             },
         })
     }
@@ -238,11 +235,8 @@ impl PeerCommand {
                 args.extend(shared_peer_args);
                 args
             }
-            PeerCommand::Reference { node_bin, script } => {
-                let mut args = vec![
-                    node_bin.to_string_lossy().into_owned(),
-                    script.to_string_lossy().into_owned(),
-                ];
+            PeerCommand::Reference { peer_bin } => {
+                let mut args = vec![peer_bin.to_string_lossy().into_owned()];
                 args.extend(shared_peer_args);
                 if let Some(ice) = run.ice {
                     if let Some(url) = &ice.server_url {
@@ -345,12 +339,10 @@ mod tests {
     #[test]
     fn reference_argv_omits_bind_addr_and_maps_ice() {
         let command = PeerCommand::Reference {
-            node_bin: PathBuf::from("/bin/node"),
-            script: PathBuf::from("/peer.mjs"),
+            peer_bin: PathBuf::from("/bin/conformance-reference-peer"),
         };
         let argv = command.argv(&run(None)).unwrap();
-        assert_eq!(argv[0], "/bin/node");
-        assert_eq!(argv[1], "/peer.mjs");
+        assert_eq!(argv[0], "/bin/conformance-reference-peer");
         assert!(!argv.contains(&"--bind-addr".to_string()));
         assert!(!argv.contains(&"--ice-server-url".to_string()));
 

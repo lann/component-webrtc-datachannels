@@ -190,43 +190,28 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E12. Reference peer receive-side reordering (node-webrtc); rtc default-options bug
+### E12. node-webrtc receive-side reordering: latent in jco-node
 
-The non-wasm reference peer intermittently (~10-25% of runs over loopback)
-receives an `ordered: true` channel's messages with the head of the sequence
-displaced past later messages — e.g. indexes `8..15,0..7` or `1,0,2..15` —
-when the remote peer starts sending immediately after channel open. A
-standalone two-process reproduction (upstream `webrtc` 0.20.0-rc.4 offerer,
-no repository code; sequential awaited sends) with the sender's SCTP stack
-instrumented proved the sender's wire metadata correct (`U = 0`, stream
-sequence numbers in application send order) while a bare `onmessage` handler
-still observed the permutation — so the defect is in **`@roamhq/wrtc`'s
-(node-webrtc's) native→JS message dispatch**, above SCTP: an SCTP-conformant
-receiver cannot deliver `U = 0` chunks of one stream out of SSN order. The
-root cause is visible in node-webrtc's `rtc_data_channel.cc`: the JS
-wrapper's constructor re-registers the libwebrtc observer (new messages then
-dispatch directly to the JS loop) *before* re-dispatching the backlog the
-temporary pre-wrapper observer cached, so open-adjacent arrivals overtake
-every earlier message. Both of this repository's senders were exonerated:
-the wasmtime host and the wasip3-impl provider pass explicit
-`ordered: true` and emit correct metadata.
-
-The same investigation found a real but distinct upstream `rtc` bug this
-suite does *not* hit: `create_data_channel(label, None)` (derived
-`DataChannelParameters::default()`) silently creates an **unordered** channel
-(`ordered: false`), inverting the W3C default its own comments cite — DCEP
-`ReliableUnordered`, `U = 1` on every chunk.
-
-Both write-ups with reproductions live with the local rtc checkout
-(`rtc-ordered-delivery-bug.md`, `wrtc-receive-reordering-bug.md`, and the
-`rtc-ordering-repro/` harness). Until the node-webrtc fix lands, the
-`ordering` test carries the `ordered-delivery` tag and the four pair
-directions where the reference peer receives from a fast-opening sender
-declare it unsupported in `conformance/manifests.toml` (a flaky failure
-cannot be an `expected-fail`: it would `unexpected-pass` on green runs).
-File upstream: WonderInventions/node-webrtc (the receive-side reorder) and
-webrtc-rs/rtc (the default-options ordering inversion); drop the manifest
-entries once a fixed `@roamhq/wrtc` ships.
+`@roamhq/wrtc` (node-webrtc) can dispatch an ordered channel's messages to
+JS with the head of the sequence displaced past later messages: its
+`RTCDataChannel` constructor re-registers the libwebrtc observer (new
+messages then dispatch directly to the JS loop) *before* re-dispatching the
+backlog the temporary pre-wrapper observer cached, so arrivals adjacent to
+channel open overtake every earlier message (`rtc_data_channel.cc`; a
+standalone reproduction with sender-side SCTP instrumentation proved the
+senders' wire metadata correct). The reference peer was moved off
+node-webrtc (to Google's libwebrtc via LiveKit's Rust bindings) and no
+longer exposes it, and the `ordering` manifest skips were dropped — but the
+**jco-node host still runs on `@roamhq/wrtc`**, so the bug is latent behind
+the jco-node target and its pairs, historically masked by the JSPI startup
+delay between channel open and first sends. If `ordering` ever flakes on a
+jco-node row with a head-displaced index sequence, this is the cause: the
+`ordering` test retains its `ordered-delivery` tag so a manifest entry can
+scope the skip immediately. Upstream write-ups and the reproduction live
+with the local rtc checkout (`wrtc-receive-reordering-bug.md`,
+`rtc-ordered-delivery-bug.md` — the latter a distinct `rtc` default-options
+bug found in the same investigation — and `rtc-ordering-repro/`); file them
+at WonderInventions/node-webrtc and webrtc-rs/rtc.
 
 ### E13. Unify and shrink the implementations' environment-variable surface
 

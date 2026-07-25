@@ -22,7 +22,8 @@ timeout := "600"
 # browser-first host transpiled by jco, run under Node and headless Chromium),
 # wasip3-guest (the whole WebRTC stack in wasm: the guest composed with the
 # wasip3-impl provider, run under `wasmtime run`), and reference (the non-wasm
-# reference peer: plain Node over @roamhq/wrtc). Interop anchors every target
+# reference peer: Google's libwebrtc via LiveKit's Rust bindings). Interop
+# anchors every target
 # against the reference peer in both orders (jco-browser at handshake-only
 # smoke scope) and retains the wasmtime<->jco-node and wasmtime<->wasip3-guest
 # implementation pairs. The jco targets need a JSPI-capable Node (24+; see
@@ -81,22 +82,22 @@ build-wasip3: build-guest
 build-signalingd:
     cargo build -p conformance-signalingd
 
-# Install the non-wasm reference peer's npm dependencies (@roamhq/wrtc).
-npm-reference:
-    cd conformance/adapters/reference && npm install --no-fund --no-audit
+# Build the non-wasm reference peer (Google's libwebrtc via LiveKit's Rust
+# bindings; the first build downloads the prebuilt static libwebrtc).
+build-reference: (bin "conformance-adapter-reference" "conformance-reference-peer")
 
 # Build the conformance-runner result classifier.
 build-runner:
     cargo build -p conformance-runner
 
 # Build everything the loopback suite (`run-matrix`) executes.
-build-matrix: build-guest transpile-guest build-wasip3 build-signalingd build-runner npm-reference \
+build-matrix: build-guest transpile-guest build-wasip3 build-signalingd build-runner build-reference \
     (bin "conformance-adapter-wasmtime" "conformance-adapter-wasmtime") \
     (bin "conformance-adapter-wasip3" "conformance-adapter-wasip3") \
     (bin "conformance-adapter-wasmtime" "conformance-interop")
 
 # Build everything the Shadow lab (`run-shadow`) executes.
-build-shadow: build-guest build-wasip3 build-signalingd build-runner npm-reference \
+build-shadow: build-guest build-wasip3 build-signalingd build-runner build-reference \
     (bin "conformance-adapter-wasmtime" "conformance-peer") \
     (bin "conformance-adapter-common" "conformance-shadow")
 
@@ -142,7 +143,7 @@ jco-browser: transpile-guest build-signalingd && run-jco-browser
 # real WebRTC data channel. Writes conformance/results/<pair>.json per
 # direction.
 [doc("Build + run the interop pairs (reference anchoring + implementation pairs)")]
-interop: transpile-guest build-wasip3 build-signalingd npm-reference (bin "conformance-adapter-wasmtime" "conformance-interop") && run-interop
+interop: transpile-guest build-wasip3 build-signalingd build-reference (bin "conformance-adapter-wasmtime" "conformance-interop") && run-interop
 
 # Run the two-peer corpus inside the Shadow network simulator
 # (https://github.com/shadow/shadow). Like the netns lab it places the two peers
@@ -233,7 +234,7 @@ run-shadow:
         --out conformance/results
     timeout {{timeout}} target/release/conformance-shadow \
         --target reference --peer-kind reference \
-        --reference-peer conformance/adapters/reference/peer.mjs \
+        --reference-peer target/release/conformance-reference-peer \
         --signaling-bin target/debug/conformance-signalingd \
         --data-dir target/shadow-data-reference \
         --out conformance/results
@@ -291,7 +292,7 @@ netns scenario="lan" peer_kind="wasmtime": build-guest build-signalingd \
         just conformance::build-wasip3
     fi
     if [ "{{peer_kind}}" = "reference" ]; then
-        just conformance::npm-reference
+        just conformance::build-reference
     fi
     sudo timeout {{timeout}} target/release/conformance-netns \
         --scenario {{scenario}} \
