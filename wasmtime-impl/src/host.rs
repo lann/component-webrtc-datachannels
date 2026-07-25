@@ -23,17 +23,20 @@ use wasmtime::{AsContextMut, Result, StoreContextMut};
 
 use crate::bindings::webrtc_datachannels::connections::{
     self, HostDataChannel, HostDataChannelOptions, HostDataChannelWithStore, HostPeerConnection,
-    HostPeerConnectionWithStore,
+    HostPeerConnectionConfig, HostPeerConnectionWithStore,
 };
 use crate::bindings::webrtc_datachannels::types::{
-    self, Error, IceCandidate, Message, MessageKind, SdpType, SendViaStreamError,
-    SessionDescription, StreamMessage,
+    self, ConfigError, ConnectionState, DataChannelState, Error, IceCandidate, IceServer,
+    IceTransportPolicy, Message, MessageKind, SdpType, SendViaStreamError, SessionDescription,
+    StreamMessage,
 };
-use crate::data_channel::{CloseSignal, InboundMessage, InboundQueue, WiredFuture};
+use crate::data_channel::{ChanState, CloseSignal, InboundMessage, InboundQueue, WiredFuture};
 use crate::error::{WebrtcError, WebrtcResult};
-use crate::peer_connection::{LocalCandidate, SdpKind};
+use crate::peer_connection::{ConnectionPhase, LocalCandidate, SdpKind};
+use crate::state_watch::StateWatch;
 use crate::{
-    DataChannel, DataChannelOptions, PeerConnection, WasiWebrtc, WasiWebrtcCtxView, WasiWebrtcView,
+    DataChannel, DataChannelOptions, PeerConnection, PeerConnectionConfig, WasiWebrtc,
+    WasiWebrtcCtxView, WasiWebrtcView, WebrtcIceServer,
 };
 
 use webrtc::data_channel::DataChannel as WebrtcDataChannel;
@@ -373,9 +376,81 @@ impl<D: Send + 'static> StreamConsumer<D> for OutboundStreamMessages {
     }
 }
 
+/// A [`StreamProducer`] backing the `state-changes` streams: a coalescing
+/// watch over a [`StateWatch`], converting each internal state into its WIT
+/// enum on demand. The first element reflects the state at the first read;
+/// consecutive elements are distinct; the stream ends after a terminal state
+/// (per the watch's own terminal predicate).
+struct StateChanges<T, U> {
+    /// The watch, or `None` if `state-changes` was already claimed (in which
+    /// case the stream is empty).
+    watch: Option<Arc<StateWatch<T>>>,
+    /// The version of the last-delivered state (`None` before the first).
+    delivered: Option<u64>,
+    convert: fn(T) -> U,
+}
+
+impl<D, T, U> StreamProducer<D> for StateChanges<T, U>
+where
+    D: Send + 'static,
+    T: Copy + PartialEq + Send + Unpin + 'static,
+    U: Send + Sync + Unpin + 'static,
+{
+    type Item = U;
+    type Buffer = Option<U>;
+
+    fn poll_produce<'a>(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        _store: StoreContextMut<'a, D>,
+        mut destination: Destination<'a, Self::Item, Self::Buffer>,
+        finish: bool,
+    ) -> Poll<Result<StreamResult>> {
+        let this = self.get_mut(); // safe: StateChanges is Unpin
+        let Some(watch) = this.watch.as_ref() else {
+            return Poll::Ready(Ok(StreamResult::Dropped));
+        };
+        let (value, version) = watch.current();
+        match this.delivered {
+            // Already delivered this version: the stream ends after a
+            // terminal state, otherwise wait for the next change.
+            Some(seen) if seen == version => {
+                if watch.is_terminal_now() {
+                    return Poll::Ready(Ok(StreamResult::Dropped));
+                }
+                match watch.poll_changed(seen, cx) {
+                    Poll::Ready(_) => {
+                        // Changed between `current` and here; re-poll.
+                        cx.waker().wake_by_ref();
+                        Poll::Pending
+                    }
+                    Poll::Pending => {
+                        if finish {
+                            Poll::Ready(Ok(StreamResult::Cancelled))
+                        } else {
+                            Poll::Pending
+                        }
+                    }
+                }
+            }
+            // A new (or first) state: deliver it.
+            _ => {
+                this.delivered = Some(version);
+                destination.set_buffer(Some((this.convert)(value)));
+                Poll::Ready(Ok(StreamResult::Completed))
+            }
+        }
+    }
+}
+
 impl HostDataChannel for WasiWebrtcCtxView<'_> {
     fn label(&mut self, self_: Resource<DataChannel>) -> Result<String> {
         Ok(self.table.get(&self_)?.label())
+    }
+
+    fn close(&mut self, self_: Resource<DataChannel>) -> Result<()> {
+        self.table.get(&self_)?.close();
+        Ok(())
     }
 }
 
@@ -387,7 +462,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
     ) -> Result<std::result::Result<(), Error>> {
         let (wired, conn_closed) = accessor.with(|mut access| {
             let channel = access.get().table.get(&self_)?;
-            Ok::<_, wasmtime::Error>((channel.wired(), channel.conn_closed()))
+            Ok::<_, wasmtime::Error>((channel.wired(), channel.closed_signal()))
         })?;
 
         // The owning peer connection closed: the `webrtc` 0.20 wrapper would
@@ -430,7 +505,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
                     channel.wired(),
                     channel.stream_started(),
                     channel.is_stream_receiving(),
-                    channel.conn_closed(),
+                    channel.closed_signal(),
                 ))
             })?;
 
@@ -479,7 +554,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
     ) -> Result<std::result::Result<(), SendViaStreamError>> {
         let (wired, conn_closed) = accessor.with(|mut access| {
             let channel = access.get().table.get(&self_)?;
-            Ok::<_, wasmtime::Error>((channel.wired(), channel.conn_closed()))
+            Ok::<_, wasmtime::Error>((channel.wired(), channel.closed_signal()))
         })?;
         let closed_err = |sent| {
             Ok(Err(SendViaStreamError {
@@ -569,7 +644,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
             (
                 channel.begin_stream_receiving(),
                 channel.wired(),
-                channel.conn_closed(),
+                channel.closed_signal(),
             )
         };
         if !claimed {
@@ -586,6 +661,28 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         Ok(Ok(reader))
     }
 
+    fn state_changes(
+        mut access: wasmtime::component::Access<'_, T, Self>,
+        self_: Resource<DataChannel>,
+    ) -> Result<StreamReader<DataChannelState>> {
+        let channel = access.get().table.get(&self_)?;
+        // Take-once per the WIT contract: a later call returns a stream that
+        // ends immediately.
+        let watch = channel.take_state_stream().then(|| channel.state_watch());
+        StreamReader::new(
+            access,
+            StateChanges {
+                watch,
+                delivered: None,
+                convert: |state| match state {
+                    ChanState::Connecting => DataChannelState::Connecting,
+                    ChanState::Open => DataChannelState::Open,
+                    ChanState::Closing => DataChannelState::Closing,
+                    ChanState::Closed => DataChannelState::Closed,
+                },
+            },
+        )
+    }
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<DataChannel>) -> Result<()> {
         accessor.with(|mut access| {
             access.get().table.delete(rep)?;
@@ -609,10 +706,107 @@ fn to_sdp_kind(kind: SdpType) -> WebrtcResult<SdpKind> {
     }
 }
 
+impl HostPeerConnectionConfig for WasiWebrtcCtxView<'_> {
+    fn new(&mut self) -> Result<Resource<PeerConnectionConfig>> {
+        Ok(self.table.push(PeerConnectionConfig::default())?)
+    }
+
+    fn ice_servers(&mut self, self_: Resource<PeerConnectionConfig>) -> Result<Vec<IceServer>> {
+        Ok(self
+            .table
+            .get(&self_)?
+            .ice_servers
+            .iter()
+            .map(|server| IceServer {
+                urls: server.urls.clone(),
+                username: server.username.clone(),
+                credential: server.credential.clone(),
+            })
+            .collect())
+    }
+
+    fn set_ice_servers(
+        &mut self,
+        self_: Resource<PeerConnectionConfig>,
+        servers: Vec<IceServer>,
+    ) -> Result<std::result::Result<(), ConfigError>> {
+        // Validate eagerly, per the WIT contract: an accepted config is
+        // binding, so a malformed entry must be rejected here rather than
+        // surfacing at connection time.
+        for server in &servers {
+            if server.urls.is_empty() {
+                return Ok(Err(ConfigError::Invalid(
+                    "ice-server has no urls".to_string(),
+                )));
+            }
+            for url in &server.urls {
+                if !["stun:", "stuns:", "turn:", "turns:"]
+                    .iter()
+                    .any(|scheme| url.starts_with(scheme))
+                {
+                    return Ok(Err(ConfigError::Invalid(format!(
+                        "ice-server url {url:?} has no stun:/stuns:/turn:/turns: scheme"
+                    ))));
+                }
+            }
+        }
+        self.table.get_mut(&self_)?.ice_servers = servers
+            .into_iter()
+            .map(|server| WebrtcIceServer {
+                urls: server.urls,
+                username: server.username,
+                credential: server.credential,
+            })
+            .collect();
+        Ok(Ok(()))
+    }
+
+    fn ice_transport_policy(
+        &mut self,
+        self_: Resource<PeerConnectionConfig>,
+    ) -> Result<IceTransportPolicy> {
+        Ok(if self.table.get(&self_)?.relay_only {
+            IceTransportPolicy::Relay
+        } else {
+            IceTransportPolicy::All
+        })
+    }
+
+    fn set_ice_transport_policy(
+        &mut self,
+        self_: Resource<PeerConnectionConfig>,
+        policy: IceTransportPolicy,
+    ) -> Result<std::result::Result<(), ConfigError>> {
+        self.table.get_mut(&self_)?.relay_only = matches!(policy, IceTransportPolicy::Relay);
+        Ok(Ok(()))
+    }
+}
+
+impl<T: Send> connections::HostPeerConnectionConfigWithStore<T> for WasiWebrtc {
+    async fn drop(accessor: &Accessor<T, Self>, rep: Resource<PeerConnectionConfig>) -> Result<()> {
+        accessor.with(|mut access| {
+            access.get().table.delete(rep)?;
+            Ok(())
+        })
+    }
+}
+
 impl HostPeerConnection for WasiWebrtcCtxView<'_> {
-    fn new(&mut self) -> Result<Resource<PeerConnection>> {
+    fn new(
+        &mut self,
+        config: Option<Resource<PeerConnectionConfig>>,
+    ) -> Result<Resource<PeerConnection>> {
         let hook = self.ctx.setting_engine_hook();
-        let ice = self.ctx.ice_config();
+        // A supplied config was accepted in full by its setters, so it is
+        // authoritative for the connectivity it carries (ICE servers, the
+        // candidate policy); the host's bind addresses stay host-side. `none`
+        // leaves the host's configured defaults in place.
+        let mut ice = self.ctx.ice_config();
+        if let Some(config) = config {
+            let config = self.table.delete(config)?;
+            ice.ice_servers = config.ice_servers;
+            ice.relay_only = config.relay_only;
+        }
         let connect_timeout = self.ctx.connect_timeout();
         let max_inbound = self.ctx.max_inbound_buffer_bytes();
         Ok(self.table.push(PeerConnection::new_with(
@@ -829,6 +1023,32 @@ impl<T: WasiWebrtcView + 'static> HostPeerConnectionWithStore<T> for WasiWebrtc 
             .map_err(Error::from))
     }
 
+    fn state_changes(
+        mut access: Access<'_, T, Self>,
+        self_: Resource<PeerConnection>,
+    ) -> Result<StreamReader<ConnectionState>> {
+        let connection = access.get().table.get(&self_)?;
+        // Take-once per the WIT contract: a later call returns a stream that
+        // ends immediately.
+        let watch = connection
+            .take_state_stream()
+            .then(|| connection.state_watch());
+        StreamReader::new(
+            access,
+            StateChanges {
+                watch,
+                delivered: None,
+                convert: |phase| match phase {
+                    ConnectionPhase::New => ConnectionState::New,
+                    ConnectionPhase::Connecting => ConnectionState::Connecting,
+                    ConnectionPhase::Connected => ConnectionState::Connected,
+                    ConnectionPhase::Disconnected => ConnectionState::Disconnected,
+                    ConnectionPhase::Failed => ConnectionState::Failed,
+                    ConnectionPhase::Closed => ConnectionState::Closed,
+                },
+            },
+        )
+    }
     async fn wait_connected(
         accessor: &Accessor<T, Self>,
         self_: Resource<PeerConnection>,

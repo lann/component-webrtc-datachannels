@@ -36,6 +36,7 @@ mod data_channel;
 mod error;
 mod host;
 mod peer_connection;
+mod state_watch;
 
 pub use data_channel::{DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES, MAX_INBOUND_BUFFER_ENV};
 pub use error::{WebrtcError, WebrtcResult};
@@ -271,6 +272,22 @@ impl Default for DataChannelOptions {
             max_retransmits: None,
         }
     }
+}
+
+/// Host state behind a `peer-connection-config` resource.
+///
+/// A configuration builder like [`DataChannelOptions`], but with fallible
+/// setters per the WIT contract: capability-gated options are rejected
+/// eagerly, so a config a connection is constructed with was accepted in
+/// full. This host supports STUN/TURN servers and the `relay` policy (both
+/// map onto [`WebrtcIceConfig`]), so its setters validate rather than
+/// reject: a malformed server entry fails `invalid`.
+#[derive(Clone, Debug, Default)]
+pub struct PeerConnectionConfig {
+    /// The accepted STUN/TURN servers.
+    pub ice_servers: Vec<WebrtcIceServer>,
+    /// Whether only relay (TURN) candidates may be used.
+    pub relay_only: bool,
 }
 
 /// Add the `lann:webrtc-datachannels` interfaces implemented by this crate

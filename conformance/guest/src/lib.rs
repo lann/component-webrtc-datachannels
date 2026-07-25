@@ -198,7 +198,7 @@ async fn handshake_offerer(
     test_id: &str,
     session: &Session,
 ) -> Result<(PeerConnection, DataChannel), String> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
     let dc = peer
         .create_data_channel(channel_options(test_id))
         .map_err(|e| format!("create-data-channel: {}", describe(&e)))?;
@@ -228,7 +228,7 @@ async fn handshake_offerer(
 /// Drive the answerer half of the handshake, returning the connected peer and
 /// the data channel the offerer opened.
 async fn handshake_answerer(session: &Session) -> Result<(PeerConnection, DataChannel), String> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
 
     // The offerer publishes its offer first.
     let offer = match recv_signal(session).await? {
@@ -511,7 +511,7 @@ async fn run_inproc(test_id: &str, config: &TestConfig) -> Outcome {
 /// Feed a malformed SDP into a fresh peer connection and require an error
 /// classified as `invalid-signaling`.
 async fn invalid_sdp() -> Result<(), String> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
     let bogus = make_sdp(SdpType::Offer, "this is not valid sdp".to_string());
     match peer.set_remote_description(bogus).await {
         Ok(()) => Err("malformed SDP was accepted".to_string()),
@@ -544,8 +544,8 @@ async fn inproc_round_trip(test_id: &str) -> Result<(), String> {
 async fn inproc_connect(
     test_id: &str,
 ) -> Result<(PeerConnection, PeerConnection, DataChannel, DataChannel), String> {
-    let offerer = PeerConnection::new();
-    let answerer = PeerConnection::new();
+    let offerer = PeerConnection::new(None);
+    let answerer = PeerConnection::new(None);
 
     let options = DataChannelOptions::new();
     options.set_label(CHANNEL_LABEL);
@@ -695,7 +695,7 @@ async fn error_closed() -> Result<(), String> {
 /// `error.timed-out` from `wait-connected` rather than hanging or failing with
 /// another variant.
 async fn error_timed_out() -> Result<(), String> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
     let options = DataChannelOptions::new();
     options.set_label(CHANNEL_LABEL);
     let _dc = peer
@@ -722,7 +722,7 @@ async fn error_timed_out() -> Result<(), String> {
 /// `error.closed`, and that the gate precedes input validation (a malformed
 /// description after close is `closed`, not `invalid-signaling`).
 async fn post_close_signaling() -> Result<(), String> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
     peer.close();
 
     let expect_closed = |what: &str, result: Result<(), Error>| match result {

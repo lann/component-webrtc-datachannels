@@ -91,7 +91,7 @@ impl Role {
 /// Drive the manual-signaling exchange for `role`, returning the message the
 /// peer sent over the established data channel.
 async fn drive(role: Role) -> Result<String, Error> {
-    let pc = PeerConnection::new();
+    let pc = PeerConnection::new(None);
     let mut stdin = Stdin::new();
 
     let channel = match role {

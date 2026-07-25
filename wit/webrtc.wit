@@ -99,11 +99,78 @@ interface types {
         sdp-mid: option<string>,
         sdp-mline-index: option<u16>,
     }
+
+    /// The failure returned by a fallible `connections.peer-connection-config`
+    /// setter.
+    ///
+    /// Following `wasi:http`'s `request-options` precedent, capability-gated
+    /// options are rejected **eagerly at the setter**, so a config that was
+    /// successfully built is binding on the connection constructed with it —
+    /// an implementation must never silently ignore an accepted option.
+    variant config-error {
+        /// This implementation — or this host's policy — does not support the
+        /// option or the supplied value. Capability and policy are
+        /// deliberately indistinguishable to the guest.
+        not-supported,
+        /// The supplied value is malformed. The string carries a
+        /// human-readable reason.
+        invalid(string),
+    }
+
+    /// A STUN or TURN server used for ICE candidate gathering, a subset of
+    /// the W3C `RTCIceServer`.
+    ///
+    /// Credentials are `string`s on protocol grounds, not merely for
+    /// convenience: STUN/TURN usernames and passwords are Unicode by
+    /// specification (UTF-8 processed with the PRECIS `OpaqueString` profile,
+    /// RFC 8489), and credential schemes with non-string values (RFC 7635
+    /// OAuth tokens) are out of scope here, as they are for the W3C API.
+    record ice-server {
+        /// Server URLs, e.g. `stun:stun.example.net` or
+        /// `turn:turn.example.net:3478`.
+        urls: list<string>,
+        /// TURN long-term-credential username (empty for STUN-only servers).
+        username: string,
+        /// TURN long-term-credential secret (empty for STUN-only servers).
+        credential: string,
+    }
+
+    /// The ICE candidate policy, mirroring the W3C `RTCIceTransportPolicy`.
+    enum ice-transport-policy {
+        /// Any candidate type may be used.
+        all,
+        /// Only relay (TURN) candidates are used.
+        relay,
+    }
+
+    /// The lifecycle state of a `connections.peer-connection`, mirroring the
+    /// W3C `RTCPeerConnectionState`. See
+    /// `connections.peer-connection.state-changes` for delivery semantics:
+    /// terminal states (`failed`, `closed`) are always observable; transient
+    /// granularity is implementation-defined.
+    enum connection-state {
+        new,
+        connecting,
+        connected,
+        disconnected,
+        failed,
+        closed,
+    }
+
+    /// The lifecycle state of a `connections.data-channel`, mirroring the W3C
+    /// `RTCDataChannelState`. See `connections.data-channel.state-changes`
+    /// for delivery semantics.
+    enum data-channel-state {
+        connecting,
+        open,
+        closing,
+        closed,
+    }
 }
 
-/// The stateful WebRTC resources: the `data-channel-options` builder, the
-/// `data-channel` transport, and the `RTCPeerConnection`-style
-/// `peer-connection` that negotiates it.
+/// The stateful WebRTC resources: the `data-channel-options` and
+/// `peer-connection-config` builders, the `data-channel` transport, and the
+/// `RTCPeerConnection`-style `peer-connection` that negotiates it.
 ///
 /// These resources carry host-side identity and are owned by the single
 /// component that implements them, so — unlike the structural `types` — they
@@ -117,6 +184,11 @@ interface connections {
         send-via-stream-error,
         session-description,
         ice-candidate,
+        config-error,
+        ice-server,
+        ice-transport-policy,
+        connection-state,
+        data-channel-state,
     };
 
     /// Configuration for a data channel, a subset of `RTCDataChannelInit`
@@ -240,6 +312,83 @@ interface connections {
         /// when this method is called are resolved (with
         /// `error.receiving-via-stream`) before this method returns.
         receive-via-stream: func() -> result<stream<stream-message>, error>;
+
+        /// A stream of lifecycle states, behaving as a coalescing watch: each
+        /// element is the channel's state as observed when that element is
+        /// produced — production is demand-driven, so the first element
+        /// reflects the state at the first read, not at the time this stream
+        /// was taken. Consecutive elements are always distinct; intermediate
+        /// states may be coalesced away, never invented; the terminal
+        /// `closed` is always delivered and ends the stream.
+        ///
+        /// Reaching `closed` through the graceful path (a local or remote
+        /// `close`) happens only after pending sends have been handed to the
+        /// wire, so `close` followed by awaiting `closed` is a flush-aware
+        /// close. `closed` reached through failure implies no such flush —
+        /// and neither case implies delivery to the peer, which remains an
+        /// application-level concern (see the inbound-buffering contract).
+        ///
+        /// The stream may be taken **once**: the first call returns it, and
+        /// every later call returns a stream that ends immediately without
+        /// yielding anything.
+        state-changes: func() -> stream<data-channel-state>;
+
+        /// Close the data channel.
+        ///
+        /// Deliberately synchronous, matching the W3C
+        /// `RTCDataChannel.close()`: it initiates the graceful closing
+        /// procedure — pending sends are flushed, then the transport-level
+        /// close runs (an SCTP stream reset, RFC 8831) — and returns; await
+        /// `state-changes` reaching `closed` for completion. Idempotent:
+        /// closing an already-closed channel is a no-op.
+        ///
+        /// The close is observed locally at once: operations in flight when
+        /// the channel closes, and any calls made after, fail with
+        /// `error.closed`, and the resource's streams end. Messages buffered
+        /// but not yet received when `close` is called are discarded — a
+        /// guest that wants them must receive them first (mirroring the
+        /// connection-level close contract). Dropping the resource without
+        /// calling `close` implies `close`.
+        close: func();
+    }
+
+    /// Configuration for a peer connection, a subset of the W3C
+    /// `RTCConfiguration`.
+    ///
+    /// A builder like `data-channel-options`, but with **fallible setters**
+    /// (the shape of `wasi:http`'s `request-options`): capability-gated
+    /// options are rejected eagerly with a `config-error`, so any config that
+    /// was successfully built is honored by the connection constructed with
+    /// it. Getters reflect what a successful set stored.
+    /// (`data-channel-options` keeps its infallible setters because its
+    /// fields are universally supportable; these are not — an implementation
+    /// without STUN/TURN support rejects `set-ice-servers` rather than
+    /// silently gathering host candidates only.)
+    ///
+    /// The omitted `RTCConfiguration` members (`bundlePolicy`,
+    /// `rtcpMuxPolicy`, `certificates`, `iceCandidatePoolSize`) are left out
+    /// deliberately: none affects the data-channel-only surface this package
+    /// standardizes, and each is trivially addable later as another accessor
+    /// pair.
+    resource peer-connection-config {
+        /// Construct a config with default field values: no ICE servers, and
+        /// the `all` candidate policy.
+        constructor();
+
+        /// The ICE servers a successful `set-ice-servers` stored.
+        ice-servers: func() -> list<ice-server>;
+        /// Set the STUN/TURN servers used for candidate gathering. Fails
+        /// `not-supported` when the implementation has no STUN/TURN support
+        /// (or the host's policy forbids the supplied servers), and `invalid`
+        /// on a malformed server entry. Validation is eager: a rejected value
+        /// is never latently fatal at connection time.
+        set-ice-servers: func(servers: list<ice-server>) -> result<_, config-error>;
+
+        /// The configured candidate policy.
+        ice-transport-policy: func() -> ice-transport-policy;
+        /// Set the candidate policy. `relay` fails `not-supported` where
+        /// relaying is unavailable (it requires TURN support).
+        set-ice-transport-policy: func(policy: ice-transport-policy) -> result<_, config-error>;
     }
 
     /// A single WebRTC peer connection driving the full `RTCPeerConnection`-style
@@ -261,7 +410,14 @@ interface connections {
     /// is a **latched** observation: a connection that connected and later
     /// closed still reports having connected (see `wait-connected`).
     resource peer-connection {
-        constructor();
+        /// Construct a peer connection. `config` is taken by ownership, like
+        /// `create-data-channel` takes its options; `none` leaves
+        /// configuration to the implementation's (or embedding host's)
+        /// defaults — no ICE servers and the `all` candidate policy, unless
+        /// the host is deployed with its own connectivity configuration.
+        /// Every option a supplied config carries was already accepted by its
+        /// setter, so construction honors it — see `peer-connection-config`.
+        constructor(config: option<peer-connection-config>);
 
         /// Create a data channel that will be negotiated in-band with the peer.
         create-data-channel: func(options: data-channel-options) -> result<data-channel, error>;
@@ -308,6 +464,27 @@ interface connections {
         /// Implementations may bound the wait and fail with `error.timed-out`;
         /// the bound is implementation-defined.
         wait-connected: async func() -> result<_, error>;
+
+        /// A stream of lifecycle states, behaving as a coalescing watch: each
+        /// element is the connection's state as observed when that element is
+        /// produced — production is demand-driven, so the first element
+        /// reflects the state at the first read, not at the time this stream
+        /// was taken. Consecutive elements are always distinct; intermediate
+        /// states may be coalesced away, never invented; a terminal state
+        /// (`failed` or `closed`) is always delivered and ends the stream.
+        ///
+        /// Transient granularity is implementation-defined: an implementation
+        /// may never emit `disconnected` (or may pass through `connecting`
+        /// unobserved) — guests must not depend on seeing any non-terminal
+        /// state. This complements the **latched** `wait-connected`, whose
+        /// semantics are unchanged: a connection that connected and later
+        /// failed reports `failed` here while `wait-connected` still
+        /// resolves `ok`.
+        ///
+        /// The stream may be taken **once**: the first call returns it, and
+        /// every later call returns a stream that ends immediately without
+        /// yielding anything.
+        state-changes: func() -> stream<connection-state>;
 
         /// Close the peer connection and any of its data channels.
         ///

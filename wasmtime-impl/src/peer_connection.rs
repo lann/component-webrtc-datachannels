@@ -63,6 +63,19 @@ pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// in-guest `wasip3-impl` driver's drain bound.
 const CLOSE_DRAIN: Duration = Duration::from_secs(1);
 
+/// The connection lifecycle as observed by the host, backing
+/// `peer-connection.state-changes` (mapped onto the WIT `connection-state` at
+/// the binding layer). `Failed` and `Closed` are terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConnectionPhase {
+    New,
+    Connecting,
+    Connected,
+    Disconnected,
+    Failed,
+    Closed,
+}
+
 /// The kind of SDP description passed to `set-local-description` /
 /// `set-remote-description`, mirroring the applicable `session-description`
 /// variants (`rollback` is rejected before reaching the host).
@@ -129,6 +142,10 @@ struct Inner {
     connect_timeout: Duration,
     /// The per-channel inbound buffer bound, in payload bytes.
     max_inbound_buffer_bytes: usize,
+    /// The connection lifecycle, backing `state-changes`.
+    phase: Arc<crate::state_watch::StateWatch<ConnectionPhase>>,
+    /// Take-once claim for `state-changes` (the WIT contract).
+    state_taken: AtomicBool,
 }
 
 /// A counter of in-flight spawned operations, awaitable at zero.
@@ -173,6 +190,7 @@ impl Drop for Inner {
         // the same bounded drain, so a message handed to the transport just
         // before the resource was dropped still flushes to the wire rather
         // than being discarded with the SCTP send queue.
+        self.phase.set(ConnectionPhase::Closed);
         self.close_trigger.fire();
         let pc = self.pc.lock().unwrap().take();
         if pc.is_none() {
@@ -221,12 +239,17 @@ impl PeerConnection {
         let state = Arc::new(ConnState::default());
         let pc_slot: Arc<Mutex<Option<Arc<dyn WebrtcPeerConnection>>>> = Arc::new(Mutex::new(None));
         let (close_trigger, close_sig) = close_signal();
+        let phase = Arc::new(crate::state_watch::StateWatch::new(
+            ConnectionPhase::New,
+            |p| matches!(p, ConnectionPhase::Failed | ConnectionPhase::Closed),
+        ));
 
         if let Ok(handle) = Handle::try_current() {
             let state = state.clone();
             let pc_slot = pc_slot.clone();
             let trigger = close_trigger.clone();
             let signal = close_sig.clone();
+            let phase = phase.clone();
             handle.spawn(async move {
                 let handler = connection_handler(
                     cand_tx,
@@ -235,6 +258,7 @@ impl PeerConnection {
                     trigger,
                     signal.clone(),
                     max_inbound_buffer_bytes,
+                    phase.clone(),
                 );
                 match new_peer_connection_with(
                     |engine| {
@@ -258,11 +282,14 @@ impl PeerConnection {
                         let _ = built_tx.send(Ok(pc));
                     }
                     Err(err) => {
+                        // The connection can never connect; terminally over.
+                        phase.set(ConnectionPhase::Failed);
                         let _ = built_tx.send(Err(WebrtcError::other(err)));
                     }
                 }
             });
         } else {
+            phase.set(ConnectionPhase::Failed);
             let _ = built_tx.send(Err(WebrtcError::msg(
                 "peer connection requires a running tokio runtime",
             )));
@@ -288,8 +315,20 @@ impl PeerConnection {
                 close_signal: close_sig,
                 connect_timeout,
                 max_inbound_buffer_bytes,
+                phase,
+                state_taken: AtomicBool::new(false),
             }),
         }
+    }
+
+    /// The connection's lifecycle watch, backing `state-changes`.
+    pub(crate) fn state_watch(&self) -> Arc<crate::state_watch::StateWatch<ConnectionPhase>> {
+        self.inner.phase.clone()
+    }
+
+    /// Claim `state-changes` (take-once): `true` for the first caller only.
+    pub(crate) fn take_state_stream(&self) -> bool {
+        !self.inner.state_taken.swap(true, Ordering::SeqCst)
     }
 
     /// Await the built peer connection (or its build error).
@@ -484,6 +523,9 @@ impl PeerConnection {
         // Fire the close signal first so pending channel operations resolve
         // with `error.closed` (the `webrtc` 0.20 wrapper reports nothing to the
         // channels itself), then tear down the connection after the drain.
+        // `close` wins over a later `failed` callback: the phase watch treats
+        // `closed` as terminal.
+        self.inner.phase.set(ConnectionPhase::Closed);
         self.inner.close_trigger.fire();
         let pc = self.inner.pc.lock().unwrap().take();
         if pc.is_none() {
@@ -519,6 +561,7 @@ fn connection_handler(
     close_trigger: CloseTrigger,
     close_sig: CloseSignal,
     max_inbound_buffer_bytes: usize,
+    phase: Arc<crate::state_watch::StateWatch<ConnectionPhase>>,
 ) -> Arc<CallbackHandler> {
     let cand_tx = Arc::new(Mutex::new(Some(cand_tx)));
     let gather_cand_tx = cand_tx.clone();
@@ -564,6 +607,19 @@ fn connection_handler(
                 }
             })
             .on_connection_state(move |s| {
+                // Feed the lifecycle watch (`state-changes`) from every
+                // transition; terminal states latch there.
+                if let Some(p) = match s {
+                    RTCPeerConnectionState::New => Some(ConnectionPhase::New),
+                    RTCPeerConnectionState::Connecting => Some(ConnectionPhase::Connecting),
+                    RTCPeerConnectionState::Connected => Some(ConnectionPhase::Connected),
+                    RTCPeerConnectionState::Disconnected => Some(ConnectionPhase::Disconnected),
+                    RTCPeerConnectionState::Failed => Some(ConnectionPhase::Failed),
+                    RTCPeerConnectionState::Closed => Some(ConnectionPhase::Closed),
+                    _ => None,
+                } {
+                    phase.set(p);
+                }
                 match s {
                     RTCPeerConnectionState::Connected => {
                         state.connected.store(true, Ordering::SeqCst);

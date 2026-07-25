@@ -32,6 +32,8 @@ pub mod bindings {
         with: {
             "lann:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
+            "lann:webrtc-datachannels/connections.peer-connection-config":
+                wasmtime_webrtc_datachannels::PeerConnectionConfig,
             "lann:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
             "lann:webrtc-datachannels/connections.peer-connection":
