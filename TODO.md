@@ -15,23 +15,78 @@ lettering has gaps.
 
 ### A3. Cross-host conformance: loopback matrix + labs in place; interop matrix incomplete
 
-The suite (see `conformance/README.md`) is built and green in CI: a shared
-conformance guest, the `conformance-signalingd` mailbox, adapters for
-`wasmtime`, `jco-node`, `jco-browser`, and `wasip3-guest`, the interop pairs
-`wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser`, and
-`wasmtime`<->`wasip3-guest` (both orders each) — all run in CI over loopback
-via `just conformance` — plus the Shadow lab in CI (non-loopback,
-deterministic) and the workstation-only netns lab (`just conformance::netns` /
-`just conformance::nat`) covering `lan`, `stun-srflx` (behind a one-to-one
-full-cone NAT), `turn-relay`, and `nat-symmetric`. The full netns lab has been
-confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
+The suite (see `conformance/README.md`) is built and green in CI: the shared
+conformance guest (37 tests), the `conformance-signalingd` mailbox, adapters
+for `wasmtime`, `jco-node`, `jco-browser`, and `wasip3-guest`, the interop
+pairs (every target against the non-wasm libwebrtc reference peer in both
+orders, the reference self-pair, and the retained `wasmtime`<->`jco-node`
+and `wasmtime`<->`wasip3-guest` pairs) — all run in CI over loopback via
+`just conformance` — plus the Shadow lab in CI (non-loopback,
+deterministic) and the workstation-only netns lab (`just conformance::netns`
+/ `just conformance::nat`) covering `lan`, `stun-srflx` (behind a one-to-one
+full-cone NAT), `turn-relay`, and `nat-symmetric`. Still open, each a
+concrete extension of the existing machinery:
 
 - **Non-loopback interop.** The interop pairs run over loopback only; the
-  labs run single-runtime peers.
-- **netns-lab peer coverage.** The lab's `--peer-kind` covers `wasmtime` (all
-  scenarios) and `wasip3-guest` (`lan` only — the in-guest sans-I/O stack
-  supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
-  in a namespace) is deferred.
+  labs place single-runtime peers. Teach the netns executor to place the
+  two peers of an interop pair in separate namespaces (the target-neutral
+  `PeerCommand` placement in `conformance/adapters/common/src/peer_command.rs`
+  already abstracts the per-peer invocation).
+- **jco-node netns peer.** Add a per-peer Node runner placeable in a
+  namespace (the missing `--peer-kind`), unlocking both lab coverage for
+  the jco host and jco directions for non-loopback interop.
+- **TURN through guest config.** The netns TURN scenarios configure ICE
+  host-side (`WebrtcIceConfig`); now that `peer-connection-config` exists,
+  add a scenario that passes the TURN server through the guest-facing
+  config instead, asserting the accepted-XOR-connects contract end to end —
+  and extending TURN coverage to the jco peer (the browser
+  `RTCPeerConnection` accepts `iceServers` directly) once the jco lab peer
+  lands. (The Wasmtime host's embedder-policy veto over guest-supplied
+  servers — surfacing through the same `config-error` channel — remains
+  unimplemented; add it when a policy use case appears.)
+- **Re-validate the netns lab against the current corpus.** The last full
+  workstation confirmation predates the corpus growth (the two-peer subset
+  is now 12 tests, including `channel-close-flush`); the lab is
+  workstation-only, so this needs a manual `just conformance::netns` /
+  `just conformance::nat` pass.
+
+### A7. Comprehensive doc-comment audit
+
+A commentary review found the doc comments broadly contract-first (error
+taxonomy, units, defaults, invariants — keep that), but with drift at the
+margins against the AGENTS.md "Code comments" rules. Audit every `.wit`
+file and the doc/inline comments across the implementations and the
+conformance tree for:
+
+- **WIT plumbing prose that renders into consumers' docs.** All WIT
+  comments are doc comments (see AGENTS.md): the `//` world headers in
+  `wasmtime-impl/wit/world.wit`, `wasip3-impl/wit/world.wit`, and
+  `examples/webrtc-consumer/wit/world.wit` describe repo layout (the
+  `deps` symlink arrangement) and inventory sibling implementations —
+  content that lands in generated bindings' docs but belongs in AGENTS.md
+  or a README. Check the demo components' WIT files too.
+- **Unenforced cross-file "mirrors" claims.** E.g.
+  `conformance/adapters/jco/driver.js` ("Mirrors the native adapters'
+  CONFORMANCE_MAX_INBOUND_BUFFER_BYTES", "Mirrors the wasmtime adapter's
+  `fold_two`"), `conformance/adapters/common/src/peer_command.rs` ("Mirror
+  the loopback wasip3 adapter's `wasmtime run` invocation"), the netns
+  `TEST_TIMEOUT` doc's claim about the loopback adapters' 90s bound, and
+  `wasmtime-impl`'s "matches the in-guest `wasip3-impl` driver's drain
+  bound". For each, in preference order: share the constant/helper; add a
+  drift check (the `list-tests` corpus verification is the model — see
+  F7); state the shared behavior once in the WIT doc comment, where the
+  conformance suite enforces it; or drop the cross-reference and justify
+  the value locally.
+- **Revision-relative phrasing.** "matching the previous
+  `RTCConfigurationBuilder::new().build()`"
+  (`wasmtime-impl/src/peer_connection.rs`), "This replaces fixed-interval
+  polling" (`wasip3-impl/src/runtime.rs`), the "retained" pairs
+  (`conformance/adapters/wasmtime/src/bin/interop.rs`) — rewrite in
+  present tense.
+- Lower priority: the name-restating doc tail (e.g. `/// The channel's
+  id.`) — add the one fact that earns the line (a unit, a default, a
+  consumer) or leave it terse; no doc should be deleted just to reduce
+  coverage.
 
 ## E. Implementations
 
@@ -124,12 +179,14 @@ values, but three refinements remain:
 - **Policy: no new implementation-level env vars** without first
   considering the proper channel — `WasiWebrtcCtx` on the Wasmtime host, an
   exported configure hook for the jco module (which `jco --map` gives no
-  instantiation-time config channel), the WIT surface for in-guest
-  configuration (see A4). Every env var is an undeclared API that each
+  instantiation-time config channel), or the WIT surface itself (as
+  `peer-connection-config` now demonstrates for in-guest configuration).
+  Every env var is an undeclared API that each
   deployer must discover; the AGENTS.md table is its only registry.
 
 `WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
-address is deployment topology, owned by whoever runs the process (see A4).
+address is deployment topology, owned by whoever runs the process, not by
+the guest (which is why it is not a `peer-connection-config` field).
 
 ### E14. `webrtc-rs` drops inbound channel events on a full event queue
 
@@ -219,8 +276,9 @@ noting the contamination risk in the result document.
 
 ## Suggested priority
 
-1. Flush-aware teardown in the Rust implementations (F5, upstream-gated).
-3. The rest as touched: the remaining corpus-mirror unification (F7), jco
+1. Flush-aware teardown at the connection level (F5, upstream-gated) and
+   the upstream reports it depends on (E14, E15).
+2. The rest as touched: the remaining corpus-mirror unification (F7), jco
    in-process timeout isolation (F11), env-var latching/library hygiene
    (E13), the doc-comment audit (A7), the remaining conformance-matrix
    gaps (A3).
