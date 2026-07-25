@@ -191,6 +191,14 @@ pub const TESTS: &[&str] = &[
     "peer-close-releases",
     "peer-invalid-sdp",
     "interop-handshake",
+    "config-defaults",
+    "config-setters-contract",
+    "config-invalid-ice-server",
+    "connection-state-changes",
+    "channel-state-changes",
+    "channel-post-close-receive",
+    "channel-drop-implies-close",
+    "channel-close-flush",
 ];
 
 /// The two-peer behavioral subset of [`TESTS`]: the tests whose outcome depends
@@ -210,6 +218,7 @@ pub const TWO_PEER_TESTS: &[&str] = &[
     "concurrent-send-receive",
     "max-retransmits-accepted",
     "interop-handshake",
+    "channel-close-flush",
 ];
 
 /// How a test is orchestrated across guest instances.
@@ -241,7 +250,14 @@ pub fn plan_for(test_id: &str) -> Plan {
         | "receive-buffer-overflow"
         | "send-via-stream"
         | "receive-via-stream"
-        | "receive-via-stream-once" => Plan::InProcess,
+        | "receive-via-stream-once"
+        | "config-defaults"
+        | "config-setters-contract"
+        | "config-invalid-ice-server"
+        | "connection-state-changes"
+        | "channel-state-changes"
+        | "channel-post-close-receive"
+        | "channel-drop-implies-close" => Plan::InProcess,
         _ => Plan::TwoPeer,
     }
 }

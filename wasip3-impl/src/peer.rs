@@ -274,6 +274,15 @@ impl SansIoPeer {
         }
     }
 
+    /// Bytes handed to the channel's sends that SCTP has not yet released —
+    /// zero once everything queued has reached the wire (or been abandoned).
+    pub fn channel_outstanding_bytes(&mut self, id: RTCDataChannelId) -> usize {
+        self.pc
+            .data_channel(id)
+            .map(|dc| dc.outstanding_bytes())
+            .unwrap_or(0)
+    }
+
     /// Close the peer connection.
     pub fn close(&mut self) {
         let _ = self.pc.close();

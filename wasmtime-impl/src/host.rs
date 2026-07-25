@@ -460,14 +460,18 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         self_: Resource<DataChannel>,
         message: Message,
     ) -> Result<std::result::Result<(), Error>> {
-        let (wired, conn_closed) = accessor.with(|mut access| {
+        let (wired, local_closed, conn_closed) = accessor.with(|mut access| {
             let channel = access.get().table.get(&self_)?;
-            Ok::<_, wasmtime::Error>((channel.wired(), channel.closed_signal()))
+            Ok::<_, wasmtime::Error>((
+                channel.wired(),
+                channel.local_closed(),
+                channel.conn_closed(),
+            ))
         })?;
 
-        // The owning peer connection closed: the `webrtc` 0.20 wrapper would
-        // silently queue the message, so surface `closed` here.
-        if conn_closed.is_closed() {
+        // The channel (or its owning connection) closed: the `webrtc` 0.20
+        // wrapper would silently queue the message, so surface `closed` here.
+        if local_closed.is_closed() || conn_closed.is_closed() {
             return Ok(Err(Error::Closed));
         }
 
@@ -476,21 +480,24 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
             Message::String(text) => (true, text.into_bytes()),
         };
 
-        // Race the send against the owning connection closing, mirroring
-        // `receive`: the `webrtc` 0.20 wrapper neither errors sends nor wakes
-        // `wired` after `PeerConnection::close`, so without the race a send on
-        // a never-opened channel could pend forever and a send landing just
-        // after close could report success for a silently dropped message.
-        // Biased order: a send that completes wins over the close signal.
+        // Race the send against the channel or its connection closing,
+        // mirroring `receive`: the `webrtc` 0.20 wrapper neither errors sends
+        // nor wakes `wired` after `PeerConnection::close`, so without the race
+        // a send on a never-opened channel could pend forever and a send
+        // landing just after close could report success for a silently
+        // dropped message. Biased order: a send that completes wins over the
+        // close signals.
         let mut op = std::pin::pin!(async move {
             let wired = wired.await?;
             send_channel_message(&wired.channel, is_string, data).await
         }
         .fuse());
-        let mut closed = std::pin::pin!(conn_closed.fired().fuse());
+        let mut local = std::pin::pin!(local_closed.fired().fuse());
+        let mut conn = std::pin::pin!(conn_closed.fired().fuse());
         Ok(futures::select_biased! {
             result = op => result.map_err(Error::from),
-            _ = closed => Err(Error::Closed),
+            _ = local => Err(Error::Closed),
+            _ = conn => Err(Error::Closed),
         })
     }
 
@@ -498,36 +505,46 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         accessor: &Accessor<T, Self>,
         self_: Resource<DataChannel>,
     ) -> Result<std::result::Result<Message, Error>> {
-        let (wired, stream_started, stream_receiving, conn_closed) =
+        let (wired, stream_started, stream_receiving, local_closed, conn_closed) =
             accessor.with(|mut access| {
                 let channel = access.get().table.get(&self_)?;
                 Ok::<_, wasmtime::Error>((
                     channel.wired(),
                     channel.stream_started(),
                     channel.is_stream_receiving(),
-                    channel.closed_signal(),
+                    channel.local_closed(),
+                    channel.conn_closed(),
                 ))
             })?;
 
+        // The channel (or its owning connection) was deliberately closed:
+        // calls made after fail `closed` and the unread backlog is discarded.
+        // (A *transport* close is different: its backlog stays deliverable —
+        // the overflow contract — and readers observe the end through the
+        // queue draining.)
+        if local_closed.is_closed() || conn_closed.is_closed() {
+            return Ok(Err(Error::Closed));
+        }
         // `receive-via-stream` has already taken over the inbound messages.
         if stream_receiving {
             return Ok(Err(Error::ReceivingViaStream));
         }
 
         // Race receiving the next inbound message (once the channel is wired)
-        // against `receive-via-stream` being called and against the owning
-        // connection closing: a pending receiver is woken and fails with
-        // `receiving-via-stream` the moment the stream is claimed, or with
-        // `closed` when the connection closes (the `webrtc` 0.20 wrapper emits
+        // against `receive-via-stream` being called and against the channel or
+        // its owning connection closing: a pending receiver is woken and fails
+        // with `receiving-via-stream` the moment the stream is claimed, or
+        // with `closed` on a close (the `webrtc` 0.20 wrapper emits
         // no channel close of its own). Biased order: an already-available
-        // message wins over both signals.
+        // message wins over the signals.
         let mut receive = std::pin::pin!(async move {
             let wired = wired.await?;
             next_inbound(wired.incoming).await
         }
         .fuse());
         let mut started = std::pin::pin!(stream_started.fuse());
-        let mut closed = std::pin::pin!(conn_closed.fired().fuse());
+        let mut local = std::pin::pin!(local_closed.fired().fuse());
+        let mut conn = std::pin::pin!(conn_closed.fired().fuse());
         Ok(futures::select_biased! {
             result = receive => match result {
                 Ok(inbound) => to_message(inbound).map_err(Error::from),
@@ -543,7 +560,8 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
                     Err(Error::Closed)
                 }
             }
-            _ = closed => Err(Error::Closed),
+            _ = local => Err(Error::Closed),
+            _ = conn => Err(Error::Closed),
         })
     }
 
@@ -552,9 +570,13 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         self_: Resource<DataChannel>,
         messages: StreamReader<StreamMessage>,
     ) -> Result<std::result::Result<(), SendViaStreamError>> {
-        let (wired, conn_closed) = accessor.with(|mut access| {
+        let (wired, local_closed, conn_closed) = accessor.with(|mut access| {
             let channel = access.get().table.get(&self_)?;
-            Ok::<_, wasmtime::Error>((channel.wired(), channel.closed_signal()))
+            Ok::<_, wasmtime::Error>((
+                channel.wired(),
+                channel.local_closed(),
+                channel.conn_closed(),
+            ))
         })?;
         let closed_err = |sent| {
             Ok(Err(SendViaStreamError {
@@ -563,10 +585,18 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
             }))
         };
 
-        // Every await below races the owning connection's close signal (see
-        // `send` for why the wrapper reports nothing itself), biased toward
-        // completing the real work when both are ready.
-        let mut closed = std::pin::pin!(conn_closed.fired().fuse());
+        // Every await below races the channel's and the owning connection's
+        // close signals (see `send` for why the wrapper reports nothing
+        // itself), biased toward completing the real work when both are ready.
+        let mut closed = std::pin::pin!(async move {
+            let mut local = std::pin::pin!(local_closed.fired().fuse());
+            let mut conn = std::pin::pin!(conn_closed.fired().fuse());
+            futures::select_biased! {
+                _ = local => {}
+                _ = conn => {}
+            }
+        }
+        .fuse());
 
         let mut wired = std::pin::pin!(wired.fuse());
         let channel = futures::select_biased! {
@@ -639,14 +669,18 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
     ) -> Result<std::result::Result<StreamReader<StreamMessage>, Error>> {
         // Claim the inbound messages for this stream. A second call (or any
         // concurrent `receive`) observes the claim and fails.
-        let (claimed, wired, conn_closed) = {
-            let channel = access.get().table.get(&self_)?;
-            (
-                channel.begin_stream_receiving(),
-                channel.wired(),
-                channel.closed_signal(),
-            )
-        };
+        let channel = access.get().table.get(&self_)?;
+        // Calls made after a local close (or the connection closing) fail
+        // `closed`; a transport close instead ends the returned stream after
+        // the backlog drains.
+        if channel.is_locally_closed() {
+            return Ok(Err(Error::Closed));
+        }
+        let (claimed, wired, conn_closed) = (
+            channel.begin_stream_receiving(),
+            channel.wired(),
+            channel.conn_closed(),
+        );
         if !claimed {
             return Ok(Err(Error::ReceivingViaStream));
         }

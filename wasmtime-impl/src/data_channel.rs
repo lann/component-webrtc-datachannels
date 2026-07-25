@@ -44,6 +44,11 @@ pub(crate) struct InboundMessage {
     pub(crate) data: Vec<u8>,
 }
 
+/// How long a locally-closed channel's flush (waiting for SCTP to release
+/// the pending sends) may take before the transport close proceeds anyway,
+/// so a peer that never acknowledges cannot hold the close open.
+const CLOSE_FLUSH_BOUND: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// The default bound on inbound payload bytes buffered per channel while
 /// waiting for the guest to `receive` them.
 ///
@@ -380,14 +385,19 @@ pub struct DataChannel {
     /// Resolves once `receive-via-stream` is called, so pending `receive` calls
     /// can be woken and fail with `receiving-via-stream`.
     stream_started: Shared<oneshot::Receiver<()>>,
-    /// Fired once the channel itself is over — by a local `close`, the owning
-    /// connection closing, or the transport closing — so operations fail
-    /// `error.closed` whichever way the channel ends (the `webrtc` 0.20
-    /// wrapper reports nothing to the channels itself).
-    closed: CloseSignal,
-    /// Fires `closed`; `close()` (and `Drop`) pull it, and the state feeder
-    /// forwards the connection/transport closes into it.
-    close_trigger: CloseTrigger,
+    /// Fired once the owning `peer-connection` resource closes. Send/receive
+    /// observe it so operations on a closed connection fail with
+    /// `error.closed` even though the `webrtc` 0.20 wrapper reports nothing
+    /// to the channels itself.
+    conn_closed: CloseSignal,
+    /// Fired by a local `close()` (or the resource dropping): operations fail
+    /// `error.closed` at once and the unread backlog is discarded. A
+    /// *transport* close deliberately does not fire this — its backlog stays
+    /// deliverable (the overflow contract) and readers observe the end
+    /// through the inbound queue draining.
+    local_closed: CloseSignal,
+    /// Fires `local_closed`; pulled by `close()` and `Drop`.
+    local_close_trigger: CloseTrigger,
     /// The channel lifecycle, backing `state-changes`.
     state: Arc<crate::state_watch::StateWatch<ChanState>>,
     /// Take-once claim for `state-changes` (the WIT contract).
@@ -402,22 +412,22 @@ impl DataChannel {
     /// its connection-close signal.
     pub(crate) fn deferred(label: String, wired: WiredFuture, conn_closed: CloseSignal) -> Self {
         let (started_tx, started_rx) = oneshot::channel();
-        let (close_trigger, closed) = close_signal();
+        let (local_close_trigger, local_closed) = close_signal();
         let state = Arc::new(crate::state_watch::StateWatch::new(
             ChanState::Connecting,
             |s| matches!(s, ChanState::Closed),
         ));
         // The state feeder: drives the lifecycle watch from the wiring
         // future, the connection-close signal, the transport-close signal,
-        // and a local `close()` (which fires `closed` directly), and forwards
-        // every ending into the channel's own close signal. Without a runtime
+        // and a local `close()`, running the graceful transport close for
+        // the local case so pending sends flush before `closed` is
+        // observable. Without a runtime
         // the channel can never wire, so the initial `Connecting` (ended by
         // `close`/drop) is the whole observable lifecycle.
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let wired = wired.clone();
             let conn_closed = conn_closed.clone();
-            let local_closed = closed.clone();
-            let trigger = close_trigger.clone();
+            let local_closed = local_closed.clone();
             let state = state.clone();
             handle.spawn(async move {
                 let mut wired = std::pin::pin!(wired.fuse());
@@ -431,9 +441,24 @@ impl DataChannel {
                             _ = transport => {}
                             _ = conn => {}
                             _ = local => {
-                                // A local close: run the graceful
-                                // transport close so pending sends flush
-                                // before `closed` is observable.
+                                // A local close is flush-aware: wait
+                                // (bounded) for SCTP to release the pending
+                                // sends before the transport close, so
+                                // `closed` is observable only after messages
+                                // handed to the transport reached the wire.
+                                let deadline =
+                                    tokio::time::Instant::now() + CLOSE_FLUSH_BOUND;
+                                while tokio::time::Instant::now() < deadline {
+                                    match w.channel.outstanding_bytes().await {
+                                        Ok(0) | Err(_) => break,
+                                        Ok(_) => {
+                                            tokio::time::sleep(
+                                                std::time::Duration::from_millis(10),
+                                            )
+                                            .await
+                                        }
+                                    }
+                                }
                                 let _ = w.channel.close().await;
                             }
                         }
@@ -441,7 +466,6 @@ impl DataChannel {
                     _ = conn => {}
                     _ = local => {}
                 }
-                trigger.fire();
                 state.set(ChanState::Closed);
             });
         }
@@ -451,8 +475,9 @@ impl DataChannel {
             stream_receiving: Arc::new(AtomicBool::new(false)),
             stream_started_tx: Arc::new(Mutex::new(Some(started_tx))),
             stream_started: started_rx.shared(),
-            closed,
-            close_trigger,
+            conn_closed,
+            local_closed,
+            local_close_trigger,
             state,
             state_taken: Arc::new(AtomicBool::new(false)),
         }
@@ -463,17 +488,28 @@ impl DataChannel {
     /// state feeder runs the graceful transport close and reports `closed`
     /// when it completes. Idempotent.
     pub(crate) fn close(&self) {
-        if self.closed.is_closed() {
+        if self.local_closed.is_closed() {
             return;
         }
         self.state.set(ChanState::Closing);
-        self.close_trigger.fire();
+        self.local_close_trigger.fire();
     }
 
-    /// The channel's close signal: fired by a local `close`, the owning
-    /// connection closing, or the transport closing.
-    pub(crate) fn closed_signal(&self) -> CloseSignal {
-        self.closed.clone()
+    /// The owning connection's close signal.
+    pub(crate) fn conn_closed(&self) -> CloseSignal {
+        self.conn_closed.clone()
+    }
+
+    /// The channel's local-close signal (see the field docs).
+    pub(crate) fn local_closed(&self) -> CloseSignal {
+        self.local_closed.clone()
+    }
+
+    /// Whether the channel was closed by its own `close` (or drop) or by the
+    /// owning connection closing — the cases whose contract is fail-`closed`
+    /// at once with the unread backlog discarded.
+    pub(crate) fn is_locally_closed(&self) -> bool {
+        self.local_closed.is_closed() || self.conn_closed.is_closed()
     }
 
     /// The channel's lifecycle watch, backing `state-changes`.

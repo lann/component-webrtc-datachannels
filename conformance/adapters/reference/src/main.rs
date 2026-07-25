@@ -542,6 +542,40 @@ async fn exchange(
             }
             verify_all(&received, count, cli.test == "ordering")
         }
+        "channel-close-flush" => {
+            let count = cli.message_count.max(1);
+            let size = cli.message_size.max(16);
+            if cli.role == "offerer" {
+                // Send the corpus, close immediately, and wait for the close
+                // to complete (the graceful close transmits the buffered
+                // payloads first).
+                for index in 0..count {
+                    send(channel, &make_payload(index, size), true)?;
+                }
+                channel.close();
+                loop {
+                    match inbound.recv().await {
+                        Some(Inbound::Closed) | None => return Ok(()),
+                        Some(Inbound::Message { .. }) => continue,
+                    }
+                }
+            } else {
+                // Every payload must arrive despite the peer's immediate
+                // close, after which the close itself is observed.
+                let mut received = Vec::with_capacity(count as usize);
+                for _ in 0..count {
+                    let (_binary, data) = receive(inbound).await?;
+                    received.push(data);
+                }
+                verify_all(&received, count, false)?;
+                match inbound.recv().await {
+                    Some(Inbound::Closed) | None => Ok(()),
+                    Some(Inbound::Message { .. }) => {
+                        anyhow::bail!("received past the peer's close")
+                    }
+                }
+            }
+        }
         other => anyhow::bail!("unhandled test id {other:?}"),
     }
 }

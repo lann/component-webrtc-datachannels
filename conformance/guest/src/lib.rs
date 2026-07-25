@@ -28,10 +28,11 @@ use bindings::exports::conformance::suite::runner::{
     Guest, Role, TestConfig, TestDescriptor, TestResult,
 };
 use bindings::lann::webrtc_datachannels::connections::{
-    DataChannel, DataChannelOptions, PeerConnection,
+    DataChannel, DataChannelOptions, PeerConnection, PeerConnectionConfig,
 };
 use bindings::lann::webrtc_datachannels::types::{
-    Error, IceCandidate, Message, MessageKind, SdpType, SessionDescription, StreamMessage,
+    ConfigError, ConnectionState, DataChannelState, Error, IceCandidate, IceServer,
+    IceTransportPolicy, Message, MessageKind, SdpType, SessionDescription, StreamMessage,
 };
 
 /// The negotiated data-channel label used by every behavioral test. Both peers
@@ -119,6 +120,26 @@ fn corpus() -> &'static [(&'static str, &'static [&'static str])] {
         ("peer-close-releases", &["peer-connection"]),
         ("peer-invalid-sdp", &["peer-connection", "errors"]),
         ("interop-handshake", &["interop", "signaling"]),
+        ("config-defaults", &["peer-connection", "ice-config"]),
+        (
+            "config-setters-contract",
+            &["peer-connection", "ice-config"],
+        ),
+        (
+            "config-invalid-ice-server",
+            &["peer-connection", "ice-config", "errors"],
+        ),
+        (
+            "connection-state-changes",
+            &["peer-connection", "lifecycle"],
+        ),
+        ("channel-state-changes", &["data-channel", "lifecycle"]),
+        (
+            "channel-post-close-receive",
+            &["data-channel", "lifecycle", "errors"],
+        ),
+        ("channel-drop-implies-close", &["data-channel", "lifecycle"]),
+        ("channel-close-flush", &["data-channel", "lifecycle"]),
     ]
 }
 
@@ -146,7 +167,14 @@ async fn run(test_id: &str, config: &TestConfig) -> Outcome {
         | "receive-buffer-overflow"
         | "send-via-stream"
         | "receive-via-stream"
-        | "receive-via-stream-once" => run_inproc(test_id, config).await,
+        | "receive-via-stream-once"
+        | "config-defaults"
+        | "config-setters-contract"
+        | "config-invalid-ice-server"
+        | "connection-state-changes"
+        | "channel-state-changes"
+        | "channel-post-close-receive"
+        | "channel-drop-implies-close" => run_inproc(test_id, config).await,
 
         // Everything else is a two-peer behavioral test driven over the mailbox.
         _ => run_two_peer(test_id, config).await,
@@ -184,12 +212,58 @@ async fn run_two_peer(test_id: &str, config: &TestConfig) -> Outcome {
     // tearing down, so neither peer closes the connection while the other still
     // needs it — to receive the channel (`label-round-trip` transfers no
     // payload) or to drain the last buffered messages.
-    let outcome = match exchange(test_id, config, &dc).await {
-        Ok(()) => Outcome::from_result(barrier(&dc).await),
-        Err(detail) => Outcome::Fail(detail),
+    // `channel-close-flush` owns its completion protocol (the channel close it
+    // asserts *is* the rendezvous) and needs the channel by value.
+    let outcome = if test_id == "channel-close-flush" {
+        Outcome::from_result(close_flush(role, config, dc).await)
+    } else {
+        match exchange(test_id, config, &dc).await {
+            Ok(()) => Outcome::from_result(barrier(&dc).await),
+            Err(detail) => Outcome::Fail(detail),
+        }
     };
     peer.close();
     outcome
+}
+
+/// `channel-close-flush`: the offerer sends the corpus payloads and closes the
+/// channel immediately; every payload must still reach the answerer (the WIT's
+/// flush-aware close), whose next receive then observes the close. The
+/// offerer awaits its own `state-changes` reaching `closed` — the flush
+/// signal — before returning, so its connection teardown cannot race the
+/// flush.
+async fn close_flush(
+    role: MailboxRole,
+    config: &TestConfig,
+    dc: DataChannel,
+) -> Result<(), String> {
+    let count = config.message_count.max(1);
+    let size = config.message_size.max(16);
+    match role {
+        MailboxRole::Offerer => {
+            send_sequence(&dc, count, size).await?;
+            let states = dc.state_changes();
+            dc.close();
+            let states = drain_states(states, |s| matches!(s, DataChannelState::Closed)).await?;
+            if states.last() != Some(&DataChannelState::Closed) {
+                return Err(format!(
+                    "expected state-changes to end with closed after close, got {states:?}"
+                ));
+            }
+            Ok(())
+        }
+        MailboxRole::Answerer => {
+            let received = recv_sequence(&dc, count).await?;
+            verify_all(&received, count)?;
+            // The peer closed right after its last send: the flush-aware close
+            // means every payload arrived above, and the close arrives here.
+            match receive(&dc).await {
+                Err(detail) if detail.ends_with("closed") => Ok(()),
+                Ok(_) => Err("received past the peer's close".to_string()),
+                Err(detail) => Err(format!("waiting for the peer's close: {detail}")),
+            }
+        }
+    }
 }
 
 /// Drive the offerer half of the handshake, returning the connected peer and the
@@ -504,8 +578,308 @@ async fn run_inproc(test_id: &str, config: &TestConfig) -> Outcome {
         "send-via-stream" => Outcome::from_result(send_via_stream_round_trip(config).await),
         "receive-via-stream" => Outcome::from_result(receive_via_stream_round_trip(config).await),
         "receive-via-stream-once" => Outcome::from_result(receive_via_stream_once().await),
+        "config-defaults" => Outcome::from_result(config_defaults().await),
+        "config-setters-contract" => Outcome::from_result(config_setters_contract().await),
+        "config-invalid-ice-server" => Outcome::from_result(config_invalid_ice_server().await),
+        "connection-state-changes" => Outcome::from_result(connection_state_changes().await),
+        "channel-state-changes" => Outcome::from_result(channel_state_changes().await),
+        "channel-post-close-receive" => Outcome::from_result(channel_post_close_receive().await),
+        "channel-drop-implies-close" => Outcome::from_result(channel_drop_implies_close().await),
         _ => Outcome::from_result(inproc_round_trip(test_id).await),
     }
+}
+
+/// `peer-connection-config` defaults: the getters report no ICE servers and
+/// the `all` policy, and a connection constructed with a default config (like
+/// one constructed with `none`) is usable.
+async fn config_defaults() -> Result<(), String> {
+    let config = PeerConnectionConfig::new();
+    if !config.ice_servers().is_empty() {
+        return Err("default config has ice servers".to_string());
+    }
+    if !matches!(config.ice_transport_policy(), IceTransportPolicy::All) {
+        return Err("default config policy is not `all`".to_string());
+    }
+    let peer = PeerConnection::new(Some(config));
+    let options = DataChannelOptions::new();
+    options.set_label(CHANNEL_LABEL);
+    peer.create_data_channel(options)
+        .map_err(|e| format!("create-data-channel: {}", describe(&e)))?;
+    peer.create_offer()
+        .await
+        .map_err(|e| format!("create-offer: {}", describe(&e)))?;
+    peer.close();
+    Ok(())
+}
+
+/// The fallible-setter contract: each capability-gated setter either accepts
+/// (and its getter reflects the stored value) or fails `not-supported` (and
+/// the getter is unchanged) — never a trap, never a silent ignore. Whatever
+/// was accepted must then construct a working connection (accepted implies
+/// honored).
+async fn config_setters_contract() -> Result<(), String> {
+    let config = PeerConnectionConfig::new();
+
+    // A syntactically valid STUN server on an unroutable (TEST-NET-1)
+    // address: acceptance is about capability, not reachability.
+    let server = IceServer {
+        urls: vec!["stun:192.0.2.1:3478".to_string()],
+        username: String::new(),
+        credential: String::new(),
+    };
+    match config.set_ice_servers(std::slice::from_ref(&server)) {
+        Ok(()) => {
+            let stored = config.ice_servers();
+            if stored.len() != 1 || stored[0].urls != server.urls {
+                return Err("accepted ice servers not reflected by the getter".to_string());
+            }
+        }
+        Err(ConfigError::NotSupported) => {
+            if !config.ice_servers().is_empty() {
+                return Err("rejected ice servers changed the getter".to_string());
+            }
+        }
+        Err(ConfigError::Invalid(detail)) => {
+            return Err(format!("valid ice server rejected as invalid: {detail}"));
+        }
+    }
+
+    match config.set_ice_transport_policy(IceTransportPolicy::Relay) {
+        Ok(()) => {
+            if !matches!(config.ice_transport_policy(), IceTransportPolicy::Relay) {
+                return Err("accepted relay policy not reflected by the getter".to_string());
+            }
+            // A relay-only connection without a reachable TURN server cannot
+            // connect, but constructing it must work; put the policy back so
+            // the construction probe below exercises the accepted servers.
+            config
+                .set_ice_transport_policy(IceTransportPolicy::All)
+                .map_err(|e| format!("resetting policy failed: {e:?}"))?;
+        }
+        Err(ConfigError::NotSupported) => {
+            if !matches!(config.ice_transport_policy(), IceTransportPolicy::All) {
+                return Err("rejected relay policy changed the getter".to_string());
+            }
+        }
+        Err(ConfigError::Invalid(detail)) => {
+            return Err(format!("relay policy rejected as invalid: {detail}"));
+        }
+    }
+
+    // Accepted implies honored: the config constructs a connection that can
+    // produce an offer.
+    let peer = PeerConnection::new(Some(config));
+    peer.create_offer()
+        .await
+        .map_err(|e| format!("create-offer with accepted config: {}", describe(&e)))?;
+    peer.close();
+    Ok(())
+}
+
+/// Malformed ICE-server entries are rejected eagerly (`invalid`, or
+/// `not-supported` where servers are unsupported altogether), and a rejected
+/// value is never latently fatal: the config still constructs a working
+/// connection afterwards.
+async fn config_invalid_ice_server() -> Result<(), String> {
+    let config = PeerConnectionConfig::new();
+
+    let no_urls = IceServer {
+        urls: Vec::new(),
+        username: String::new(),
+        credential: String::new(),
+    };
+    if config.set_ice_servers(&[no_urls]).is_ok() {
+        return Err("ice server without urls was accepted".to_string());
+    }
+
+    let bad_scheme = IceServer {
+        urls: vec!["http://example.com".to_string()],
+        username: String::new(),
+        credential: String::new(),
+    };
+    if config.set_ice_servers(&[bad_scheme]).is_ok() {
+        return Err("ice server with a non-ICE scheme was accepted".to_string());
+    }
+
+    let peer = PeerConnection::new(Some(config));
+    peer.create_offer()
+        .await
+        .map_err(|e| format!("create-offer after rejected sets: {}", describe(&e)))?;
+    peer.close();
+    Ok(())
+}
+
+/// Read every element of a state stream until it ends, verifying the
+/// coalescing-watch contract as it goes: no consecutive duplicates, and
+/// nothing after the first terminal element.
+async fn drain_states<T: Copy + PartialEq + core::fmt::Debug>(
+    mut stream: wit_bindgen::StreamReader<T>,
+    is_terminal: impl Fn(T) -> bool,
+) -> Result<Vec<T>, String> {
+    let mut states = Vec::new();
+    loop {
+        let (status, batch) = stream.read(Vec::with_capacity(1)).await;
+        for state in batch {
+            if states.last() == Some(&state) {
+                return Err(format!("consecutive duplicate state {state:?}"));
+            }
+            if states.last().copied().is_some_and(&is_terminal) {
+                return Err(format!("state {state:?} delivered after a terminal state"));
+            }
+            states.push(state);
+        }
+        if matches!(
+            status,
+            wit_bindgen::StreamResult::Dropped | wit_bindgen::StreamResult::Cancelled
+        ) {
+            return Ok(states);
+        }
+    }
+}
+
+/// `peer-connection.state-changes`: on a connected pair the watch reads
+/// `connected`, ends with `closed` after a local close, never duplicates
+/// consecutively, and is take-once.
+async fn connection_state_changes() -> Result<(), String> {
+    let (offerer, answerer, _offer_dc, _answer_dc) =
+        inproc_connect("connection-state-changes").await?;
+
+    let mut states = offerer.state_changes();
+    let (_, first) = states.read(Vec::with_capacity(1)).await;
+    if first.first() != Some(&ConnectionState::Connected) {
+        return Err(format!(
+            "expected connected as the state at first read, got {first:?}"
+        ));
+    }
+
+    // Take-once: a second stream ends immediately without yielding.
+    let taken_again = drain_states(offerer.state_changes(), |s| {
+        matches!(s, ConnectionState::Failed | ConnectionState::Closed)
+    })
+    .await?;
+    if !taken_again.is_empty() {
+        return Err("second state-changes stream yielded elements".to_string());
+    }
+
+    offerer.close();
+    let rest = drain_states(states, |s| {
+        matches!(s, ConnectionState::Failed | ConnectionState::Closed)
+    })
+    .await?;
+    if rest.last() != Some(&ConnectionState::Closed) {
+        return Err(format!(
+            "expected the stream to end with closed, got {rest:?}"
+        ));
+    }
+
+    answerer.close();
+    Ok(())
+}
+
+/// `data-channel.state-changes`: an open channel's watch reads `open`, ends
+/// with `closed` after a local close, and is take-once.
+async fn channel_state_changes() -> Result<(), String> {
+    let (offerer, answerer, offer_dc, answer_dc) = inproc_connect("channel-state-changes").await?;
+    if !exchange_once(&offer_dc, &answer_dc).await? {
+        return Err("data channel round trip failed".to_string());
+    }
+
+    let mut states = offer_dc.state_changes();
+    let (_, first) = states.read(Vec::with_capacity(1)).await;
+    if first.first() != Some(&DataChannelState::Open) {
+        return Err(format!(
+            "expected open as the state at first read, got {first:?}"
+        ));
+    }
+
+    let taken_again = drain_states(offer_dc.state_changes(), |s| {
+        matches!(s, DataChannelState::Closed)
+    })
+    .await?;
+    if !taken_again.is_empty() {
+        return Err("second state-changes stream yielded elements".to_string());
+    }
+
+    offer_dc.close();
+    let rest = drain_states(states, |s| matches!(s, DataChannelState::Closed)).await?;
+    if rest.last() != Some(&DataChannelState::Closed) {
+        return Err(format!(
+            "expected the stream to end with closed, got {rest:?}"
+        ));
+    }
+
+    offerer.close();
+    answerer.close();
+    Ok(())
+}
+
+/// `data-channel.close` locally: idempotent; calls made after fail `closed`
+/// (the unread backlog is discarded, per the WIT contract).
+async fn channel_post_close_receive() -> Result<(), String> {
+    let (offerer, answerer, offer_dc, answer_dc) =
+        inproc_connect("channel-post-close-receive").await?;
+    if !exchange_once(&offer_dc, &answer_dc).await? {
+        return Err("data channel round trip failed".to_string());
+    }
+
+    // Leave a message unread on the offerer side, then close: the backlog is
+    // discarded and every later call fails `closed`.
+    send(&answer_dc, Message::Binary(vec![1, 2, 3])).await?;
+    offer_dc.close();
+    offer_dc.close(); // idempotent
+
+    match receive(&offer_dc).await {
+        Err(detail) if detail.ends_with("closed") => {}
+        Ok(_) => return Err("receive after close delivered a message".to_string()),
+        Err(detail) => return Err(format!("receive after close: {detail}")),
+    }
+    match offer_dc.send(Message::Binary(vec![4])).await {
+        Err(Error::Closed) => {}
+        Ok(()) => return Err("send after close succeeded".to_string()),
+        Err(other) => return Err(format!("send after close: {}", describe(&other))),
+    }
+    match offer_dc.receive_via_stream() {
+        Err(Error::Closed) => {}
+        Ok(_) => return Err("receive-via-stream after close returned a stream".to_string()),
+        Err(other) => {
+            return Err(format!(
+                "receive-via-stream after close: {}",
+                describe(&other)
+            ))
+        }
+    }
+
+    offerer.close();
+    answerer.close();
+    Ok(())
+}
+
+/// Dropping a `data-channel` resource without calling `close` implies
+/// `close`: the remote end observes the channel closing while the connection
+/// itself stays alive (attributing the close to the drop, not to teardown).
+async fn channel_drop_implies_close() -> Result<(), String> {
+    let (offerer, answerer, offer_dc, answer_dc) =
+        inproc_connect("channel-drop-implies-close").await?;
+
+    // A probe proves the channel worked before the drop (and, flushed by the
+    // implied close, must still arrive).
+    send(&offer_dc, Message::Binary(vec![7u8; 8])).await?;
+    drop(offer_dc);
+
+    match receive(&answer_dc).await? {
+        Message::Binary(bytes) if bytes == vec![7u8; 8] => {}
+        other => return Err(format!("probe mismatch: {other:?}")),
+    }
+    // The implied close reaches the remote end as this channel closing.
+    match receive(&answer_dc).await {
+        Err(detail) if detail.ends_with("closed") => {}
+        Ok(_) => return Err("received past the dropped channel's close".to_string()),
+        Err(detail) => return Err(format!("waiting for the drop-close: {detail}")),
+    }
+
+    offerer.close();
+    answerer.close();
+    Ok(())
 }
 
 /// Feed a malformed SDP into a fresh peer connection and require an error

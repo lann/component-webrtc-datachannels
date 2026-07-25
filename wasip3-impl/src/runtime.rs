@@ -38,6 +38,10 @@ use crate::wasi::sockets::types::{
 /// tick future that is never cancelled mid-flight.
 const MAX_WAIT_NANOS: u64 = 50_000_000;
 
+/// How long a locally-closed channel's flush (waiting for the core to release
+/// its pending sends) may take before the rtc-level close proceeds anyway.
+pub const CHANNEL_CLOSE_FLUSH_BOUND: Duration = Duration::from_secs(1);
+
 /// How long the pump keeps draining after a local `close` when the core has not
 /// yet reported the close complete: long enough for the final queued sends (a
 /// last message still in the SCTP queue, the SCTP/DTLS close chunks) and the
@@ -171,6 +175,13 @@ pub struct Channel {
     pub stream_claimed: bool,
     /// True once the channel (or its connection) has closed.
     pub closed: bool,
+    /// A local `close()` awaiting its flush: the pump performs the rtc-level
+    /// close once the channel's outstanding bytes drain (or the bounded flush
+    /// window lapses), so pending sends reach the wire first. While set (with
+    /// `closed`), `state-changes` reports `closing` rather than `closed`.
+    pub local_close_pending: bool,
+    /// The bound on the local close's flush wait.
+    pub close_flush_deadline: Option<Instant>,
 }
 
 impl Channel {
@@ -183,6 +194,8 @@ impl Channel {
             overflowed: false,
             stream_claimed: false,
             closed: false,
+            local_close_pending: false,
+            close_flush_deadline: None,
         }
     }
 
@@ -367,6 +380,29 @@ impl Runtime {
             flush(&shared, &socket).await;
             let (done, had_events) = {
                 let mut s = shared.borrow_mut();
+                // Service locally-closed channels: perform the rtc-level close
+                // once the channel's pending sends have been released by SCTP
+                // (or the bounded flush window lapses), so a close never
+                // discards data the guest already handed to the transport.
+                let mut serviced = false;
+                for index in 0..s.channels.len() {
+                    let (id, pending, deadline) = {
+                        let c = &s.channels[index];
+                        (c.id, c.local_close_pending, c.close_flush_deadline)
+                    };
+                    if !pending {
+                        continue;
+                    }
+                    let flushed = s.peer.channel_outstanding_bytes(id) == 0;
+                    let expired = deadline.is_none_or(|d| Instant::now() >= d);
+                    if flushed || expired {
+                        s.peer.close_data_channel(id);
+                        let c = &mut s.channels[index];
+                        c.local_close_pending = false;
+                        c.close_flush_deadline = None;
+                        serviced = true;
+                    }
+                }
                 if s.close_requested {
                     s.close_requested = false;
                     s.peer.close();
@@ -384,7 +420,7 @@ impl Runtime {
                     || (s.closed
                         && (s.shutdown_complete
                             || s.drain_deadline.is_none_or(|d| Instant::now() >= d)));
-                (done, had_events)
+                (done, had_events || serviced)
             };
             if had_events {
                 watch.notify();
@@ -467,7 +503,11 @@ fn apply_event(s: &mut Shared, event: PeerEvent) {
                 // `Shared::pending_stream_claims` / `Shared::pending_closes`).
                 channel.stream_claimed = s.pending_stream_claims.contains(&id);
                 s.pending_stream_claims.retain(|&claimed| claimed != id);
-                channel.closed = channel.closed || s.pending_closes.contains(&id);
+                if s.pending_closes.contains(&id) {
+                    channel.closed = true;
+                    channel.local_close_pending = true;
+                    channel.close_flush_deadline = Some(Instant::now() + CHANNEL_CLOSE_FLUSH_BOUND);
+                }
                 s.pending_closes.retain(|&closed| closed != id);
                 s.channels.push(channel);
             }

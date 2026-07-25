@@ -43,6 +43,14 @@ export const TESTS = [
   "peer-close-releases",
   "peer-invalid-sdp",
   "interop-handshake",
+  "config-defaults",
+  "config-setters-contract",
+  "config-invalid-ice-server",
+  "connection-state-changes",
+  "channel-state-changes",
+  "channel-post-close-receive",
+  "channel-drop-implies-close",
+  "channel-close-flush",
 ];
 
 // How a test is orchestrated across guest instances.
@@ -65,6 +73,13 @@ const IN_PROCESS = new Set([
   "send-via-stream",
   "receive-via-stream",
   "receive-via-stream-once",
+  "config-defaults",
+  "config-setters-contract",
+  "config-invalid-ice-server",
+  "connection-state-changes",
+  "channel-state-changes",
+  "channel-post-close-receive",
+  "channel-drop-implies-close",
 ]);
 
 /** The orchestration plan for a test id: `in-process` or `two-peer`. */

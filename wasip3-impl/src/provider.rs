@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 use futures::channel::mpsc;
 
 use crate::peer::SansIoPeer;
-use crate::runtime::{InboundMessage, Runtime, Shared};
+use crate::runtime::{InboundMessage, Runtime, Shared, CHANNEL_CLOSE_FLUSH_BOUND};
 
 use crate::exports::lann::webrtc_datachannels::connections::{
     Guest, GuestDataChannel, GuestDataChannelOptions, GuestPeerConnection,
@@ -226,6 +226,10 @@ impl DataChannel {
                     channel.closed = true;
                     channel.inbox.clear();
                     channel.inbox_bytes = 0;
+                    // The rtc-level close is deferred to the pump so pending
+                    // sends flush first (see `Channel::local_close_pending`).
+                    channel.local_close_pending = true;
+                    channel.close_flush_deadline = Some(Instant::now() + CHANNEL_CLOSE_FLUSH_BOUND);
                 }
                 // Not yet tracked (still opening): record the close so the
                 // open event drains into an already-closed channel.
@@ -236,7 +240,6 @@ impl DataChannel {
                     s.pending_closes.push(self.id);
                 }
             }
-            s.peer.close_data_channel(self.id);
             s.watch.notify();
         }
         let _ = self.nudge.unbounded_send(());
@@ -841,9 +844,16 @@ async fn pump_channel_states(
     loop {
         let (state, seen) = {
             let mut s = shared.borrow_mut();
+            let flushing = s
+                .channel_mut(id)
+                .is_some_and(|c| c.closed && c.local_close_pending);
             let state = match channel_state(&mut s, id) {
                 ChannelState::Opening => DataChannelState::Connecting,
                 ChannelState::Open => DataChannelState::Open,
+                // A local close still flushing its pending sends reports
+                // `closing`; `closed` follows once the pump performs the
+                // rtc-level close.
+                ChannelState::Closed if flushing => DataChannelState::Closing,
                 ChannelState::Closed => DataChannelState::Closed,
             };
             (state, s.watch.version())
