@@ -20,9 +20,11 @@
 //! any other adapter report.
 //!
 //! The executor is target-neutral: `--peer-kind` selects how each peer host's
-//! command line is built. Any peer that honours the shared single-peer contract
-//! (`--test`/`--role`/`--server`/`--room`/…, one JSON result line on stdout) and
-//! can bind a configured non-loopback address fits:
+//! command line is built, and `--offerer-kind` / `--answerer-kind` override it
+//! per role, placing an **interop pair** (e.g. `wasmtime-x-wasip3-guest`) on
+//! separate simulated hosts. Any peer that honours the shared single-peer
+//! contract (`--test`/`--role`/`--server`/`--room`/…, one JSON result line on
+//! stdout) and can bind a configured non-loopback address fits:
 //!
 //! - `wasmtime` runs the native `conformance-peer` binary. Its peers gather host
 //!   candidates from their simulated interface address (`--bind-addr`) and run
@@ -66,6 +68,16 @@ struct Cli {
     /// How each peer host's command line is built (which target's peer runs).
     #[arg(long, value_enum, default_value_t = PeerKind::Wasmtime)]
     peer_kind: PeerKind,
+
+    /// How the offerer host's command line is built; defaults to --peer-kind.
+    /// Set this and --answerer-kind to different kinds to place an interop
+    /// pair.
+    #[arg(long, value_enum)]
+    offerer_kind: Option<PeerKind>,
+
+    /// How the answerer host's command line is built; defaults to --peer-kind.
+    #[arg(long, value_enum)]
+    answerer_kind: Option<PeerKind>,
 
     /// Environment id recorded in the result document (the matrix column).
     #[arg(long, default_value = "shadow")]
@@ -168,6 +180,14 @@ impl Placement {
     }
 }
 
+/// One role's peer placement: the kind that selects its environment (the
+/// syscall shim arms only for the native `wasmtime` peer) and the resolved
+/// command template.
+struct RolePeer {
+    kind: PeerKind,
+    command: PeerCommand,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     conformance_adapter_common::init_tracing();
@@ -175,14 +195,21 @@ fn main() -> Result<()> {
     // Shadow runs each managed process with its working directory set to that
     // host's output directory, not the caller's, so every path handed to a
     // process (binaries and components) must be absolute.
-    let peer_command = PeerCommand::resolve(
-        cli.peer_kind,
-        &cli.peer_bin,
-        &cli.guest,
-        &cli.wasmtime_bin,
-        &cli.component,
-        &cli.reference_peer,
-    )?;
+    let resolve_role = |kind: PeerKind| -> Result<RolePeer> {
+        Ok(RolePeer {
+            kind,
+            command: PeerCommand::resolve(
+                kind,
+                &cli.peer_bin,
+                &cli.guest,
+                &cli.wasmtime_bin,
+                &cli.component,
+                &cli.reference_peer,
+            )?,
+        })
+    };
+    let offerer = resolve_role(cli.offerer_kind.unwrap_or(cli.peer_kind))?;
+    let answerer = resolve_role(cli.answerer_kind.unwrap_or(cli.peer_kind))?;
     let signaling_bin = conformance_adapter_common::peer_command::absolute(&cli.signaling_bin)?;
 
     let placements: Vec<Placement> = TWO_PEER_TESTS
@@ -195,7 +222,7 @@ fn main() -> Result<()> {
         anyhow::bail!("no tests selected");
     }
 
-    let config = render_config(&cli, &peer_command, &signaling_bin, &placements)?;
+    let config = render_config(&cli, &offerer, &answerer, &signaling_bin, &placements)?;
     let config_path = cli.data_dir.with_extension("yaml");
     if let Some(parent) = config_path.parent() {
         std::fs::create_dir_all(parent)
@@ -237,7 +264,8 @@ fn main() -> Result<()> {
 /// of simulated hosts (signaling, offerer, answerer).
 fn render_config(
     cli: &Cli,
-    peer_command: &PeerCommand,
+    offerer: &RolePeer,
+    answerer: &RolePeer,
     signaling_bin: &Path,
     placements: &[Placement],
 ) -> Result<String> {
@@ -271,12 +299,15 @@ fn render_config(
             Some("running"),
         );
 
-        for (role, ip) in [("offerer", &p.offerer_ip), ("answerer", &p.answerer_ip)] {
+        for (role, ip, peer) in [
+            ("offerer", &p.offerer_ip, offerer),
+            ("answerer", &p.answerer_ip, answerer),
+        ] {
             // The Shadow simulated stack lacks the multicast-socket options
             // mDNS candidate gathering binds with, so the wasmtime peers run
             // with mDNS disabled (they connect over explicit host candidates,
             // so mDNS is unnecessary here).
-            let argv = peer_command.argv(&PeerRun {
+            let argv = peer.command.argv(&PeerRun {
                 test_id: p.test_id,
                 role,
                 signaling_url: &p.signaling_url(cli.signaling_port),
@@ -294,7 +325,7 @@ fn render_config(
             // syscall surface to the webrtc driver's quinn-udp UDP layer and
             // engages only when this variable is set (the wasip3-guest peer
             // has no shim; its UDP goes through wasi:sockets).
-            let env: &[(&str, &str)] = match cli.peer_kind {
+            let env: &[(&str, &str)] = match peer.kind {
                 PeerKind::Wasmtime => &[(SHADOW_SYSCALL_SHIM_ENV, "1")],
                 PeerKind::Wasip3Guest | PeerKind::Reference => &[],
             };

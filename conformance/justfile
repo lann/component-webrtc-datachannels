@@ -157,8 +157,10 @@ interop: transpile-guest build-wasip3 build-signalingd build-reference (bin "con
 # the wasmtime target runs the native conformance-peer, the wasip3-guest
 # target runs the composed wasip3 conformance component under `wasmtime run`
 # (each in-guest provider bound to its host's simulated address via
-# WEBRTC_UDP_BIND_ADDR), and the reference target runs the non-wasm reference
-# peer under Node. Needs `shadow` on PATH; install it with
+# WEBRTC_UDP_BIND_ADDR), and the reference target runs the native libwebrtc
+# reference peer. Per-role kinds (--offerer-kind/--answerer-kind) place the
+# wasmtime <-> wasip3-guest interop pair in both orders over the same
+# simulated path. Needs `shadow` on PATH; install it with
 # scripts/download-shadow.sh (prebuilt, from the `shadow-dev` release) or
 # scripts/build-shadow.sh (from source).
 [doc("Build + run the Shadow lab (deterministic non-loopback simulation)")]
@@ -237,6 +239,27 @@ run-shadow:
         --reference-peer target/release/conformance-reference-peer \
         --signaling-bin target/debug/conformance-signalingd \
         --data-dir target/shadow-data-reference \
+        --out conformance/results
+    # The wasmtime <-> wasip3-guest interop pair, both orders: the two peers of
+    # each test run different targets on separate simulated hosts, giving the
+    # implementation pair its non-loopback coverage.
+    timeout {{timeout}} target/release/conformance-shadow \
+        --target wasmtime-x-wasip3-guest \
+        --offerer-kind wasmtime --answerer-kind wasip3-guest \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --peer-bin target/release/conformance-peer \
+        --component conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+        --signaling-bin target/debug/conformance-signalingd \
+        --data-dir target/shadow-data-wasmtime-x-wasip3-guest \
+        --out conformance/results
+    timeout {{timeout}} target/release/conformance-shadow \
+        --target wasip3-guest-x-wasmtime \
+        --offerer-kind wasip3-guest --answerer-kind wasmtime \
+        --guest conformance/guest/build/conformance-guest.component.wasm \
+        --peer-bin target/release/conformance-peer \
+        --component conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+        --signaling-bin target/debug/conformance-signalingd \
+        --data-dir target/shadow-data-wasip3-guest-x-wasmtime \
         --out conformance/results
 
 # Classify every result in conformance/results against the manifests and
