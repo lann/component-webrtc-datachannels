@@ -34,8 +34,10 @@ pub fn webrtc_ctx() -> WasiWebrtcCtx {
             engine.set_include_loopback_candidate(true);
         });
     }
-    if let Some(bytes) = wasmtime_webrtc_datachannels::max_inbound_buffer_bytes_from_env()
-        .unwrap_or_else(|e| panic!("{e}"))
+    let bound = std::env::var(wasmtime_webrtc_datachannels::MAX_INBOUND_BUFFER_ENV).ok();
+    if let Some(bytes) =
+        wasmtime_webrtc_datachannels::parse_max_inbound_buffer_bytes(bound.as_deref())
+            .unwrap_or_else(|e| panic!("{e}"))
     {
         ctx.set_max_inbound_buffer_bytes(bytes);
     }

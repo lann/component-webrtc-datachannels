@@ -39,7 +39,7 @@ mod peer_connection;
 mod state_watch;
 
 pub use data_channel::{
-    max_inbound_buffer_bytes_from_env, DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES,
+    parse_max_inbound_buffer_bytes, DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES,
     MAX_INBOUND_BUFFER_ENV,
 };
 pub use error::{WebrtcError, WebrtcResult};
@@ -210,9 +210,9 @@ impl WasiWebrtcCtx {
     /// Set the per-channel inbound buffer bound, in payload bytes (see the
     /// `data-channel` WIT docs for the overflow contract). Default:
     /// [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. Hosts honoring the conventional
-    /// [`MAX_INBOUND_BUFFER_ENV`] environment variable read it through
-    /// [`max_inbound_buffer_bytes_from_env`] and apply the result here; the
-    /// crate itself never reads the environment.
+    /// [`MAX_INBOUND_BUFFER_ENV`] environment variable read it, validate the
+    /// value with [`parse_max_inbound_buffer_bytes`], and apply the result
+    /// here; the crate itself never reads the environment.
     pub fn set_max_inbound_buffer_bytes(&mut self, bytes: usize) {
         self.max_inbound_buffer_bytes = bytes;
     }
