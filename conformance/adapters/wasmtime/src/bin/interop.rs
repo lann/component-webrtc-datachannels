@@ -1,8 +1,8 @@
 //! Cross-runtime interop orchestrator for the conformance suite.
 //!
 //! It anchors every target against the suite's **non-wasm reference peer**
-//! (`conformance/adapters/reference`: plain Node driving `RTCPeerConnection`,
-//! libwebrtc via `@roamhq/wrtc`) in both orders — `wasmtime`, `jco-node`, and
+//! (`conformance/adapters/reference`: a native binary driving Google's
+//! libwebrtc via LiveKit's Rust bindings) in both orders — `wasmtime`, `jco-node`, and
 //! `wasip3-guest` over the full two-peer corpus, `jco-browser` over the
 //! interop-handshake smoke test (one headless-Chromium instance per test).
 //! Because the reference side runs no wasm component and no WIT bindings, a
@@ -22,8 +22,8 @@
 //! jco-node peer via `conformance/adapters/jco/run-node.mjs --interop`, the
 //! jco-browser peer via `run-browser.mjs --interop`, the wasip3-guest peer via
 //! `wasmtime run` over the fully composed component
-//! ([`conformance_adapter_wasip3::Wasip3Peer`]), and the reference peer via
-//! `node peer.mjs`. Both peers of a pair share one in-process
+//! ([`conformance_adapter_wasip3::Wasip3Peer`]), and the reference peer as the
+//! `conformance-reference-peer` binary. Both peers of a pair share one in-process
 //! `conformance-signalingd` room and connect over a real WebRTC data channel.
 //!
 //! It writes one adapter result document per direction
@@ -72,7 +72,7 @@ enum Side {
     JcoBrowser,
     /// The composed wasip3-guest component, via `wasmtime run`.
     Wasip3,
-    /// The non-wasm reference peer, via `node peer.mjs`.
+    /// The non-wasm reference peer, via `conformance-reference-peer`.
     Reference,
 }
 
@@ -146,8 +146,7 @@ async fn run_external_peer(
             .await
         }
         Side::Reference => {
-            let mut command = tokio::process::Command::new(&cli.node_bin);
-            command.arg(&cli.reference_peer);
+            let mut command = tokio::process::Command::new(&cli.reference_peer);
             shared_args(&mut command);
             run_peer_command(command, &format!("reference peer {test_id}/{role}")).await
         }
@@ -263,9 +262,9 @@ struct Cli {
     #[arg(long, default_value = "loopback")]
     environment: String,
 
-    /// The Node binary that drives the jco-node, jco-browser, and reference
-    /// peers. Must be JSPI-capable (Node 24+) for the jco-node peer.
-    /// Overridable so CI can point at a specific toolchain node.
+    /// The Node binary that drives the jco-node and jco-browser peers. Must
+    /// be JSPI-capable (Node 24+) for the jco-node peer. Overridable so CI
+    /// can point at a specific toolchain node.
     #[arg(long, env = "CONFORMANCE_NODE", default_value = "node")]
     node_bin: String,
 
@@ -277,9 +276,8 @@ struct Cli {
     #[arg(long, default_value = "conformance/adapters/jco/run-browser.mjs")]
     jco_run_browser: PathBuf,
 
-    /// Path to the reference peer script (needs `npm install` in its
-    /// directory; see `just conformance::npm-reference`).
-    #[arg(long, default_value = "conformance/adapters/reference/peer.mjs")]
+    /// Path to the `conformance-reference-peer` binary.
+    #[arg(long, default_value = "target/release/conformance-reference-peer")]
     reference_peer: PathBuf,
 
     /// The `wasmtime` binary that drives the wasip3-guest peer (v46+).

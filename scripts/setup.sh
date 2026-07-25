@@ -19,6 +19,8 @@
 #     integration test (`just examples::test-webrtc-composed`)
 #   - iproute2, nftables, and coturn, used by the conformance netns lab
 #     (`just conformance::netns`; skip with SKIP_NETNS_LAB=1)
+#   - pkg-config and the glib development headers, needed to build the
+#     conformance reference peer (LiveKit's webrtc-sys) on Linux
 #   - the conformance Shadow lab (`just conformance::shadow`) needs the Shadow
 #     network simulator, which this script does NOT install. Shadow ships no
 #     upstream prebuilt binary and is slow to build, so it is built once by the
@@ -26,9 +28,8 @@
 #     `shadow-dev` GitHub prerelease; fetch it with scripts/download-shadow.sh or
 #     build it locally with scripts/build-shadow.sh. The lab recipe prints this
 #     guidance and fails if the binary is missing when it runs.
-#   - the Node host's npm dependencies (jco + @roamhq/wrtc), the conformance
-#     jco adapter's npm dependencies (jco + @roamhq/wrtc + playwright-core),
-#     and the conformance reference peer's npm dependencies (@roamhq/wrtc)
+#   - the Node host's npm dependencies (jco + @roamhq/wrtc), and the conformance
+#     jco adapter's npm dependencies (jco + @roamhq/wrtc + playwright-core)
 #
 # wasm-tools, just, and cargo-nextest are installed with cargo-binstall, which
 # downloads the pinned prebuilt release binaries when available and automatically
@@ -155,6 +156,19 @@ else
   fi
 fi
 
+# The conformance reference peer (conformance/adapters/reference) builds
+# LiveKit's `webrtc-sys`, whose build script locates the glib headers through
+# pkg-config on Linux. Install them on Debian/Ubuntu when apt-get is available
+# (harmless no-op elsewhere — provide them yourself).
+if command -v apt-get >/dev/null 2>&1 && ! pkg-config --exists glib-2.0 gobject-2.0 gio-2.0 2>/dev/null; then
+  log "Installing the reference peer's build dependencies (pkg-config, libglib2.0-dev)"
+  APT_SUDO=""
+  [ "$(id -u)" -eq 0 ] || APT_SUDO="sudo"
+  ${APT_SUDO} apt-get update -y
+  DEBIAN_FRONTEND=noninteractive ${APT_SUDO} apt-get install -y --no-install-recommends \
+    pkg-config libglib2.0-dev
+fi
+
 if [ "${SKIP_NODE:-0}" = "1" ]; then
   log "Skipping Node host dependencies (SKIP_NODE=1)"
 else
@@ -162,8 +176,6 @@ else
   (cd "${REPO_ROOT}/jco-impl" && npm install)
   log "Installing conformance jco adapter dependencies (conformance/adapters/jco)"
   (cd "${REPO_ROOT}/conformance/adapters/jco" && npm install)
-  log "Installing conformance reference peer dependencies (conformance/adapters/reference)"
-  (cd "${REPO_ROOT}/conformance/adapters/reference" && npm install)
 fi
 
 # In GitHub Actions, $GITHUB_PATH is a file; appending a path to it makes that
