@@ -33,6 +33,118 @@ confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
   supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
   in a namespace) is deferred.
 
+### A4. Guest-facing `peer-connection` configuration (ICE servers, transport policy)
+
+The `peer-connection` constructor takes no configuration, so connectivity
+config is host-side only: the Wasmtime host's `WasiWebrtcCtx` ICE config,
+nothing at all on the jco host, and the deployment-side
+`WEBRTC_UDP_BIND_ADDR` for the in-guest provider. Real deployments need
+*application-owned* ICE configuration — TURN credentials are typically
+ephemeral, fetched by the app at runtime — which no host-side channel can
+express, and `RTCConfiguration.iceServers` is the most load-bearing field of
+the W3C constructor this package mirrors.
+
+Agreed design, following `wasi:http`'s `request-options` precedent of
+**fallible setters**:
+
+- A `peer-connection-config` builder resource with
+  `set-ice-servers: func(servers: list<ice-server>) -> result<_, config-error>`
+  and `set-ice-transport-policy` (`all | relay`), where
+  `config-error = not-supported | invalid(string)`. Getters reflect what a
+  successful set stored. `peer-connection`'s constructor takes
+  `option<peer-connection-config>` by ownership, like `create-data-channel`
+  takes its options.
+- **Accepted ⇒ honored**: rejection happens eagerly at the setter, so any
+  config that was successfully built is binding — an implementation may never
+  silently ignore a field. `data-channel-options` keeps its infallible
+  setters (its fields are universally supportable); capability-gated options
+  get the fallible variant of the same builder pattern.
+- The wasip3 provider returns `not-supported` from `set-ice-servers` (the
+  in-guest sans-I/O stack has no STUN/TURN client) until `rtc`'s stun/turn
+  crates are wired into the driver; the conformance manifest records this
+  with an `unsupported` tag so the matrix shows it and forces cleanup when
+  support lands.
+- The same error channel carries **host policy**: on the Wasmtime host, a
+  `WasiWebrtcCtx` hook may reject guest-supplied servers
+  (allowlist/deny), surfacing as `not-supported`/`invalid` — capability and
+  policy are indistinguishable to the guest, deliberately.
+- Conformance contract: per target, `set-ice-servers` returns
+  `not-supported` XOR the TURN scenarios pass. This extends the netns
+  TURN coverage beyond the wasmtime target (the browser `RTCPeerConnection`
+  accepts `iceServers` directly) — see A3's netns-lab coverage gap.
+
+Out of scope, deliberately host/deployment-side: the bind address
+(topology), loopback candidates (demo glue), buffer bounds and timeouts
+(host resource policy). Do this when the first non-LAN use case lands or
+when extending lab coverage to jco — it is an interface change, not hygiene.
+
+### A5. Connection- and channel-state streams
+
+The interface exposes exactly one lifecycle observation: the latched
+`wait-connected`. Post-connect transitions are unobservable — a guest
+cannot see `disconnected`/`failed` after connecting (only infer "terminally
+over" from operations failing `closed` and streams ending) — and a
+`data-channel` has no open or close signal at all (a locally created
+channel's wiring is internal, so there is nothing to await between
+`create-data-channel` and the first successful `send`). These are the gaps
+that block a faithful W3C-polyfill guest (`connectionState`/
+`onconnectionstatechange`, `readyState`/`onopen`/`onclose`) and force
+close-drain guessing (F5, A6).
+
+Design sketch:
+
+- `peer-connection.state-changes: func() -> stream<connection-state>` —
+  take-once (like the package's other streams), yielding the current state
+  first and then each transition; enum mirroring the W3C set
+  (`new | connecting | connected | disconnected | failed | closed`).
+  Terminal states (`failed`, `closed`) are mandatory; transient granularity
+  (`disconnected`) is implementation-defined and may never be emitted
+  (compatible, not identical). Complements — does not replace — the latched
+  `wait-connected`.
+- `data-channel.state-changes: func() -> stream<data-channel-state>` —
+  same shape, enum per W3C (`connecting | open | closing | closed`).
+  Reaching `closed` through the graceful path means the closing procedure
+  completed, which per the W3C ordering happens only after pending sends
+  flush — see A6 for why this is the flush signal.
+
+All three implementations already have the underlying signals (the browser
+events; `webrtc-rs`'s connection-state callback and per-channel
+`OnOpen`/`OnClose` pump events; `rtc`'s `PeerEvent`
+`Connected/Failed/Closed/ChannelOpen/ChannelClosed`). Conformance asserts
+the mandatory transitions per target; manifests record granularity gaps.
+
+### A6. `data-channel.close()`
+
+The only channel-scoped teardown today is dropping the resource, whose
+transport effect is implementation-defined (the jco host closes the native
+channel via its dispose hook; the Wasmtime host makes no such promise) —
+closing one channel while keeping the connection, a basic W3C capability,
+is not expressible in the contract.
+
+Design, settled: `close: func()` — **synchronous**, matching both the W3C
+`RTCDataChannel.close()` surface and the package's command/observation
+split (`peer-connection.close` + `wait-connected` precedent). Idempotent;
+initiates the graceful closing procedure (pending sends flush, then the
+transport-level close — an SCTP stream reset per RFC 8831). Deliberately
+**not** async: completion is observed through the A5 channel-state stream
+reaching `closed`, which the W3C closing procedure orders *after* the
+flush, so `close(); await closed` is the flush-aware close — and an async
+close would need ambiguous result semantics on failure paths (what does it
+resolve to when the connection dies mid-flush?). Document that `closed` ≠
+delivered: failure paths reach `closed` without flushing, and a clean
+flush means handed-to-the-wire, not acked — delivery guarantees remain
+application-level acks, per the existing inbound-buffering contract.
+
+Alongside, make resource-drop-without-close contractual (drop implies
+close) so today's implementation-defined behavior becomes spec. With A5 +
+A6, guests can do flush-aware teardown themselves (close each channel,
+await `closed`, then close the connection), reducing reliance on the
+host-side bounded graces (F5).
+
+Remaining polyfill gaps deliberately not covered here: property accessors
+(`ordered`/`max-retransmits`/`protocol`) on incoming channels, and
+conveying the remote peer's end-of-candidates through `add-ice-candidate`.
+
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -116,37 +228,56 @@ File upstream: WonderInventions/node-webrtc (the receive-side reorder) and
 webrtc-rs/rtc (the default-options ordering inversion); drop the manifest
 entries once a fixed `@roamhq/wrtc` ships.
 
+### E13. Unify and shrink the implementations' environment-variable surface
+
+The env-var surface is now indexed (AGENTS.md) and fails loud on invalid
+values, but three refinements remain:
+
+- **Latching semantics differ per implementation.** The Rust
+  implementations latch `WEBRTC_MAX_INBOUND_BUFFER_BYTES` at first read
+  (`OnceLock`), for the process lifetime; the jco host resolves it lazily
+  per channel (`maxInboundBuffered` in `jco-impl/webrtc.js`). A harness
+  that changes the value mid-process observes different behavior per
+  target. Align on read-once-at-first-use everywhere.
+- **The Wasmtime host library still reads ambient env.**
+  `WasiWebrtcCtx::default()` sources the buffer bound from the env var, so
+  a malformed value panics even when the embedder immediately overrides it
+  via `set_max_inbound_buffer_bytes` — and a library panicking on ambient
+  state is harsh for embedders in general. Consider making `wasmtime-impl`
+  env-free: move the env read to its consumers (the demo binaries and the
+  conformance adapter) through the existing ctx accessor, keeping the one
+  shared variable name working across all three implementations for the
+  conformance suite.
+- **Policy: no new implementation-level env vars** without first
+  considering the proper channel — `WasiWebrtcCtx` on the Wasmtime host, an
+  exported configure hook for the jco module (which `jco --map` gives no
+  instantiation-time config channel), the WIT surface for in-guest
+  configuration (see A4). Every env var is an undeclared API that each
+  deployer must discover; the AGENTS.md table is its only registry.
+
+`WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
+address is deployment topology, owned by whoever runs the process (see A4).
+
 ## F. Conformance suite
 
-### F5. Interop barrier sentinel can be lost to the winner's immediate close
+### F5. Replace the bounded close-drain graces with flush-aware teardown
 
-The interop "attempt timed-out" flake family is now diagnosed (via the
-phase-marker logs): in a two-peer test the side that finishes its barrier
-first closes immediately, and a close that tears the connection down
-without draining can discard the just-sent barrier sentinel before it
-reaches the wire, leaving the slower peer waiting for a sentinel that
-never arrives (the browser does not surface the dirty teardown as a
-channel close within the 90s guard). The **wasmtime host** now defers its
-network teardown by a bounded `CLOSE_DRAIN` grace (the close is still
-observed locally at once), mirroring `wasip3-impl`'s drain — which covers
-every observed instance (wasmtime answerer + jco peer). Still open: the
-**jco host**'s `close()` calls `pc.close()` immediately, so the symmetric
-race (jco answerer strands a wasmtime offerer) remains possible; a
-matching deferred-teardown there must keep the local close observation
-immediate (the `#closed` gate) *and* mark the connection's channels closed
-at once, or the delayed teardown would regress `post-close-send`.
+The interop "attempt timed-out" flake family (a peer closing immediately
+after its last send, discarding the just-sent barrier sentinel with the
+SCTP send queue) is now handled in every implementation: the Wasmtime host
+defers network teardown by a bounded `CLOSE_DRAIN` grace on `close()` and
+on resource drop, the in-guest `wasip3-impl` driver drains before its
+rtc-level close, and the jco host closes its channels at once (keeping the
+post-close contract) but tears the connection down only after every
+channel's `bufferedAmount` drains, bounded by `CLOSE_DRAIN_MS`.
 
-The same race also reached the Wasmtime host through a second path, now
-fixed: dropping the `peer-connection` resource (a guest returning without
-calling `close`) tore the network down immediately, skipping the
-`CLOSE_DRAIN` grace that `close()` applies — the cli-signaling round trip
-flaked (~5-10% locally) with the offerer's `receive` failing `closed`
-because the answerer's just-sent reply was discarded with the SCTP send
-queue. `Drop` now mirrors `close()` (fire the signal, defer teardown by
-the drain), and the cli-signaling host binary lingers briefly after the
-guest returns so process exit does not cut the drain short. A
-flush-aware teardown (close once the SCTP queue is empty, bounded) would
-replace both graces.
+Remaining: the two Rust implementations' graces are blind timers — a
+too-slow path can still lose the final message at the bound, and every
+close pays the full grace even when nothing is queued. The jco host shows
+the better shape (tear down as soon as the send buffers drain, with the
+timer only as the cap); doing the same in the Rust implementations needs
+SCTP send-queue introspection from `webrtc`/`rtc` (an upstream capability
+— track alongside E5/E6's upstream items).
 
 ### F7. Unify the remaining corpus mirrors (plan + params)
 
@@ -182,7 +313,11 @@ noting the contamination risk in the result document.
 
 ## Suggested priority
 
-1. Conformance-suite integrity: wire `list-tests` + loud missing results
-   (F7), the jco close-drain half of the barrier race (F5).
-2. The rest as touched: jco in-process timeout isolation (F11), the
-   remaining conformance-matrix gaps (A3).
+1. Flush-aware teardown in the Rust implementations (F5, upstream-gated).
+2. When the first non-LAN use case (or jco lab coverage) calls for it:
+   guest-facing peer-connection configuration (A4); when a W3C-polyfill or
+   richer-lifecycle guest calls for it: state streams and channel close
+   (A5, A6 — A6 wants A5 first).
+3. The rest as touched: the remaining corpus-mirror unification (F7), jco
+   in-process timeout isolation (F11), env-var latching/library hygiene
+   (E13), the remaining conformance-matrix gaps (A3).

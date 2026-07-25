@@ -42,6 +42,14 @@ const MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 // How long `wait-connected` waits before failing with `error.timed-out`.
 const CONNECT_TIMEOUT_MS = 20_000;
 
+// How long `close()` keeps the underlying connection alive after the close is
+// observed locally, so messages already handed to the transport flush to the
+// wire before teardown discards the SCTP send queue (a reply or rendezvous
+// sentinel sent just before `close()` would otherwise be lost, stranding the
+// remote peer). The teardown runs as soon as every channel's `bufferedAmount`
+// drains, with this as the upper bound for a peer that never drains.
+const CLOSE_DRAIN_MS = 1_000;
+
 // The default bound on buffered inbound payload bytes awaiting `receive`.
 // There is no wire-level inbound backpressure (the W3C API has no read-side
 // flow control), so this bound is what protects memory from a slow guest
@@ -308,6 +316,11 @@ export class PeerConnection {
    * so a pending waiter would otherwise hang to its timeout.
    */
   #closeHooks = new Set();
+  /**
+   * Every underlying `RTCDataChannel` this connection created or adopted, so
+   * `close()` can close them all at once (see its doc).
+   */
+  #ownedChannels = new Set();
 
   constructor() {
     this.#pc = new RTCPeerConnection();
@@ -349,6 +362,7 @@ export class PeerConnection {
     // Data channels opened by the remote peer.
     this.#channels = eventStream((push) => {
       this.#pc.addEventListener("datachannel", ({ channel }) => {
+        this.#ownedChannels.add(channel);
         push(new DataChannel(channel));
       });
     });
@@ -387,6 +401,7 @@ export class PeerConnection {
     this.#requireOpen();
     try {
       const channel = this.#pc.createDataChannel(options.label(), options.toInit());
+      this.#ownedChannels.add(channel);
       return new DataChannel(channel);
     } catch (err) {
       throw { tag: "other", val: String(err) };
@@ -535,15 +550,44 @@ export class PeerConnection {
    * Close the peer connection and any of its data channels. Idempotent; wakes
    * pending `waitConnected` callers (the W3C `close()` transitions the state
    * without firing events).
+   *
+   * The close is observed **locally** at once — methods fail `closed`, the
+   * resource's streams end, and every owned channel is closed (its graceful
+   * W3C `close()` still transmits already-buffered data) — but the
+   * connection-level teardown is deferred until every channel's
+   * `bufferedAmount` drains, bounded by `CLOSE_DRAIN_MS`: an immediate
+   * `pc.close()` discards the SCTP send queue, so a message sent just before
+   * `close()` (for example a rendezvous sentinel the remote peer still needs)
+   * would be lost.
    */
   close() {
     if (this.#closed) return;
     this.#closed = true;
-    this.#pc.close();
     for (const hook of this.#closeHooks) hook();
     this.#closeHooks.clear();
     this.#candidates.end();
     this.#channels.end();
+    // Close the channels now (keeping the post-close contract observable at
+    // once), then tear the connection down once their send buffers drain.
+    for (const channel of this.#ownedChannels) {
+      try {
+        channel.close();
+      } catch {
+        // Already closed.
+      }
+    }
+    const deadline = Date.now() + CLOSE_DRAIN_MS;
+    const drained = () =>
+      [...this.#ownedChannels].every((channel) => channel.bufferedAmount === 0);
+    const tick = setInterval(() => {
+      if (drained() || Date.now() >= deadline) {
+        clearInterval(tick);
+        this.#pc.close();
+      }
+    }, 10);
+    // Under Node, do not hold an exiting process open for the drain: process
+    // exit already flushed-or-lost everything this timer could affect.
+    tick.unref?.();
   }
 
   /**
