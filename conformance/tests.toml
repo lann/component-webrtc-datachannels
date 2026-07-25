@@ -171,3 +171,47 @@ description = "Invalid SDP into the peer-connection yields error.invalid-signali
 id = "interop-handshake"
 tags = ["interop", "signaling"]
 description = "Full mailbox-driven offer/answer + trickle ICE, then a payload-integrity exchange."
+
+# --- Configuration (A4) ---------------------------------------------------------
+
+[[test]]
+id = "config-defaults"
+tags = ["peer-connection", "ice-config"]
+description = "peer-connection-config defaults (no servers, all policy); a default config constructs a usable connection."
+
+[[test]]
+id = "config-setters-contract"
+tags = ["peer-connection", "ice-config"]
+description = "Fallible config setters accept (getter reflects) or fail not-supported (getter unchanged), never trap; accepted config constructs a working connection."
+
+[[test]]
+id = "config-invalid-ice-server"
+tags = ["peer-connection", "ice-config", "errors"]
+description = "Malformed ice-server entries are rejected eagerly; a rejected value is never latently fatal."
+
+# --- Lifecycle (A5, A6) ---------------------------------------------------------
+
+[[test]]
+id = "connection-state-changes"
+tags = ["peer-connection", "lifecycle"]
+description = "peer-connection.state-changes: connected at first read on a connected pair, ends with closed after close, no consecutive duplicates, take-once."
+
+[[test]]
+id = "channel-state-changes"
+tags = ["data-channel", "lifecycle"]
+description = "data-channel.state-changes: open at first read on an open channel, ends with closed after close, take-once."
+
+[[test]]
+id = "channel-post-close-receive"
+tags = ["data-channel", "lifecycle", "errors"]
+description = "data-channel.close is idempotent and observed at once: later receive/send/receive-via-stream fail closed; the unread backlog is discarded."
+
+[[test]]
+id = "channel-drop-implies-close"
+tags = ["data-channel", "lifecycle"]
+description = "Dropping a data-channel without close implies close: the probe sent before the drop still arrives, then the remote observes the channel closed."
+
+[[test]]
+id = "channel-close-flush"
+tags = ["data-channel", "lifecycle"]
+description = "data-channel.close flushes pending sends: every message sent immediately before close arrives at the peer, whose next receive then fails closed."

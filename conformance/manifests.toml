@@ -97,6 +97,19 @@
 [target.jco-browser-x-reference]
 [target.reference-x-jco-browser]
 [target.wasip3-guest-x-reference]
+
+# The sans-I/O `rtc` stack's data-channel close sends nothing on the wire (its
+# handler-level `close()` is a stub, so no SCTP stream reset is emitted; see
+# TODO item E15). A wasip3 offerer's `channel-close-flush` close is therefore
+# never observable by the libwebrtc answerer, which waits past the attempt
+# guard (the flush half works: every payload arrives). The rtc<->rtc and
+# rtc<->webrtc-rs pairs pass only because those answerers detect the
+# offerer's process exit as a connection death within the guard.
+[[target.wasip3-guest-x-reference.expected-fail]]
+test = "channel-close-flush"
+reason = "rtc emits no SCTP stream reset on data-channel close, so the libwebrtc answerer never observes the close"
+tracking = "TODO.md E15"
+
 [target.reference-x-wasip3-guest]
 
 # Retained implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
