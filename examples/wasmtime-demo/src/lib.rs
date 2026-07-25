@@ -34,10 +34,29 @@ pub fn webrtc_ctx() -> WasiWebrtcCtx {
             engine.set_include_loopback_candidate(true);
         });
     }
-    if let Some(bytes) = wasmtime_webrtc_datachannels::max_inbound_buffer_bytes_from_env()
-        .unwrap_or_else(|e| panic!("{e}"))
-    {
+    if let Some(bytes) = max_inbound_buffer_bytes_from_env() {
         ctx.set_max_inbound_buffer_bytes(bytes);
     }
     ctx
+}
+
+/// The `WEBRTC_MAX_INBOUND_BUFFER_BYTES` override when set: `None` when the
+/// variable is unset or empty, the byte count for a positive integer, and a
+/// panic otherwise — the variable is primarily a test knob, and a typo that
+/// silently restored the default bound would invalidate exactly the test
+/// that set it.
+fn max_inbound_buffer_bytes_from_env() -> Option<usize> {
+    const ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
+    match std::env::var(ENV) {
+        Ok(value) if !value.is_empty() => Some(
+            value
+                .parse::<usize>()
+                .ok()
+                .filter(|&bytes| bytes > 0)
+                .unwrap_or_else(|| {
+                    panic!("invalid {ENV} {value:?}: expected a positive byte count")
+                }),
+        ),
+        _ => None,
+    }
 }
