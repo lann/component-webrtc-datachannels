@@ -208,6 +208,10 @@ pub struct Shared {
     /// pump observed their open (they are not yet in `channels`); the claim is
     /// applied to the tracked channel when its open event drains.
     pub pending_stream_claims: Vec<RTCDataChannelId>,
+    /// Channels locally closed before the pump observed their open; applied to
+    /// the tracked channel when its open event drains, so a
+    /// `create-data-channel` + `close` pair never resurrects the channel.
+    pub pending_closes: Vec<RTCDataChannelId>,
     /// Whether the connection reached `connected`.
     pub connected: bool,
     /// Whether the connection failed.
@@ -301,6 +305,7 @@ impl Runtime {
             channels: Vec::new(),
             local_channels: Vec::new(),
             pending_stream_claims: Vec::new(),
+            pending_closes: Vec::new(),
             connected: false,
             failed: false,
             closed: false,
@@ -457,10 +462,13 @@ fn apply_event(s: &mut Shared, event: PeerEvent) {
                 // tracked already-closed, so `send`/`receive` on its handle
                 // observe `closed` rather than a spuriously usable channel.
                 channel.closed = s.closed || s.failed;
-                // Apply a `receive-via-stream` claim made while the channel was
-                // still opening (see `Shared::pending_stream_claims`).
+                // Apply a `receive-via-stream` claim or a local close made
+                // while the channel was still opening (see
+                // `Shared::pending_stream_claims` / `Shared::pending_closes`).
                 channel.stream_claimed = s.pending_stream_claims.contains(&id);
                 s.pending_stream_claims.retain(|&claimed| claimed != id);
+                channel.closed = channel.closed || s.pending_closes.contains(&id);
+                s.pending_closes.retain(|&closed| closed != id);
                 s.channels.push(channel);
             }
         }

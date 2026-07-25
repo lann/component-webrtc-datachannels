@@ -411,10 +411,12 @@ interface connections {
     /// closed still reports having connected (see `wait-connected`).
     resource peer-connection {
         /// Construct a peer connection. `config` is taken by ownership, like
-        /// `create-data-channel` takes its options; `none` uses the defaults
-        /// (no ICE servers, the `all` candidate policy). Every option a
-        /// supplied config carries was already accepted by its setter, so
-        /// construction honors it — see `peer-connection-config`.
+        /// `create-data-channel` takes its options; `none` leaves
+        /// configuration to the implementation's (or embedding host's)
+        /// defaults — no ICE servers and the `all` candidate policy, unless
+        /// the host is deployed with its own connectivity configuration.
+        /// Every option a supplied config carries was already accepted by its
+        /// setter, so construction honors it — see `peer-connection-config`.
         constructor(config: option<peer-connection-config>);
 
         /// Create a data channel that will be negotiated in-band with the peer.

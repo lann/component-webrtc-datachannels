@@ -112,8 +112,8 @@ impl Guest for Component {
 /// ICE — and return both peers with the two ends of the negotiated channel.
 async fn connect_pair() -> Result<(PeerConnection, PeerConnection, DataChannel, DataChannel), Error>
 {
-    let offerer = PeerConnection::new();
-    let answerer = PeerConnection::new();
+    let offerer = PeerConnection::new(None);
+    let answerer = PeerConnection::new(None);
 
     let options = DataChannelOptions::new();
     options.set_label("echo");

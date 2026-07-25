@@ -117,8 +117,8 @@ fn connect_result(side: &str, result: Result<(), Error>) -> Result<()> {
 async fn connect_once() -> Result<(String, String)> {
     print("Creating the offerer and answerer via the imported provider…\n").await;
 
-    let offerer = PeerConnection::new();
-    let answerer = PeerConnection::new();
+    let offerer = PeerConnection::new(None);
+    let answerer = PeerConnection::new(None);
 
     // The offerer creates the channel and produces an offer.
     let options = DataChannelOptions::new();

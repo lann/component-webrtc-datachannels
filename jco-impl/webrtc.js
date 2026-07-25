@@ -136,6 +136,66 @@ export class DataChannelOptions {
 }
 
 /**
+ * The `peer-connection-config` resource: a configuration builder with
+ * fallible setters (the WIT `config-error` is thrown as `{ tag, val }`),
+ * following `wasi:http`'s `request-options` precedent. This host maps the
+ * accepted options straight onto the W3C `RTCConfiguration`, so both ICE
+ * servers and the `relay` policy are supported; setters validate eagerly (a
+ * malformed server entry throws `invalid` here, never at connection time).
+ */
+export class PeerConnectionConfig {
+  #iceServers = [];
+  #policy = "all";
+
+  /** The ICE servers a successful `setIceServers` stored. */
+  iceServers() {
+    return this.#iceServers;
+  }
+
+  /** @param {Array<{urls: string[], username: string, credential: string}>} servers */
+  setIceServers(servers) {
+    for (const server of servers) {
+      if (!server.urls.length) {
+        throw { tag: "invalid", val: "ice-server has no urls" };
+      }
+      for (const url of server.urls) {
+        if (!/^(stun|stuns|turn|turns):/.test(url)) {
+          throw {
+            tag: "invalid",
+            val: `ice-server url ${JSON.stringify(url)} has no stun:/stuns:/turn:/turns: scheme`,
+          };
+        }
+      }
+    }
+    this.#iceServers = servers;
+  }
+
+  /** The configured candidate policy. */
+  iceTransportPolicy() {
+    return this.#policy;
+  }
+
+  /** @param {"all" | "relay"} policy */
+  setIceTransportPolicy(policy) {
+    this.#policy = policy;
+  }
+
+  /** The `RTCConfiguration` these options describe. */
+  toConfiguration() {
+    const configuration = { iceTransportPolicy: this.#policy };
+    if (this.#iceServers.length) {
+      configuration.iceServers = this.#iceServers.map((server) => {
+        const entry = { urls: server.urls };
+        if (server.username) entry.username = server.username;
+        if (server.credential) entry.credential = server.credential;
+        return entry;
+      });
+    }
+    return configuration;
+  }
+}
+
+/**
  * The `data-channel` resource, implemented over an `RTCDataChannel`.
  *
  * `send`/`receive` each carry exactly one data-channel message, preserving
@@ -148,6 +208,12 @@ export class DataChannel {
   // Set once `receive-via-stream` has claimed the inbound messages; further
   // `receive`/`receive-via-stream` calls fail with `receiving-via-stream`.
   #streamClaimed = false;
+  /** True once `close()` has been called on this resource. */
+  #localClosed = false;
+  /** Take-once claim for `state-changes` (the WIT contract). */
+  #stateTaken = false;
+  /** Wake callbacks for the `state-changes` watch (see `stateStream`). */
+  #statePokes = new Set();
 
   constructor(channel) {
     this.#channel = channel;
@@ -182,6 +248,7 @@ export class DataChannel {
    * inbound messages).
    */
   async receive() {
+    if (this.#localClosed) throw { tag: "closed" };
     if (this.#streamClaimed) throw { tag: "receiving-via-stream" };
     return this.#incoming.next();
   }
@@ -225,6 +292,7 @@ export class DataChannel {
    * with it. The stream ends when the channel closes.
    */
   receiveViaStream() {
+    if (this.#localClosed) throw { tag: "closed" };
     if (this.#streamClaimed) throw { tag: "receiving-via-stream" };
     this.#streamClaimed = true;
     const incoming = this.#incoming;
@@ -266,13 +334,51 @@ export class DataChannel {
   }
 
   /**
-   * Dispose hook jco invokes when the guest drops the resource: close the
-   * channel so its native resources are released even if the guest never
-   * closed the owning peer connection.
+   * Close the data channel. The close is observed locally at once — pending
+   * and later operations fail `closed`, the unread inbound backlog is
+   * discarded per the WIT contract — while the native graceful close (which
+   * still transmits already-buffered data) runs the closing procedure;
+   * `state-changes` reports `closed` when it completes. Idempotent.
+   */
+  close() {
+    if (this.#localClosed) return;
+    this.#localClosed = true;
+    this.#incoming.discard();
+    try {
+      this.#channel.close();
+    } catch {
+      // Already closed.
+    }
+    for (const poke of this.#statePokes) poke();
+  }
+
+  /**
+   * A stream of lifecycle states: a coalescing watch whose first element
+   * reflects the state at the first read, ending after `closed` (see the WIT
+   * contract). Take-once: later calls return a stream that ends immediately.
+   */
+  stateChanges() {
+    if (this.#stateTaken) return emptyStream();
+    this.#stateTaken = true;
+    return stateStream(
+      () => this.#channel.readyState,
+      (wake) => {
+        for (const event of ["open", "closing", "close", "error"]) {
+          this.#channel.addEventListener(event, wake);
+        }
+        this.#statePokes.add(wake);
+      },
+      (state) => state === "closed",
+    );
+  }
+
+  /**
+   * Dispose hook jco invokes when the guest drops the resource: dropping
+   * without `close` implies `close`, per the WIT contract.
    */
   [Symbol.dispose]() {
     try {
-      this.#channel.close();
+      this.close();
     } catch {
       // Already closed.
     }
@@ -321,9 +427,17 @@ export class PeerConnection {
    * `close()` can close them all at once (see its doc).
    */
   #ownedChannels = new Set();
+  /** Take-once claim for `state-changes` (the WIT contract). */
+  #stateTaken = false;
+  /** Wake callbacks for the `state-changes` watch (see `stateStream`). */
+  #statePokes = new Set();
 
-  constructor() {
-    this.#pc = new RTCPeerConnection();
+  /** @param {PeerConnectionConfig | undefined} config */
+  constructor(config) {
+    // Every option a supplied config carries was accepted by its setters, so
+    // it maps straight onto the W3C configuration; `undefined` leaves the
+    // browser defaults.
+    this.#pc = new RTCPeerConnection(config ? config.toConfiguration() : undefined);
 
     // Latch `connected` as soon as it is reached, independent of any
     // `waitConnected` caller: the WIT contract keeps reporting a
@@ -339,6 +453,7 @@ export class PeerConnection {
         this.#closeHooks.clear();
         this.#candidates.end();
         this.#channels.end();
+        for (const poke of this.#statePokes) poke();
       }
     };
     this.#pc.addEventListener("connectionstatechange", latch);
@@ -499,6 +614,32 @@ export class PeerConnection {
   }
 
   /**
+   * A stream of lifecycle states: a coalescing watch whose first element
+   * reflects the state at the first read, ending after a terminal state
+   * (`failed` or `closed` — see the WIT contract). The local `#closed` and
+   * `#failed` latches win over the live `connectionState`, so nothing is
+   * ever observed after a terminal state. Take-once: later calls return a
+   * stream that ends immediately.
+   */
+  stateChanges() {
+    if (this.#stateTaken) return emptyStream();
+    this.#stateTaken = true;
+    return stateStream(
+      () => {
+        if (this.#closed) return "closed";
+        if (this.#failed) return "failed";
+        return this.#pc.connectionState;
+      },
+      (wake) => {
+        this.#pc.addEventListener("connectionstatechange", wake);
+        this.#pc.addEventListener("iceconnectionstatechange", wake);
+        this.#statePokes.add(wake);
+      },
+      (state) => state === "failed" || state === "closed",
+    );
+  }
+
+  /**
    * Resolve once the connection reaches `connected`.
    *
    * `connected` is latched per the WIT contract: once the connection has ever
@@ -567,6 +708,7 @@ export class PeerConnection {
     this.#closeHooks.clear();
     this.#candidates.end();
     this.#channels.end();
+    for (const poke of this.#statePokes) poke();
     // Close the channels now (keeping the post-close contract observable at
     // once), then tear the connection down once their send buffers drain.
     for (const channel of this.#ownedChannels) {
@@ -760,6 +902,52 @@ function concatChunks(chunks, total) {
  * the pre-overflow backlog stays deliverable, after which `next()` rejects with
  * `{ tag: 'receive-buffer-overflow' }`.
  */
+/**
+ * A pull-based coalescing state watch backing the `state-changes` streams:
+ * each element is `current()` at the time it is produced (the first element
+ * reflects the state at the first read), consecutive elements are distinct,
+ * and the stream closes after a terminal state. `subscribe` registers a
+ * wake callback for potential state changes and is called once.
+ *
+ * @param {() => string} current
+ * @param {(wake: () => void) => void} subscribe
+ * @param {(state: string) => boolean} isTerminal
+ */
+function stateStream(current, subscribe, isTerminal) {
+  let delivered;
+  let notify = null;
+  subscribe(() => {
+    if (notify) {
+      const wake = notify;
+      notify = null;
+      wake();
+    }
+  });
+  return new ReadableStream({
+    async pull(controller) {
+      for (;;) {
+        // Arm the wake before checking, so a transition between the check
+        // and the wait is not missed.
+        const woken = new Promise((resolve) => {
+          notify = resolve;
+        });
+        const state = current();
+        if (state !== delivered) {
+          delivered = state;
+          controller.enqueue(state);
+          if (isTerminal(state)) controller.close();
+          return;
+        }
+        if (isTerminal(state)) {
+          controller.close();
+          return;
+        }
+        await woken;
+      }
+    },
+  });
+}
+
 function incomingQueue(channel) {
   const limit = maxInboundBuffered();
   const messages = [];
@@ -823,6 +1011,18 @@ function incomingQueue(channel) {
     rejectWaiters(error) {
       while (waiters.length) {
         waiters.shift().reject(error);
+      }
+    },
+    /**
+     * Discard the unread backlog and fail pending and future reads `closed`
+     * (a local `close`, per the WIT contract).
+     */
+    discard() {
+      messages.length = 0;
+      buffered = 0;
+      closed = true;
+      while (waiters.length) {
+        waiters.shift().reject({ tag: "closed" });
       }
     },
   };

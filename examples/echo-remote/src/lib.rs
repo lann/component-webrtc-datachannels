@@ -54,7 +54,7 @@ impl Guest for Component {
 /// Drive the offerer half of the rendezvous handshake, returning the connected
 /// peer and the data channel it created.
 async fn handshake_offerer(session: &Session) -> Result<(PeerConnection, DataChannel), Error> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
     let options = DataChannelOptions::new();
     options.set_label("echo");
     options.set_ordered(true);
@@ -78,7 +78,7 @@ async fn handshake_offerer(session: &Session) -> Result<(PeerConnection, DataCha
 /// Drive the answerer half of the rendezvous handshake, returning the
 /// connected peer and the data channel the offerer opened.
 async fn handshake_answerer(session: &Session) -> Result<(PeerConnection, DataChannel), Error> {
-    let peer = PeerConnection::new();
+    let peer = PeerConnection::new(None);
 
     // The offerer publishes its offer first.
     let offer = match recv_signal(session).await? {

@@ -169,6 +169,8 @@ pub(crate) struct Wired {
     /// Inbound messages, delivered one per `receive` call. Behind an async mutex
     /// so concurrent receivers serialize and each takes the next message.
     pub(crate) incoming: Arc<AsyncMutex<InboundQueue>>,
+    /// Resolves once the channel's pump ends (the transport closed).
+    pub(crate) transport_closed: Shared<oneshot::Receiver<()>>,
 }
 
 /// A future resolving to a channel's wired transport parts (or a wiring
@@ -245,6 +247,8 @@ pub(crate) struct ChannelPump {
     pub(crate) incoming: InboundQueue,
     /// Resolves once the channel reports `open`.
     pub(crate) open: oneshot::Receiver<()>,
+    /// Resolves once the pump ends (the transport closed).
+    pub(crate) closed: Shared<oneshot::Receiver<()>>,
 }
 
 /// Spawn the per-channel pump task that drives a `webrtc` 0.20 data channel.
@@ -265,6 +269,7 @@ pub(crate) fn spawn_channel_pump(
 ) -> ChannelPump {
     let (in_tx, in_rx) = mpsc::unbounded::<InboundMessage>();
     let (open_tx, open_rx) = oneshot::channel::<()>();
+    let (closed_tx, closed_rx) = oneshot::channel::<()>();
     let budget = Arc::new(InboundBudget::new(max_inbound_buffer_bytes));
     let pump_budget = budget.clone();
     tokio::spawn(async move {
@@ -292,10 +297,13 @@ pub(crate) fn spawn_channel_pump(
                 _ => {}
             }
         }
+        // The transport closed (an `OnClose` event or a `None` poll).
+        let _ = closed_tx.send(());
     });
     ChannelPump {
         incoming: InboundQueue::new(in_rx, budget),
         open: open_rx,
+        closed: closed_rx.shared(),
     }
 }
 
@@ -309,10 +317,15 @@ pub(crate) fn spawn_channel_wiring(
 ) {
     let pump = spawn_channel_pump(channel.clone(), max_inbound_buffer_bytes);
     let incoming = Arc::new(AsyncMutex::new(pump.incoming));
+    let transport_closed = pump.closed;
     tokio::spawn(async move {
         match pump.open.await {
             Ok(()) => {
-                let _ = wire_tx.send(Ok(Wired { channel, incoming }));
+                let _ = wire_tx.send(Ok(Wired {
+                    channel,
+                    incoming,
+                    transport_closed,
+                }));
             }
             Err(_) => {
                 let _ = wire_tx.send(Err(WebrtcError::Closed));
@@ -332,6 +345,17 @@ pub(crate) fn wire_open_channel(
     let (wire_tx, wired) = wiring_channel();
     spawn_channel_wiring(channel, wire_tx, max_inbound_buffer_bytes);
     wired
+}
+
+/// The channel lifecycle as observed by the host, backing
+/// `data-channel.state-changes` (mapped onto the WIT `data-channel-state` at
+/// the binding layer). `Closed` is terminal.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChanState {
+    Connecting,
+    Open,
+    Closing,
+    Closed,
 }
 
 /// Host state behind a `data-channel` resource.
@@ -356,11 +380,18 @@ pub struct DataChannel {
     /// Resolves once `receive-via-stream` is called, so pending `receive` calls
     /// can be woken and fail with `receiving-via-stream`.
     stream_started: Shared<oneshot::Receiver<()>>,
-    /// Fired once the owning `peer-connection` resource closes. Send/receive
-    /// observe it so operations on a closed connection fail with
-    /// `error.closed` even though the `webrtc` 0.20 wrapper reports nothing
-    /// itself.
-    conn_closed: CloseSignal,
+    /// Fired once the channel itself is over — by a local `close`, the owning
+    /// connection closing, or the transport closing — so operations fail
+    /// `error.closed` whichever way the channel ends (the `webrtc` 0.20
+    /// wrapper reports nothing to the channels itself).
+    closed: CloseSignal,
+    /// Fires `closed`; `close()` (and `Drop`) pull it, and the state feeder
+    /// forwards the connection/transport closes into it.
+    close_trigger: CloseTrigger,
+    /// The channel lifecycle, backing `state-changes`.
+    state: Arc<crate::state_watch::StateWatch<ChanState>>,
+    /// Take-once claim for `state-changes` (the WIT contract).
+    state_taken: Arc<AtomicBool>,
 }
 
 impl DataChannel {
@@ -371,14 +402,88 @@ impl DataChannel {
     /// its connection-close signal.
     pub(crate) fn deferred(label: String, wired: WiredFuture, conn_closed: CloseSignal) -> Self {
         let (started_tx, started_rx) = oneshot::channel();
+        let (close_trigger, closed) = close_signal();
+        let state = Arc::new(crate::state_watch::StateWatch::new(
+            ChanState::Connecting,
+            |s| matches!(s, ChanState::Closed),
+        ));
+        // The state feeder: drives the lifecycle watch from the wiring
+        // future, the connection-close signal, the transport-close signal,
+        // and a local `close()` (which fires `closed` directly), and forwards
+        // every ending into the channel's own close signal. Without a runtime
+        // the channel can never wire, so the initial `Connecting` (ended by
+        // `close`/drop) is the whole observable lifecycle.
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let wired = wired.clone();
+            let conn_closed = conn_closed.clone();
+            let local_closed = closed.clone();
+            let trigger = close_trigger.clone();
+            let state = state.clone();
+            handle.spawn(async move {
+                let mut wired = std::pin::pin!(wired.fuse());
+                let mut conn = std::pin::pin!(conn_closed.fired().fuse());
+                let mut local = std::pin::pin!(local_closed.fired().fuse());
+                futures::select_biased! {
+                    w = wired => if let Ok(w) = w {
+                        state.set(ChanState::Open);
+                        let mut transport = std::pin::pin!(w.transport_closed.clone().fuse());
+                        futures::select_biased! {
+                            _ = transport => {}
+                            _ = conn => {}
+                            _ = local => {
+                                // A local close: run the graceful
+                                // transport close so pending sends flush
+                                // before `closed` is observable.
+                                let _ = w.channel.close().await;
+                            }
+                        }
+                    },
+                    _ = conn => {}
+                    _ = local => {}
+                }
+                trigger.fire();
+                state.set(ChanState::Closed);
+            });
+        }
         Self {
             label,
             wired,
             stream_receiving: Arc::new(AtomicBool::new(false)),
             stream_started_tx: Arc::new(Mutex::new(Some(started_tx))),
             stream_started: started_rx.shared(),
-            conn_closed,
+            closed,
+            close_trigger,
+            state,
+            state_taken: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Close the channel: the close is observed locally at once (operations
+    /// fail `error.closed`, the state watch reports `closing`), while the
+    /// state feeder runs the graceful transport close and reports `closed`
+    /// when it completes. Idempotent.
+    pub(crate) fn close(&self) {
+        if self.closed.is_closed() {
+            return;
+        }
+        self.state.set(ChanState::Closing);
+        self.close_trigger.fire();
+    }
+
+    /// The channel's close signal: fired by a local `close`, the owning
+    /// connection closing, or the transport closing.
+    pub(crate) fn closed_signal(&self) -> CloseSignal {
+        self.closed.clone()
+    }
+
+    /// The channel's lifecycle watch, backing `state-changes`.
+    pub(crate) fn state_watch(&self) -> Arc<crate::state_watch::StateWatch<ChanState>> {
+        self.state.clone()
+    }
+
+    /// Claim `state-changes` (take-once): `true` for the first caller only.
+    pub(crate) fn take_state_stream(&self) -> bool {
+        !self.state_taken.swap(true, Ordering::SeqCst)
     }
 
     /// The negotiated channel label.
@@ -420,10 +525,13 @@ impl DataChannel {
     pub(crate) fn stream_started(&self) -> Shared<oneshot::Receiver<()>> {
         self.stream_started.clone()
     }
+}
 
-    /// The owning connection's close signal.
-    pub(crate) fn conn_closed(&self) -> CloseSignal {
-        self.conn_closed.clone()
+impl Drop for DataChannel {
+    fn drop(&mut self) {
+        // Dropping the resource without calling `close` implies `close`, per
+        // the WIT contract.
+        self.close();
     }
 }
 
