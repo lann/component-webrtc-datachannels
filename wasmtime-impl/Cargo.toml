@@ -15,8 +15,8 @@ wasmtime = { version = "47", features = ["component-model", "component-model-asy
 # quinn-udp GSO/GRO batching (webrtc-rs/webrtc#820) requires syscalls the
 # Shadow simulator does not implement; the conformance Shadow lab bridges
 # that with an in-binary shim (conformance/adapters/wasmtime/src/bin/peer/
-# shadow_shim.rs) — see TODO item E5 for the upstream fixes that would
-# retire it.
+# shadow_shim.rs); if Shadow adds support for these syscalls the shim can be
+# retired.
 webrtc = "0.20.0-rc.4"
 futures = "0.3"
 anyhow = "1"
