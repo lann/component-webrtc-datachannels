@@ -78,6 +78,73 @@ Out of scope, deliberately host/deployment-side: the bind address
 (host resource policy). Do this when the first non-LAN use case lands or
 when extending lab coverage to jco — it is an interface change, not hygiene.
 
+### A5. Connection- and channel-state streams
+
+The interface exposes exactly one lifecycle observation: the latched
+`wait-connected`. Post-connect transitions are unobservable — a guest
+cannot see `disconnected`/`failed` after connecting (only infer "terminally
+over" from operations failing `closed` and streams ending) — and a
+`data-channel` has no open or close signal at all (a locally created
+channel's wiring is internal, so there is nothing to await between
+`create-data-channel` and the first successful `send`). These are the gaps
+that block a faithful W3C-polyfill guest (`connectionState`/
+`onconnectionstatechange`, `readyState`/`onopen`/`onclose`) and force
+close-drain guessing (F5, A6).
+
+Design sketch:
+
+- `peer-connection.state-changes: func() -> stream<connection-state>` —
+  take-once (like the package's other streams), yielding the current state
+  first and then each transition; enum mirroring the W3C set
+  (`new | connecting | connected | disconnected | failed | closed`).
+  Terminal states (`failed`, `closed`) are mandatory; transient granularity
+  (`disconnected`) is implementation-defined and may never be emitted
+  (compatible, not identical). Complements — does not replace — the latched
+  `wait-connected`.
+- `data-channel.state-changes: func() -> stream<data-channel-state>` —
+  same shape, enum per W3C (`connecting | open | closing | closed`).
+  Reaching `closed` through the graceful path means the closing procedure
+  completed, which per the W3C ordering happens only after pending sends
+  flush — see A6 for why this is the flush signal.
+
+All three implementations already have the underlying signals (the browser
+events; `webrtc-rs`'s connection-state callback and per-channel
+`OnOpen`/`OnClose` pump events; `rtc`'s `PeerEvent`
+`Connected/Failed/Closed/ChannelOpen/ChannelClosed`). Conformance asserts
+the mandatory transitions per target; manifests record granularity gaps.
+
+### A6. `data-channel.close()`
+
+The only channel-scoped teardown today is dropping the resource, whose
+transport effect is implementation-defined (the jco host closes the native
+channel via its dispose hook; the Wasmtime host makes no such promise) —
+closing one channel while keeping the connection, a basic W3C capability,
+is not expressible in the contract.
+
+Design, settled: `close: func()` — **synchronous**, matching both the W3C
+`RTCDataChannel.close()` surface and the package's command/observation
+split (`peer-connection.close` + `wait-connected` precedent). Idempotent;
+initiates the graceful closing procedure (pending sends flush, then the
+transport-level close — an SCTP stream reset per RFC 8831). Deliberately
+**not** async: completion is observed through the A5 channel-state stream
+reaching `closed`, which the W3C closing procedure orders *after* the
+flush, so `close(); await closed` is the flush-aware close — and an async
+close would need ambiguous result semantics on failure paths (what does it
+resolve to when the connection dies mid-flush?). Document that `closed` ≠
+delivered: failure paths reach `closed` without flushing, and a clean
+flush means handed-to-the-wire, not acked — delivery guarantees remain
+application-level acks, per the existing inbound-buffering contract.
+
+Alongside, make resource-drop-without-close contractual (drop implies
+close) so today's implementation-defined behavior becomes spec. With A5 +
+A6, guests can do flush-aware teardown themselves (close each channel,
+await `closed`, then close the connection), reducing reliance on the
+host-side bounded graces (F5).
+
+Remaining polyfill gaps deliberately not covered here: property accessors
+(`ordered`/`max-retransmits`/`protocol`) on incoming channels, and
+conveying the remote peer's end-of-candidates through `add-ice-candidate`.
+
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -236,7 +303,9 @@ noting the contamination risk in the result document.
 
 1. Flush-aware teardown in the Rust implementations (F5, upstream-gated).
 2. When the first non-LAN use case (or jco lab coverage) calls for it:
-   guest-facing peer-connection configuration (A4).
+   guest-facing peer-connection configuration (A4); when a W3C-polyfill or
+   richer-lifecycle guest calls for it: state streams and channel close
+   (A5, A6 — A6 wants A5 first).
 3. The rest as touched: the remaining corpus-mirror unification (F7), jco
    in-process timeout isolation (F11), env-var latching/library hygiene
    (E13), the remaining conformance-matrix gaps (A3).
