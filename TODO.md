@@ -181,35 +181,24 @@ address is deployment topology, owned by whoever runs the process (see A4).
 
 ## F. Conformance suite
 
-### F5. Interop barrier sentinel can be lost to the winner's immediate close
+### F5. Replace the bounded close-drain graces with flush-aware teardown
 
-The interop "attempt timed-out" flake family is now diagnosed (via the
-phase-marker logs): in a two-peer test the side that finishes its barrier
-first closes immediately, and a close that tears the connection down
-without draining can discard the just-sent barrier sentinel before it
-reaches the wire, leaving the slower peer waiting for a sentinel that
-never arrives (the browser does not surface the dirty teardown as a
-channel close within the 90s guard). The **wasmtime host** now defers its
-network teardown by a bounded `CLOSE_DRAIN` grace (the close is still
-observed locally at once), mirroring `wasip3-impl`'s drain — which covers
-every observed instance (wasmtime answerer + jco peer). Still open: the
-**jco host**'s `close()` calls `pc.close()` immediately, so the symmetric
-race (jco answerer strands a wasmtime offerer) remains possible; a
-matching deferred-teardown there must keep the local close observation
-immediate (the `#closed` gate) *and* mark the connection's channels closed
-at once, or the delayed teardown would regress `post-close-send`.
+The interop "attempt timed-out" flake family (a peer closing immediately
+after its last send, discarding the just-sent barrier sentinel with the
+SCTP send queue) is now handled in every implementation: the Wasmtime host
+defers network teardown by a bounded `CLOSE_DRAIN` grace on `close()` and
+on resource drop, the in-guest `wasip3-impl` driver drains before its
+rtc-level close, and the jco host closes its channels at once (keeping the
+post-close contract) but tears the connection down only after every
+channel's `bufferedAmount` drains, bounded by `CLOSE_DRAIN_MS`.
 
-The same race also reached the Wasmtime host through a second path, now
-fixed: dropping the `peer-connection` resource (a guest returning without
-calling `close`) tore the network down immediately, skipping the
-`CLOSE_DRAIN` grace that `close()` applies — the cli-signaling round trip
-flaked (~5-10% locally) with the offerer's `receive` failing `closed`
-because the answerer's just-sent reply was discarded with the SCTP send
-queue. `Drop` now mirrors `close()` (fire the signal, defer teardown by
-the drain), and the cli-signaling host binary lingers briefly after the
-guest returns so process exit does not cut the drain short. A
-flush-aware teardown (close once the SCTP queue is empty, bounded) would
-replace both graces.
+Remaining: the two Rust implementations' graces are blind timers — a
+too-slow path can still lose the final message at the bound, and every
+close pays the full grace even when nothing is queued. The jco host shows
+the better shape (tear down as soon as the send buffers drain, with the
+timer only as the cap); doing the same in the Rust implementations needs
+SCTP send-queue introspection from `webrtc`/`rtc` (an upstream capability
+— track alongside E5/E6's upstream items).
 
 ### F7. Unify the remaining corpus mirrors (plan + params)
 
@@ -245,7 +234,7 @@ noting the contamination risk in the result document.
 
 ## Suggested priority
 
-1. The jco close-drain half of the barrier race (F5).
+1. Flush-aware teardown in the Rust implementations (F5, upstream-gated).
 2. When the first non-LAN use case (or jco lab coverage) calls for it:
    guest-facing peer-connection configuration (A4).
 3. The rest as touched: the remaining corpus-mirror unification (F7), jco
