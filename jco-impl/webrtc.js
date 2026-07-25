@@ -54,41 +54,24 @@ const CLOSE_DRAIN_MS = 1_000;
 // There is no wire-level inbound backpressure (the W3C API has no read-side
 // flow control), so this bound is what protects memory from a slow guest
 // reader: exceeding it closes the channel and, once the buffered backlog
-// drains, `receive` fails with `error.receive-buffer-overflow`. Overridable —
-// primarily as a test knob, so the conformance overflow probe needs only a
-// small flood — through the `WEBRTC_MAX_INBOUND_BUFFER_BYTES` environment
-// variable (Node) or a global of the same name (browsers).
+// drains, `receive` fails with `error.receive-buffer-overflow`.
 const DEFAULT_MAX_INBOUND_BUFFERED = 8 * 1024 * 1024;
 
-/** The inbound buffer bound, latched at first use (see maxInboundBuffered). */
-let latchedMaxInboundBuffered;
+/** The configured inbound buffer bound; channels capture it at creation. */
+let maxInboundBuffered = DEFAULT_MAX_INBOUND_BUFFERED;
 
 /**
- * The configured inbound buffer bound, latched at first use for the process
- * lifetime (the same read-once semantics as the other implementations, so a
- * harness changing the value mid-process observes uniform behavior). A
- * set-but-invalid value (not a positive number) throws rather than silently
- * reverting to the default: the knob is primarily a test knob, and a typo
- * that silently restored the 8 MiB bound would invalidate exactly the test
- * that set it.
+ * Set the per-channel inbound buffer bound, in payload bytes. This module
+ * reads no ambient configuration (no environment variables or globals): a
+ * host that offers the bound as a knob reads and validates the value itself
+ * and applies it here. Channels capture the bound at creation. Throws on
+ * anything but a positive finite number.
  */
-function maxInboundBuffered() {
-  if (latchedMaxInboundBuffered !== undefined) return latchedMaxInboundBuffered;
-  const raw =
-    globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES ??
-    globalThis.process?.env?.WEBRTC_MAX_INBOUND_BUFFER_BYTES;
-  if (raw === undefined || raw === "") {
-    latchedMaxInboundBuffered = DEFAULT_MAX_INBOUND_BUFFERED;
-    return latchedMaxInboundBuffered;
+export function setMaxInboundBufferBytes(bytes) {
+  if (!(Number.isFinite(bytes) && bytes > 0)) {
+    throw new Error(`invalid inbound buffer bound ${bytes}: expected a positive byte count`);
   }
-  const configured = Number(raw);
-  if (!(configured > 0)) {
-    throw new Error(
-      `invalid WEBRTC_MAX_INBOUND_BUFFER_BYTES ${JSON.stringify(raw)}: expected a positive byte count`,
-    );
-  }
-  latchedMaxInboundBuffered = configured;
-  return latchedMaxInboundBuffered;
+  maxInboundBuffered = bytes;
 }
 
 /** The UTF-8 byte length of a string payload (the WIT bound counts bytes). */
@@ -907,7 +890,7 @@ function concatChunks(chunks, total) {
  * with the next message, or rejects with `{ tag: 'closed' }` once the channel
  * closes with no more messages pending.
  *
- * Buffering is bounded by `maxInboundBuffered()` payload bytes: a message that
+ * Buffering is bounded by the configured inbound bound in payload bytes: a message that
  * would exceed it closes the channel and discards that and any later messages;
  * the pre-overflow backlog stays deliverable, after which `next()` rejects with
  * `{ tag: 'receive-buffer-overflow' }`.
@@ -959,7 +942,7 @@ function stateStream(current, subscribe, isTerminal) {
 }
 
 function incomingQueue(channel) {
-  const limit = maxInboundBuffered();
+  const limit = maxInboundBuffered;
   const messages = [];
   const waiters = [];
   let buffered = 0;
