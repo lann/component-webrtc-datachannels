@@ -4,6 +4,13 @@
 // Run with:  just examples::demo-node   (or: npm run transpile && npm start
 // after `just examples::build-component`)
 import { demo } from "../generated/echo-demo.js";
+import { parseMaxInboundBufferBytes, setMaxInboundBufferBytes } from "../webrtc.js";
+
+// Honor the conventional inbound-buffer knob: the host module itself reads no
+// environment, so this Node host wires the variable through the module's
+// exported configure hook (a malformed value fails loud here).
+const bufferBound = parseMaxInboundBufferBytes(process.env.WEBRTC_MAX_INBOUND_BUFFER_BYTES);
+if (bufferBound !== undefined) setMaxInboundBufferBytes(bufferBound);
 
 const MESSAGE_COUNT = 1000;
 const MESSAGE_SIZE = 4096;

@@ -29,9 +29,9 @@ import * as connections from "../../../jco-impl/webrtc.js";
 import { Session } from "./signaling.js";
 
 // Shrink the host's inbound-buffer bound so the `receive-buffer-overflow`
-// probe overflows it with a small flood (webrtc.js resolves the bound lazily
-// per channel, so setting the global here covers every instance).
-globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+// probe overflows it with a small flood (channels capture the bound at
+// creation, so configuring the module here covers every instance).
+connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");

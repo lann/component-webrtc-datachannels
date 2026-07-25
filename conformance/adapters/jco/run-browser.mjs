@@ -244,9 +244,9 @@ async function runInPage({ base, only, jobs }) {
   ]);
 
   // Shrink the host's inbound-buffer bound so the `receive-buffer-overflow`
-  // probe overflows it with a small flood (webrtc.js resolves the bound lazily
-  // per channel).
-  globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+  // probe overflows it with a small flood (channels capture the bound at
+  // creation).
+  connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
   const names = [
     "conformance-guest.core.wasm",
@@ -290,7 +290,7 @@ async function runInteropInPage({ base, testId, config }) {
       import(`${base}/signaling.js`),
       import(`${base}/generated/conformance-guest.js`),
     ]);
-  globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+  connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
   const names = [
     "conformance-guest.core.wasm",
