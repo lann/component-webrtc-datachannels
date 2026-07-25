@@ -78,29 +78,41 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E12. `rtc` sender breaks ordered delivery observed by libwebrtc receivers
+### E12. Reference peer receive-side reordering (node-webrtc); rtc default-options bug
 
-The non-wasm reference peer (libwebrtc via `@roamhq/wrtc`) intermittently
-(~10-25% of runs over loopback) receives an `ordered: true` channel's
-messages block-rotated — e.g. indexes `8..15,0..7` or `2..7,0,1,8..15` —
-from *both* `rtc`-based senders (the Wasmtime host on `webrtc` 0.20.0-rc.4
-and the in-guest `wasip3-impl` provider, so the defect is in the shared
-sans-I/O `rtc` core, not a driver). All messages arrive in a single 0-1 ms
-burst (no retransmission gap, so no loss involved), whole contiguous blocks
-swap rather than individual messages, and loopback UDP is FIFO — so the
-sender is emitting SCTP DATA whose ordering metadata cannot restore the
-application order (a per-chunk `U`-bit or stream-sequence-number assignment
-defect). `rtc`-based *receivers* mask it (rtc <-> rtc pairs pass `ordering`
-consistently), which is why no pre-reference pair ever caught it. Reproduce
-with `conformance-interop --pair wasmtime-x-reference --only ordering` in a
-loop; the reference peer logs the received index order under
-`REF_PEER_DEBUG=1`. Until it is fixed upstream, the `ordering` test carries
-the `ordered-delivery` tag and the four affected pair directions
-(`wasmtime`/`wasip3-guest` x `reference`, both orders) declare it
-unsupported in `conformance/manifests.toml` (a flaky failure cannot be an
-`expected-fail`: it would `unexpected-pass` on green runs). File the
-upstream `webrtc-rs/rtc` issue with the repro above, and drop the manifest
-entries once a fixed pin lands.
+The non-wasm reference peer intermittently (~10-25% of runs over loopback)
+receives an `ordered: true` channel's messages with the head of the sequence
+displaced past later messages — e.g. indexes `8..15,0..7` or `1,0,2..15` —
+when the remote peer starts sending immediately after channel open. A
+standalone two-process reproduction (upstream `webrtc` 0.20.0-rc.4 offerer,
+no repository code; sequential awaited sends) with the sender's SCTP stack
+instrumented proved the sender's wire metadata correct (`U = 0`, stream
+sequence numbers in application send order) while a bare `onmessage` handler
+still observed the permutation — so the defect is in **`@roamhq/wrtc`'s
+(node-webrtc's) native→JS message dispatch**, above SCTP: an SCTP-conformant
+receiver cannot deliver `U = 0` chunks of one stream out of SSN order. The
+trigger profile (contiguous displaced head, open-adjacent window, a 50 ms
+post-open sender delay makes it vanish) suggests a queue-then-flush race for
+messages arriving before the JS listener is fully registered. Both of this
+repository's senders were exonerated: the wasmtime host and the wasip3-impl
+provider pass explicit `ordered: true` and emit correct metadata.
+
+The same investigation found a real but distinct upstream `rtc` bug this
+suite does *not* hit: `create_data_channel(label, None)` (derived
+`DataChannelParameters::default()`) silently creates an **unordered** channel
+(`ordered: false`), inverting the W3C default its own comments cite — DCEP
+`ReliableUnordered`, `U = 1` on every chunk.
+
+Both write-ups with reproductions live with the local rtc checkout
+(`rtc-ordered-delivery-bug.md`, `wrtc-receive-reordering-bug.md`, and the
+`rtc-ordering-repro/` harness). Until the node-webrtc fix lands, the
+`ordering` test carries the `ordered-delivery` tag and the four pair
+directions where the reference peer receives from a fast-opening sender
+declare it unsupported in `conformance/manifests.toml` (a flaky failure
+cannot be an `expected-fail`: it would `unexpected-pass` on green runs).
+File upstream: WonderInventions/node-webrtc (the receive-side reorder) and
+webrtc-rs/rtc (the default-options ordering inversion); drop the manifest
+entries once a fixed `@roamhq/wrtc` ships.
 
 ## F. Conformance suite
 

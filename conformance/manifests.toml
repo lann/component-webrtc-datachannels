@@ -91,20 +91,21 @@
 # jco-browser reference pairs run only `interop-handshake` (each test boots
 # its own headless Chromium), so their other two-peer cells render `missing`.
 #
-# The four rtc-sender directions declare `ordered-delivery` unsupported: the
-# `rtc` core (shared by the wasmtime host and the wasip3-impl provider)
-# intermittently emits ordered-channel messages whose SCTP ordering metadata
-# cannot restore application order at a libwebrtc receiver, and a flaky
-# failure cannot be an expected-fail (TODO.md E12 tracks the upstream fix).
+# The four directions where the reference peer receives from a fast-opening
+# sender declare `ordered-delivery` unsupported: the reference peer's own
+# node-webrtc stack intermittently dispatches an ordered channel's messages
+# to JS with the head of the sequence displaced (its sender peers' SCTP wire
+# metadata was verified correct), and a flaky failure cannot be an
+# expected-fail (TODO.md E12 tracks the upstream fix).
 [target.wasmtime-x-reference]
 [[target.wasmtime-x-reference.unsupported]]
 tag = "ordered-delivery"
-reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+reason = "node-webrtc receive-side reordering in the reference peer (TODO.md E12)"
 
 [target.reference-x-wasmtime]
 [[target.reference-x-wasmtime.unsupported]]
 tag = "ordered-delivery"
-reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+reason = "node-webrtc receive-side reordering in the reference peer (TODO.md E12)"
 
 [target.jco-node-x-reference]
 [target.reference-x-jco-node]
@@ -114,12 +115,12 @@ reason = "rtc-core senders intermittently break ordered delivery at libwebrtc re
 [target.wasip3-guest-x-reference]
 [[target.wasip3-guest-x-reference.unsupported]]
 tag = "ordered-delivery"
-reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+reason = "node-webrtc receive-side reordering in the reference peer (TODO.md E12)"
 
 [target.reference-x-wasip3-guest]
 [[target.reference-x-wasip3-guest.unsupported]]
 tag = "ordered-delivery"
-reason = "rtc-core senders intermittently break ordered delivery at libwebrtc receivers (TODO.md E12)"
+reason = "node-webrtc receive-side reordering in the reference peer (TODO.md E12)"
 
 # Retained implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
 # (webrtc-rs and the sans-I/O `rtc` stack meeting each other) and wasmtime <->
