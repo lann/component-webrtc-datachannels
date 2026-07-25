@@ -60,25 +60,35 @@ const CLOSE_DRAIN_MS = 1_000;
 // variable (Node) or a global of the same name (browsers).
 const DEFAULT_MAX_INBOUND_BUFFERED = 8 * 1024 * 1024;
 
+/** The inbound buffer bound, latched at first use (see maxInboundBuffered). */
+let latchedMaxInboundBuffered;
+
 /**
- * The configured inbound buffer bound, resolved lazily per channel. A
+ * The configured inbound buffer bound, latched at first use for the process
+ * lifetime (the same read-once semantics as the other implementations, so a
+ * harness changing the value mid-process observes uniform behavior). A
  * set-but-invalid value (not a positive number) throws rather than silently
  * reverting to the default: the knob is primarily a test knob, and a typo
  * that silently restored the 8 MiB bound would invalidate exactly the test
  * that set it.
  */
 function maxInboundBuffered() {
+  if (latchedMaxInboundBuffered !== undefined) return latchedMaxInboundBuffered;
   const raw =
     globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES ??
     globalThis.process?.env?.WEBRTC_MAX_INBOUND_BUFFER_BYTES;
-  if (raw === undefined || raw === "") return DEFAULT_MAX_INBOUND_BUFFERED;
+  if (raw === undefined || raw === "") {
+    latchedMaxInboundBuffered = DEFAULT_MAX_INBOUND_BUFFERED;
+    return latchedMaxInboundBuffered;
+  }
   const configured = Number(raw);
   if (!(configured > 0)) {
     throw new Error(
       `invalid WEBRTC_MAX_INBOUND_BUFFER_BYTES ${JSON.stringify(raw)}: expected a positive byte count`,
     );
   }
-  return configured;
+  latchedMaxInboundBuffered = configured;
+  return latchedMaxInboundBuffered;
 }
 
 /** The UTF-8 byte length of a string payload (the WIT bound counts bytes). */

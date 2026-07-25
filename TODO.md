@@ -125,38 +125,6 @@ with the local rtc checkout (`wrtc-receive-reordering-bug.md`,
 bug found in the same investigation — and `rtc-ordering-repro/`); file them
 at WonderInventions/node-webrtc and webrtc-rs/rtc.
 
-### E13. Unify and shrink the implementations' environment-variable surface
-
-The env-var surface is now indexed (AGENTS.md) and fails loud on invalid
-values, but three refinements remain:
-
-- **Latching semantics differ per implementation.** The Rust
-  implementations latch `WEBRTC_MAX_INBOUND_BUFFER_BYTES` at first read
-  (`OnceLock`), for the process lifetime; the jco host resolves it lazily
-  per channel (`maxInboundBuffered` in `jco-impl/webrtc.js`). A harness
-  that changes the value mid-process observes different behavior per
-  target. Align on read-once-at-first-use everywhere.
-- **The Wasmtime host library still reads ambient env.**
-  `WasiWebrtcCtx::default()` sources the buffer bound from the env var, so
-  a malformed value panics even when the embedder immediately overrides it
-  via `set_max_inbound_buffer_bytes` — and a library panicking on ambient
-  state is harsh for embedders in general. Consider making `wasmtime-impl`
-  env-free: move the env read to its consumers (the demo binaries and the
-  conformance adapter) through the existing ctx accessor, keeping the one
-  shared variable name working across all three implementations for the
-  conformance suite.
-- **Policy: no new implementation-level env vars** without first
-  considering the proper channel — `WasiWebrtcCtx` on the Wasmtime host, an
-  exported configure hook for the jco module (which `jco --map` gives no
-  instantiation-time config channel), or the WIT surface itself (as
-  `peer-connection-config` now demonstrates for in-guest configuration).
-  Every env var is an undeclared API that each
-  deployer must discover; the AGENTS.md table is its only registry.
-
-`WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
-address is deployment topology, owned by whoever runs the process, not by
-the guest (which is why it is not a `peer-connection-config` field).
-
 ### E14. `webrtc-rs` drops inbound channel events on a full event queue
 
 The `webrtc` 0.20 driver forwards each inbound message into a bounded
@@ -248,6 +216,5 @@ noting the contamination risk in the result document.
 1. Flush-aware teardown at the connection level (F5, upstream-gated) and
    the upstream reports it depends on (E14, E15).
 2. The rest as touched: the remaining corpus-mirror unification (F7), jco
-   in-process timeout isolation (F11), env-var latching/library hygiene
-   (E13), the remaining conformance-matrix
+   in-process timeout isolation (F11), the remaining conformance-matrix
    gaps (A3).

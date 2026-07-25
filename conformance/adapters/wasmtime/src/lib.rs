@@ -276,6 +276,7 @@ pub fn new_store(engine: &Engine) -> Store<Ctx> {
     webrtc.set_setting_engine_hook(|engine| {
         engine.set_include_loopback_candidate(true);
     });
+    apply_env_buffer_bound(&mut webrtc);
     Store::new(
         engine,
         Ctx {
@@ -305,6 +306,7 @@ pub fn new_store_with_ice(engine: &Engine, ice: WebrtcIceConfig, disable_mdns: b
             engine.set_multicast_dns_mode(rtc::ice::mdns::MulticastDnsMode::Disabled);
         });
     }
+    apply_env_buffer_bound(&mut webrtc);
     Store::new(
         engine,
         Ctx {
@@ -312,6 +314,18 @@ pub fn new_store_with_ice(engine: &Engine, ice: WebrtcIceConfig, disable_mdns: b
             table: ResourceTable::new(),
         },
     )
+}
+
+/// Apply the `WEBRTC_MAX_INBOUND_BUFFER_BYTES` override to the host context
+/// when set (the host crate itself reads no environment). A malformed value
+/// panics: silently reverting to the default bound would invalidate exactly
+/// the overflow test that set it.
+fn apply_env_buffer_bound(webrtc: &mut WasiWebrtcCtx) {
+    if let Some(bytes) =
+        webrtc_host::max_inbound_buffer_bytes_from_env().unwrap_or_else(|e| panic!("{e}"))
+    {
+        webrtc.set_max_inbound_buffer_bytes(bytes);
+    }
 }
 
 /// Build a test config for one instance.
