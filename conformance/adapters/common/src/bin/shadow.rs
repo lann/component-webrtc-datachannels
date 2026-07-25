@@ -37,9 +37,10 @@
 //!   in-guest provider at the host's simulated address through the
 //!   `WEBRTC_UDP_BIND_ADDR` environment variable. The sans-I/O stack has no
 //!   mDNS, so no equivalent of `--disable-mdns` is needed.
-//! - `reference` runs the non-wasm reference peer (`node peer.mjs`, libwebrtc
-//!   via `@roamhq/wrtc`). libwebrtc gathers candidates from the simulated
-//!   host's own interface, so no bind address is passed.
+//! - `reference` runs the non-wasm reference peer (`conformance-reference-peer`,
+//!   Google's libwebrtc via LiveKit's Rust bindings). libwebrtc gathers
+//!   candidates from the simulated host's own interface, so no bind address
+//!   is passed.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -104,13 +105,9 @@ struct Cli {
     #[arg(long, default_value = "target/release/conformance-peer")]
     peer_bin: PathBuf,
 
-    /// The Node binary (a path or a bare name looked up on `PATH`) that runs
-    /// the reference peer, used by the `reference` peer kind.
-    #[arg(long, env = "CONFORMANCE_NODE", default_value = "node")]
-    node_bin: String,
-
-    /// The reference peer script, used by the `reference` peer kind.
-    #[arg(long, default_value = "conformance/adapters/reference/peer.mjs")]
+    /// The `conformance-reference-peer` binary, used by the `reference` peer
+    /// kind.
+    #[arg(long, default_value = "target/release/conformance-reference-peer")]
     reference_peer: PathBuf,
 
     /// The `shadow` simulator binary.
@@ -184,7 +181,6 @@ fn main() -> Result<()> {
         &cli.guest,
         &cli.wasmtime_bin,
         &cli.component,
-        &cli.node_bin,
         &cli.reference_peer,
     )?;
     let signaling_bin = conformance_adapter_common::peer_command::absolute(&cli.signaling_bin)?;

@@ -76,8 +76,8 @@ conformance/                           # cross-implementation conformance suite
   adapters/                            #   per-target drivers: wasmtime, jco (Node +
                                        #     browser), wasip3 (composed in-guest stack),
                                        #     reference/ (the non-wasm reference peer:
-                                       #     plain Node over @roamhq/wrtc), plus the
-                                       #     interop-pair binary;
+                                       #     Google's libwebrtc via LiveKit's Rust
+                                       #     bindings), plus the interop-pair binary;
                                        #     common/ = the shared native building blocks
                                        #     (conformance-adapter-common), the netns-lab
                                        #     topology/provisioning (netns/nftables/coturn

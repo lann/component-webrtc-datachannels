@@ -190,30 +190,28 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E12. `rtc` sender breaks ordered delivery observed by libwebrtc receivers
+### E12. node-webrtc receive-side reordering: latent in jco-node
 
-The non-wasm reference peer (libwebrtc via `@roamhq/wrtc`) intermittently
-(~10-25% of runs over loopback) receives an `ordered: true` channel's
-messages block-rotated — e.g. indexes `8..15,0..7` or `2..7,0,1,8..15` —
-from *both* `rtc`-based senders (the Wasmtime host on `webrtc` 0.20.0-rc.4
-and the in-guest `wasip3-impl` provider, so the defect is in the shared
-sans-I/O `rtc` core, not a driver). All messages arrive in a single 0-1 ms
-burst (no retransmission gap, so no loss involved), whole contiguous blocks
-swap rather than individual messages, and loopback UDP is FIFO — so the
-sender is emitting SCTP DATA whose ordering metadata cannot restore the
-application order (a per-chunk `U`-bit or stream-sequence-number assignment
-defect). `rtc`-based *receivers* mask it (rtc <-> rtc pairs pass `ordering`
-consistently), which is why no pre-reference pair ever caught it. Reproduce
-with `conformance-interop --pair wasmtime-x-reference --only ordering` in a
-loop; the reference peer logs the received index order under
-`REF_PEER_DEBUG=1`. Until it is fixed upstream, the `ordering` test carries
-the `ordered-delivery` tag and the four affected pair directions
-(`wasmtime`/`wasip3-guest` x `reference`, both orders) declare it
-unsupported in `conformance/manifests.toml` (a flaky failure cannot be an
-`expected-fail`: it would `unexpected-pass` on green runs). File the
-upstream `webrtc-rs/rtc` issue with the repro above, and drop the manifest
-entries once a fixed pin lands.
-||||||| parent of 3da5c1e (Record the peer-connection config design and env-var follow-ups (A4, E13))
+`@roamhq/wrtc` (node-webrtc) can dispatch an ordered channel's messages to
+JS with the head of the sequence displaced past later messages: its
+`RTCDataChannel` constructor re-registers the libwebrtc observer (new
+messages then dispatch directly to the JS loop) *before* re-dispatching the
+backlog the temporary pre-wrapper observer cached, so arrivals adjacent to
+channel open overtake every earlier message (`rtc_data_channel.cc`; a
+standalone reproduction with sender-side SCTP instrumentation proved the
+senders' wire metadata correct). The reference peer was moved off
+node-webrtc (to Google's libwebrtc via LiveKit's Rust bindings) and no
+longer exposes it, and the `ordering` manifest skips were dropped — but the
+**jco-node host still runs on `@roamhq/wrtc`**, so the bug is latent behind
+the jco-node target and its pairs, historically masked by the JSPI startup
+delay between channel open and first sends. If `ordering` ever flakes on a
+jco-node row with a head-displaced index sequence, this is the cause: the
+`ordering` test retains its `ordered-delivery` tag so a manifest entry can
+scope the skip immediately. Upstream write-ups and the reproduction live
+with the local rtc checkout (`wrtc-receive-reordering-bug.md`,
+`rtc-ordered-delivery-bug.md` — the latter a distinct `rtc` default-options
+bug found in the same investigation — and `rtc-ordering-repro/`); file them
+at WonderInventions/node-webrtc and webrtc-rs/rtc.
 
 ### E13. Unify and shrink the implementations' environment-variable surface
 
@@ -244,7 +242,6 @@ values, but three refinements remain:
 
 `WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
 address is deployment topology, owned by whoever runs the process (see A4).
-
 
 ## F. Conformance suite
 

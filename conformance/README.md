@@ -62,9 +62,10 @@ discarded without API cost.
   `wasi:sockets` UDP loopback across processes and signaling through the suite
   mailbox — and writes `results/wasip3-guest.json`.
 - **Reference peer + interop pairs:** the **non-wasm reference peer**
-  (`adapters/reference/`, `peer.mjs`): plain Node driving the W3C
-  `RTCPeerConnection` API (libwebrtc via `@roamhq/wrtc`) directly — no wasm
-  component, no WIT bindings — speaking the same single-peer contract, mailbox
+  (`adapters/reference/`, the `conformance-reference-peer` binary): a native
+  program driving Google's libwebrtc — the stack browsers ship — through
+  [LiveKit's Rust bindings](https://crates.io/crates/libwebrtc), with no wasm
+  component or WIT bindings, speaking the same single-peer contract, mailbox
   protocol, and guest-owned signal-blob schema as every other peer. It is the
   suite's wire-level anchor: the `conformance-interop` binary (in
   `adapters/wasmtime/`) pairs every target against it in both orders
@@ -75,8 +76,8 @@ discarded without API cost.
   (validating the reference peer itself) and the retained
   implementation-vs-implementation pairs `wasmtime`<->`jco-node` and
   `wasmtime`<->`wasip3-guest`, each in both orders. Classified against the
-  `reference` and pair entries in `manifests.toml`. The reference peer needs
-  no JSPI, so any maintained Node runs it.
+  `reference` and pair entries in `manifests.toml`. The first build downloads
+  LiveKit's prebuilt static libwebrtc (`webrtc-sys`).
 
 ## Layering: adapters vs. environment executors
 
@@ -89,7 +90,7 @@ The suite separates *what runs a peer* from *where its network lives*:
   (`conformance-adapter-wasmtime`, the jco drivers,
   `conformance-adapter-wasip3`) and the per-process peers — the native
   `conformance-peer` binary, the composed wasip3 component under
-  `wasmtime run`, and the reference peer under `node`. A peer knows nothing
+  `wasmtime run`, and the `conformance-reference-peer` binary. A peer knows nothing
   about namespaces, simulators, or how its
   addresses were provisioned; every out-of-process peer honours the same
   single-peer contract (`--test`/`--role`/`--server`/`--room`/…, one JSON
@@ -139,7 +140,7 @@ cached exactly once per run.
 
 The jco targets and their interop pairs invoke `node --experimental-wasm-jspi`,
 so a JSPI-capable **Node 24+** must be on `PATH` (see the jco note above); the
-reference peer runs on any maintained Node with no flags. The
+reference peer is a native binary and needs no Node at all. The
 `conformance-interop` binary honours the `CONFORMANCE_NODE` environment variable
 if a specific node binary is needed. The `wasip3-guest` target and its interop
 pairs invoke `wasmtime run` (v46+, installed by `scripts/setup.sh`; overridable
@@ -212,8 +213,8 @@ lab down. Like the Shadow lab, its `--peer-kind` flag selects the peer: the
 native `conformance-peer` binary (`wasmtime`, the default), the composed
 wasip3 conformance component under `wasmtime run` (`wasip3-guest`, whose
 in-guest sans-I/O stack supports no STUN/TURN — only the `lan` scenario fits),
-or the non-wasm reference peer under `node` (`reference`, whose ICE flags map
-onto `RTCPeerConnection` and support every scenario).
+or the non-wasm reference peer binary (`reference`, whose ICE flags map onto
+libwebrtc's ICE configuration and support every scenario).
 Results are written to `conformance/results/<target>-<scenario>.json` with the
 scenario as the report's `environment`, so each scenario is its own matrix
 row.
@@ -303,12 +304,9 @@ per-role peer command template:
   `wasmtime run` (the same invocation as the loopback adapter), pointing the
   in-guest provider at each host's simulated address through the
   `WEBRTC_UDP_BIND_ADDR` environment variable;
-- `reference` runs the non-wasm reference peer (`node peer.mjs`); libwebrtc
-  gathers candidates from the simulated host's own interface, so no bind
-  address is passed. Its mailbox client uses `node:http` rather than `fetch`:
-  undici enables TCP keepalive on every new connection and fails the connect
-  when the socket option is missing, and Shadow's simulated stack returns
-  `ENOPROTOOPT` for it.
+- `reference` runs the non-wasm reference peer (`conformance-reference-peer`);
+  libwebrtc gathers candidates from the simulated host's own interface, so no
+  bind address is passed.
 
 Run the Shadow targets from the repository root (needs `shadow` on `PATH`). Shadow
 ships no upstream prebuilt binary, so install it into `~/.local` by downloading

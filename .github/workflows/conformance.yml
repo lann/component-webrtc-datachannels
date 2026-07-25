@@ -25,8 +25,9 @@ name: Conformance
 # JSPI natively), wasip3-guest (the conformance guest composed via `wac plug`
 # with the wasip3-impl provider — the sans-I/O rtc stack over WASIp3
 # wasi:sockets — plus an in-guest wasi:http mailbox client and a CLI driver,
-# run under `wasmtime run`), and reference (the non-wasm reference peer:
-# plain Node driving RTCPeerConnection over @roamhq/wrtc). The interop matrix
+# run under `wasmtime run`), and reference (the non-wasm reference peer: a
+# native binary driving Google's libwebrtc via LiveKit's Rust bindings). The
+# interop matrix
 # anchors every target against the reference peer in both orders (jco-browser
 # at handshake-only smoke scope) and retains the `wasmtime`<->`jco-node` and
 # `wasmtime`<->`wasip3-guest` implementation pairs.
@@ -93,6 +94,7 @@ jobs:
             target/release/conformance-adapter-wasip3 \
             target/release/conformance-interop \
             target/release/conformance-peer \
+            target/release/conformance-reference-peer \
             target/release/conformance-shadow \
             target/debug/conformance-signalingd \
             target/debug/conformance-runner \
@@ -182,15 +184,12 @@ jobs:
 
       # Runtime dependencies only (`wasmtime` for the composed wasip3-guest
       # peer); skip the jco Node hosts' and netns-lab deps. Shadow was
-      # downloaded above. The reference peer runs on the runner's own Node
-      # (no JSPI needed), so only its npm packages are installed.
+      # downloaded above; the reference peer arrives prebuilt in the artifact
+      # tarball.
       - name: Install dependencies
         run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
         env:
           GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Install reference peer dependencies
-        run: just conformance::npm-reference
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
