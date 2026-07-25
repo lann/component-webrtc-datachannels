@@ -13,12 +13,10 @@ package demo:webrtc-echo@0.1.0;
 /// The transport is deliberately unstandardized — it lives in the demo package,
 /// not in `lann:webrtc-datachannels`. Implementations relay blobs to and from
 /// an existing HTTP signaling server (the guest itself does not need to speak
-/// HTTP): the Wasmtime demo host implements it natively, the jco host over
-/// `fetch`, and the `rendezvous-http` component over in-guest `wasi:http@0.3`
-/// (composable under the guest so a plain `wasmtime run -S http` provisions
-/// it). The blob payloads are opaque here; the guest chooses the encoding
-/// (for example, JSON carrying `session-description` / `ice-candidate`
-/// values).
+/// HTTP); the interface can be satisfied by a host natively or by a component
+/// composed under the guest. The blob payloads are opaque here; the guest
+/// chooses the encoding (for example, JSON carrying `session-description` /
+/// `ice-candidate` values).
 interface rendezvous {
     use lann:webrtc-datachannels/types@0.1.0.{error};
 
@@ -118,18 +116,17 @@ interface remote {
     run: async func(config: remote-config) -> result<demo-stats, error>;
 }
 
-/// The world implemented by the example component and driven by both hosts.
-/// The component stands up both peers itself through the standard
-/// `connections` interface (an offerer and an in-component echo answerer), so
-/// the hosts provide nothing beyond `lann:webrtc-datachannels`.
+/// The world implemented by the example component. The component stands up
+/// both peers itself through the standard `connections` interface (an offerer
+/// and an in-component echo answerer), so a host provides nothing beyond
+/// `lann:webrtc-datachannels`.
 world webrtc-echo-demo {
     import lann:webrtc-datachannels/connections@0.1.0;
     export demo;
 }
 
 /// The world implemented by the `echo-remote` component: one peer of a
-/// two-process echo run, signaling through `rendezvous` (implemented by the
-/// host or by the composable `rendezvous-http` component) and connecting
+/// two-process echo run, signaling through `rendezvous` and connecting
 /// through the standard `connections` interface.
 world webrtc-echo-remote {
     import lann:webrtc-datachannels/connections@0.1.0;

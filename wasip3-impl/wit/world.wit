@@ -1,21 +1,14 @@
 // The `wasip3-webrtc-datachannels` component world.
 //
-// This is the third implementation of `lann:webrtc-datachannels`, alongside the
-// `wasmtime-impl` (webrtc-rs) and `jco-impl` (browser) hosts. Unlike those two —
-// which run the fully async `webrtc-rs` engine *host-side* — this
-// implementation is itself a **wasm component**: it runs the sans-I/O `rtc`
-// stack in-guest, driving it over WASIp3 `wasi:sockets` UDP and `wasi:clocks`
-// timers, and *exports* the shared `connections` resources.
+// The component is itself a **wasm component**: it runs the sans-I/O `rtc`
+// WebRTC stack in-guest, driving it over WASIp3 `wasi:sockets` UDP and
+// `wasi:clocks` timers, and *exports* the shared `connections` resources.
 //
 // Because it imports only WASIp3 interfaces and exports the package surface, it
 // can be composed (`wac plug`) with any consumer component that imports
 // `connections`: the consumer's imports are satisfied by this component's
 // exports, producing a single self-contained component the WebRTC stack of
 // which runs entirely in wasm.
-//
-// The `lann:webrtc-datachannels` package lives once at the repository root
-// `wit/` and is pulled in through the `deps/lann-webrtc-datachannels` symlink,
-// exactly like the demo components do.
 package lann:webrtc-datachannels-component;
 
 /// The composable WebRTC data-channel provider.

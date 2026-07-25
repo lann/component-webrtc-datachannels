@@ -19,7 +19,7 @@ The suite (see `conformance/README.md`) is built and green in CI: the shared
 conformance guest (37 tests), the `conformance-signalingd` mailbox, adapters
 for `wasmtime`, `jco-node`, `jco-browser`, and `wasip3-guest`, the interop
 pairs (every target against the non-wasm libwebrtc reference peer in both
-orders, the reference self-pair, and the retained `wasmtime`<->`jco-node`
+orders, the reference self-pair, and the direct `wasmtime`<->`jco-node`
 and `wasmtime`<->`wasip3-guest` pairs) — all run in CI over loopback via
 `just conformance` — plus the Shadow lab in CI (non-loopback,
 deterministic: the single-runtime targets and the
@@ -56,44 +56,6 @@ concrete extension of the existing machinery:
   is now 12 tests, including `channel-close-flush`); the lab is
   workstation-only, so this needs a manual `just conformance::netns` /
   `just conformance::nat` pass.
-
-### A7. Comprehensive doc-comment audit
-
-A commentary review found the doc comments broadly contract-first (error
-taxonomy, units, defaults, invariants — keep that), but with drift at the
-margins against the AGENTS.md "Code comments" rules. Audit every `.wit`
-file and the doc/inline comments across the implementations and the
-conformance tree for:
-
-- **WIT plumbing prose that renders into consumers' docs.** All WIT
-  comments are doc comments (see AGENTS.md): the `//` world headers in
-  `wasmtime-impl/wit/world.wit`, `wasip3-impl/wit/world.wit`, and
-  `examples/webrtc-consumer/wit/world.wit` describe repo layout (the
-  `deps` symlink arrangement) and inventory sibling implementations —
-  content that lands in generated bindings' docs but belongs in AGENTS.md
-  or a README. Check the demo components' WIT files too.
-- **Unenforced cross-file "mirrors" claims.** E.g.
-  `conformance/adapters/jco/driver.js` ("Mirrors the native adapters'
-  CONFORMANCE_MAX_INBOUND_BUFFER_BYTES", "Mirrors the wasmtime adapter's
-  `fold_two`"), `conformance/adapters/common/src/peer_command.rs` ("Mirror
-  the loopback wasip3 adapter's `wasmtime run` invocation"), the netns
-  `TEST_TIMEOUT` doc's claim about the loopback adapters' 90s bound, and
-  `wasmtime-impl`'s "matches the in-guest `wasip3-impl` driver's drain
-  bound". For each, in preference order: share the constant/helper; add a
-  drift check (the `list-tests` corpus verification is the model — see
-  F7); state the shared behavior once in the WIT doc comment, where the
-  conformance suite enforces it; or drop the cross-reference and justify
-  the value locally.
-- **Revision-relative phrasing.** "matching the previous
-  `RTCConfigurationBuilder::new().build()`"
-  (`wasmtime-impl/src/peer_connection.rs`), "This replaces fixed-interval
-  polling" (`wasip3-impl/src/runtime.rs`), the "retained" pairs
-  (`conformance/adapters/wasmtime/src/bin/interop.rs`) — rewrite in
-  present tense.
-- Lower priority: the name-restating doc tail (e.g. `/// The channel's
-  id.`) — add the one fact that earns the line (a unit, a default, a
-  consumer) or leave it terse; no doc should be deleted just to reduce
-  coverage.
 
 ## E. Implementations
 
@@ -287,5 +249,5 @@ noting the contamination risk in the result document.
    the upstream reports it depends on (E14, E15).
 2. The rest as touched: the remaining corpus-mirror unification (F7), jco
    in-process timeout isolation (F11), env-var latching/library hygiene
-   (E13), the doc-comment audit (A7), the remaining conformance-matrix
+   (E13), the remaining conformance-matrix
    gaps (A3).

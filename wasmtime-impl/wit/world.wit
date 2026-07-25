@@ -1,10 +1,6 @@
 // The `imports` world enumerates the `lann:webrtc-datachannels` interfaces this
 // crate implements on the host side, so `bindgen!` can generate the
 // corresponding `Host` traits and per-interface `add_to_linker` helpers.
-//
-// The package itself lives once at the repository root `wit/` and is pulled in
-// through the `deps/lann-webrtc-datachannels` symlink, exactly like the demo
-// components do.
 package wasmtime:webrtc-datachannels-host;
 
 /// The set of `lann:webrtc-datachannels` imports satisfied by this crate.

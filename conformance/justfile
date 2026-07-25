@@ -138,7 +138,7 @@ jco-browser: transpile-guest build-signalingd && run-jco-browser
 # both orders (wasmtime, jco-node, and wasip3-guest over the full two-peer
 # corpus; jco-browser over the interop-handshake smoke test, one
 # headless-Chromium instance per test), the reference self-pair, and the
-# retained implementation pairs wasmtime<->jco-node and
+# direct implementation pairs wasmtime<->jco-node and
 # wasmtime<->wasip3-guest. Each direction's peers share a signaling room and a
 # real WebRTC data channel. Writes conformance/results/<pair>.json per
 # direction.

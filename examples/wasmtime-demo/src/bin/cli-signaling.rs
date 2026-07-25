@@ -89,9 +89,8 @@ async fn main() -> Result<()> {
     // Linger briefly before exiting: process exit discards the SCTP send
     // queue, so a message the guest handed to the transport just before
     // returning (its peer may still be waiting on it) gets a bounded window
-    // to reach the wire. Mirrors the close-drain grace of the in-guest
-    // wasip3 conformance driver; the flush-aware teardown this papers over
-    // is tracked as TODO item F5.
+    // to reach the wire. The flush-aware teardown this papers over is
+    // tracked as TODO item F5.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     match result {

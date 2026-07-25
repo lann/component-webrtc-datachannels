@@ -3,8 +3,7 @@
 // URL of a signaling server, it runs each registered test to a raw
 // `pass`/`fail`/`skip` result and returns the adapter result rows.
 //
-// It mirrors the wasmtime adapter's orchestration (`conformance/adapters/
-// wasmtime/src/main.rs`): a test is run either as a single in-process `both`
+// A test is run either as a single in-process `both`
 // instance (peer-connection API, error-taxonomy, and streaming probes) or as
 // two instances — an offerer and an answerer sharing one signaling
 // room — for the behavioral/interop tests. Tests run in a single
@@ -12,7 +11,10 @@
 // surface, not be masked by a second attempt. The guest owns every assertion;
 // the driver only orchestrates and records.
 
-/** The registry of test ids, mirroring `conformance/tests.toml`. */
+/**
+ * The registry of test ids, mirroring `conformance/tests.toml` (verified
+ * against the guest's `list-tests` export before each run).
+ */
 export const TESTS = [
   "label-round-trip",
   "binary-message",
@@ -112,15 +114,14 @@ export function paramsFor(testId) {
 // host's `WEBRTC_MAX_INBOUND_BUFFER_BYTES` knob: small enough that the
 // `receive-buffer-overflow` probe overflows it with a ~1 MiB flood instead of
 // flooding the default 8 MiB bound (which starves concurrently running tests
-// of the corpus). Mirrors the native adapters'
-// CONFORMANCE_MAX_INBOUND_BUFFER_BYTES.
+// of the corpus).
 export const MAX_INBOUND_BUFFER_BYTES = 512 * 1024;
 
 // The hang guard for one test, bounding a run whose data-channel wait never
 // resolves. Generous: the whole attempt is on the clock under 4-wide CI
 // contention, while the host's shorter `wait-connected` timeout fires first,
 // so a genuine connection failure still surfaces as a WIT outcome rather than
-// tripping this bound. Mirrors the native adapters' TEST_TIMEOUT.
+// tripping this bound.
 const TEST_TIMEOUT_MS = 90_000;
 
 /** Build a test config for one instance. */
@@ -145,7 +146,7 @@ function withTimeout(promise, ms, message) {
 
 /**
  * Fold two per-instance results into one: any fail loses, else any skip, else
- * pass. Mirrors the wasmtime adapter's `fold_two`.
+ * pass.
  */
 function foldTwo(offerer, answerer) {
   if (offerer.tag === "fail" && answerer.tag === "fail") {

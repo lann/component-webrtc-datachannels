@@ -56,9 +56,9 @@ const CLOSE_FLUSH_BOUND: std::time::Duration = std::time::Duration::from_secs(1)
 /// matches the W3C `RTCDataChannel` floor, where none is possible), so this
 /// bound is what protects host memory from a slow guest reader: when it would
 /// be exceeded the channel is closed and, once the buffered backlog drains,
-/// `receive` fails with `error.receive-buffer-overflow`. Mirrors the outbound
-/// SCTP send-buffer bound the jco hosts use. Overridable through
-/// [`MAX_INBOUND_BUFFER_ENV`].
+/// `receive` fails with `error.receive-buffer-overflow`. The value is the
+/// 8 MiB convention the WIT inbound-buffering contract documents. Overridable
+/// through [`MAX_INBOUND_BUFFER_ENV`].
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
 /// The environment variable overriding [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]

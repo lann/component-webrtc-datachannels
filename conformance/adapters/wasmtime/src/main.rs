@@ -29,7 +29,7 @@ use wasmtime::Engine;
 
 use conformance_adapter_common::{
     fold_two, params_for, plan_for, run_corpus, write_report, AdapterReport, Plan, RawResult,
-    TestOutcome, TESTS,
+    TestOutcome, LOOPBACK_TEST_TIMEOUT, TESTS,
 };
 use conformance_adapter_wasmtime::{build_engine, make_config, run_instance, Role};
 
@@ -62,11 +62,8 @@ async fn run_two_peer(
     Ok(fold_two(offerer?, answerer?))
 }
 
-/// The hang guard for one test. Generous: the whole attempt is on the clock
-/// under 4-wide CI contention, while the host's shorter `wait-connected`
-/// timeout fires first, so a genuine connection failure still surfaces as a
-/// WIT outcome rather than tripping this bound.
-const TEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The hang guard for one test (see [`LOOPBACK_TEST_TIMEOUT`]).
+const TEST_TIMEOUT: Duration = LOOPBACK_TEST_TIMEOUT;
 
 /// Run one test to a raw result (single attempt; no retries).
 async fn run_test(

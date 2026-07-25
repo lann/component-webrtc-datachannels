@@ -7,7 +7,7 @@
 // The transpiled guest (produced by `npm run transpile`) is instantiated in
 // jco's `--instantiation` mode so this one process can stand up two independent
 // guest instances — an offerer and an answerer — for the two-peer behavioral
-// tests, exactly as the wasmtime adapter runs two stores. The shared driver
+// tests. The shared driver
 // (`driver.js`) owns the plan/fold orchestration.
 //
 // jco's async ABI needs JavaScript Promise Integration (JSPI), so this must run
@@ -40,8 +40,9 @@ const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
 // clamped to [2, 8]. The corpus is I/O-bound so the optimum exceeds the core
 // count (measured at 3x cores on the lighter Rust adapters), but each test
 // here runs inside a heavyweight JS runtime whose flake history is
-// load-induced timeouts, so the multiplier stays conservative: the previously
-// proven load (4) on 2-core CI runners, scaling up on larger machines.
+// load-induced timeouts, so the multiplier stays conservative: 4 jobs on
+// 2-core CI runners (the load proven stable there), scaling up on larger
+// machines.
 function defaultJobs() {
   return Math.min(8, Math.max(2, 2 * availableParallelism()));
 }

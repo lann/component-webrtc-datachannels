@@ -618,8 +618,8 @@ impl GuestPeerConnection for PeerConnection {
     async fn set_local_description(&self, _description: SessionDescription) -> Result<(), Error> {
         // `create-offer` / `create-answer` already apply the local description
         // (the sans-I/O core produces and sets it in one step), so this is a
-        // no-op kept for API symmetry — but the post-close contract still
-        // applies.
+        // no-op that exists for API symmetry — but the post-close contract
+        // still applies.
         let mut state = self.live()?;
         PeerConnection::ensure_pump(&mut state);
         let s = state.shared.borrow();

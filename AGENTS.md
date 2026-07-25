@@ -209,7 +209,7 @@ just test
 # conformance guest, runs every enabled adapter (wasmtime, jco-node,
 # jco-browser, wasip3-guest) plus the interop pairs (every target against the
 # non-wasm reference peer in both orders, the reference self-pair, and the
-# retained implementation pairs), and renders
+# direct implementation pairs), and renders
 # conformance/matrix.md. Needs Node 24+ and a Chrome 137+ binary:
 just conformance
 

@@ -9,8 +9,7 @@
 //!     peer connection), and
 //!   * the demo `rendezvous` signaling mailbox, implemented natively here with
 //!     an HTTP client speaking `conformance-signalingd`'s mailbox protocol
-//!     (`conformance/signaling/PROTOCOL.md`), mirroring the conformance
-//!     wasmtime adapter's mailbox host.
+//!     (`conformance/signaling/PROTOCOL.md`).
 //!
 //! Run two instances — an offerer and an answerer — pointed at the same room
 //! on the same signaling server, and a real WebRTC connection forms between

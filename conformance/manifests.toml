@@ -65,11 +65,10 @@
 #   the loopback scenario needs; the Shadow lab points each peer at its own
 #   simulated non-loopback address through that variable.
 #
-# `zero-length-message` used to be an expected-fail here (the `rtc` receive path
-# kept the one-zero-byte SCTP placeholder payload for the BinaryEmpty/StringEmpty
-# PPIDs), but upstream `rtc` now maps those PPIDs back to an empty message
-# (webrtc-rs/rtc#131, released in `rtc` 0.20.0-rc.4; the workspace pin includes it),
-# so this target passes it and it is deliberately NOT an expected-fail.
+# `zero-length-message` is deliberately NOT an expected-fail here: `rtc` maps
+# the BinaryEmpty/StringEmpty PPIDs to an empty message as of 0.20.0-rc.4
+# (webrtc-rs/rtc#131; the workspace pin includes it), so this target passes
+# it. Do not mark it expected-fail against the pinned `rtc`.
 [target.wasip3-guest]
 
 # The non-wasm reference peer (adapter: conformance/adapters/reference): a
@@ -112,7 +111,7 @@ tracking = "TODO.md E15"
 
 [target.reference-x-wasip3-guest]
 
-# Retained implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
+# Direct implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
 # (webrtc-rs and the sans-I/O `rtc` stack meeting each other) and wasmtime <->
 # jco-node (the wasm guest crossing the host-language boundary).
 [target.wasmtime-x-jco-node]

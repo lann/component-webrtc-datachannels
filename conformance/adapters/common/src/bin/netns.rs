@@ -52,8 +52,9 @@ use conformance_adapter_common::{
 /// The hang guard for one test. Lab handshakes (real routing, and a TURN relay
 /// for `turn-relay`) are slower to establish than loopback, but the lab runs
 /// native peers at low concurrency on a dedicated workstation, so it needs
-/// less headroom than the loopback adapters' 90s (which absorbs peer-process
-/// startup under 4-wide CI contention).
+/// less headroom than the loopback adapters'
+/// [`conformance_adapter_common::LOOPBACK_TEST_TIMEOUT`] (which absorbs
+/// peer-process startup under 4-wide CI contention).
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Parser)]
@@ -211,7 +212,7 @@ async fn main() -> Result<()> {
 
     // Each test starts its own short-lived signaling server (in the signaling
     // namespace, on its own port) around its handshake, so a server only ever
-    // brokers one room — matching the mailbox's per-room lifecycle.
+    // brokers one room.
     run_corpus(&cli, scenario, &topology, &peer_command).await
 }
 
