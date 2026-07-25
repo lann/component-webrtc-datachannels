@@ -146,6 +146,22 @@ it by running that test at the default 4x256. Upstream fix would be a
 blocking send (backpressure into SCTP) or a receive-window tie-in; track
 alongside E12's reference-pair findings.
 
+### E15. `rtc` emits no SCTP stream reset on data-channel close
+
+The sans-I/O `rtc` stack's channel-level close is local-only: the
+handler-level `close()` is a stub (`src/peer_connection/handler/
+datachannel.rs`, `fn close … Ok(())`), so `RTCDataChannel::close()` marks
+the local state and emits **no** RECONFIG/stream reset. A remote peer never
+observes the close — `channel-close-flush` with a wasip3 offerer hangs a
+libwebrtc answerer past the attempt guard (recorded as the
+`wasip3-guest-x-reference` expected-fail in `conformance/manifests.toml`),
+and only passes against `rtc`/`webrtc-rs` answerers because those detect
+the offerer's process exit as a connection death instead. Incoming resets
+are handled (a libwebrtc offerer's close is observed fine — the
+`reference-x-wasip3-guest` direction passes). Fix upstream by emitting the
+stream reset from the handler close; drop the manifest entry when a fixed
+pin lands (the expected-fail's unexpected-pass tripwire enforces this).
+
 ## F. Conformance suite
 
 ### F5. Replace the bounded close-drain graces with flush-aware teardown
