@@ -283,11 +283,39 @@ needed because…" belongs in commit messages, PR descriptions, or chat — not 
 source files.  Keeping process reasoning out of comments avoids cluttering the
 codebase with context that quickly becomes stale and misleading.
 
+Concretely: a comment must read as true to someone who has never seen any
+earlier revision of the code.  Revision-relative words — "previously", "new",
+"now", "replaces", "retained", "no longer", "matching the previous X" — are
+red flags: rewrite the comment in present tense ("idle waiters wake only on
+actual state changes", not "this replaces fixed-interval polling"), or move
+the remark to the commit message.
+
 Comments should also avoid claims about *other* files or implementations
 ("the other hosts do X", "its twin implements Y") unless a test — typically
 the conformance suite — enforces the claim: nothing keeps an unenforced
 cross-file claim true, and a reader who trusts it first is misdirected
 exactly when it matters.
+
+Design rationale that shapes an interface — most importantly, what an
+interface deliberately omits and why (see the `RTCDataChannelInit` note in
+`wit/webrtc.wit`) — belongs in the interface's WIT doc comment, phrased as
+forward-facing contract material rather than as a decision record ("what this
+excludes and what to do if you need it", not "we decided against X").
+Rationale for a change belongs in the commit or PR; everything else is
+omitted.
+
+### WIT comments are all doc comments
+
+WIT tooling makes no semantic distinction between `//` and `///`: every
+comment attached to an item lands in the parsed `docs` (adjacent `//`/`///`
+runs are merged, and even a comment separated from the item by a blank line
+still attaches), and `wit-bindgen`, `bindgen!`, and jco all render those docs
+into generated bindings. So there is no maintainer-only comment position in a
+`.wit` file — write every sentence in one as if it will appear in a
+consumer's rendered documentation, because it will. Interface contracts and
+consumer-facing design rationale belong there; repo-layout plumbing (symlink
+arrangements, sibling-implementation inventories) and maintainer asides do
+not — they go to AGENTS.md, a README, or the commit message.
 
 ## Environment variables
 

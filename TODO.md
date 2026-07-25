@@ -145,6 +145,44 @@ Remaining polyfill gaps deliberately not covered here: property accessors
 (`ordered`/`max-retransmits`/`protocol`) on incoming channels, and
 conveying the remote peer's end-of-candidates through `add-ice-candidate`.
 
+### A7. Comprehensive doc-comment audit
+
+A commentary review found the doc comments broadly contract-first (error
+taxonomy, units, defaults, invariants — keep that), but with drift at the
+margins against the AGENTS.md "Code comments" rules. Audit every `.wit`
+file and the doc/inline comments across the implementations and the
+conformance tree for:
+
+- **WIT plumbing prose that renders into consumers' docs.** All WIT
+  comments are doc comments (see AGENTS.md): the `//` world headers in
+  `wasmtime-impl/wit/world.wit`, `wasip3-impl/wit/world.wit`, and
+  `examples/webrtc-consumer/wit/world.wit` describe repo layout (the
+  `deps` symlink arrangement) and inventory sibling implementations —
+  content that lands in generated bindings' docs but belongs in AGENTS.md
+  or a README. Check the demo components' WIT files too.
+- **Unenforced cross-file "mirrors" claims.** E.g.
+  `conformance/adapters/jco/driver.js` ("Mirrors the native adapters'
+  CONFORMANCE_MAX_INBOUND_BUFFER_BYTES", "Mirrors the wasmtime adapter's
+  `fold_two`"), `conformance/adapters/common/src/peer_command.rs` ("Mirror
+  the loopback wasip3 adapter's `wasmtime run` invocation"), the netns
+  `TEST_TIMEOUT` doc's claim about the loopback adapters' 90s bound, and
+  `wasmtime-impl`'s "matches the in-guest `wasip3-impl` driver's drain
+  bound". For each, in preference order: share the constant/helper; add a
+  drift check (the `list-tests` corpus verification is the model — see
+  F7); state the shared behavior once in the WIT doc comment, where the
+  conformance suite enforces it; or drop the cross-reference and justify
+  the value locally.
+- **Revision-relative phrasing.** "matching the previous
+  `RTCConfigurationBuilder::new().build()`"
+  (`wasmtime-impl/src/peer_connection.rs`), "This replaces fixed-interval
+  polling" (`wasip3-impl/src/runtime.rs`), the "retained" pairs
+  (`conformance/adapters/wasmtime/src/bin/interop.rs`) — rewrite in
+  present tense.
+- Lower priority: the name-restating doc tail (e.g. `/// The channel's
+  id.`) — add the one fact that earns the line (a unit, a default, a
+  consumer) or leave it terse; no doc should be deleted just to reduce
+  coverage.
+
 ## E. Implementations
 
 ### E5. Retire the Shadow syscall shim once upstream closes the gap
@@ -213,7 +251,6 @@ unsupported in `conformance/manifests.toml` (a flaky failure cannot be an
 `expected-fail`: it would `unexpected-pass` on green runs). File the
 upstream `webrtc-rs/rtc` issue with the repro above, and drop the manifest
 entries once a fixed pin lands.
-||||||| parent of 3da5c1e (Record the peer-connection config design and env-var follow-ups (A4, E13))
 
 ### E13. Unify and shrink the implementations' environment-variable surface
 
@@ -244,7 +281,6 @@ values, but three refinements remain:
 
 `WEBRTC_UDP_BIND_ADDR` stays environment-shaped on purpose: the bind
 address is deployment topology, owned by whoever runs the process (see A4).
-
 
 ## F. Conformance suite
 
@@ -308,4 +344,5 @@ noting the contamination risk in the result document.
    (A5, A6 — A6 wants A5 first).
 3. The rest as touched: the remaining corpus-mirror unification (F7), jco
    in-process timeout isolation (F11), env-var latching/library hygiene
-   (E13), the remaining conformance-matrix gaps (A3).
+   (E13), the doc-comment audit (A7), the remaining conformance-matrix
+   gaps (A3).
