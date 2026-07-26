@@ -183,26 +183,36 @@ copy onto the pinned version via npm `overrides` — keep those blocks until
 driver-loop errors, so `patch-driver-loop-errors.mjs` remains warranted, as
 does the upstream report of the swallowing.
 
-### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
+### E18. Undiagnosed data loss: `channel-close-flush` intermittently fails on pairs involving the libwebrtc reference peer
 
-`channel-close-flush` fails on roughly a third of `reference-x-wasmtime`
-and `reference-x-jco-node` interop runs with `answerer: receive: closed`:
-the answerer observes the channel closed before it has received every
-payload the reference offerer sent immediately before closing. Messages
-that were handed to `send` are never delivered — this is data loss, not a
-test artifact. It reproduces with two unrelated answerer stacks
-(webrtc-rs via the wasmtime host, and `node-datachannel` via jco-node),
-so the common factor is the libwebrtc reference offerer (or the
-offerer-side close path in `conformance/adapters/reference`); note the
-W3C spec leaves it to the transport layer whether buffered messages are
-sent or discarded on close, and libwebrtc may be discarding. Undiagnosed
-beyond that. This is pre-existing on `main` (the pair's code is identical
-there; CI has simply been passing by chance) and is distinct from E16
-(answerer-side TSFN loss in `node-datachannel`) — though it may account
-for some failures previously attributed to E16. Diagnose (packet capture
-or libwebrtc logging on the reference peer would settle which side drops
-them) and fix or work around; do not paper over it with a manifest
-expected-fail, since the test passes most runs.
+`channel-close-flush` fails intermittently (roughly a third of local runs;
+also observed in CI) on interop pairs that include the libwebrtc reference
+peer, in both roles:
+
+- reference as **offerer** (`reference-x-wasmtime`, `reference-x-jco-node`):
+  `answerer: receive: closed` — the answerer observes the channel closed
+  before it has received every payload the reference offerer sent
+  immediately before closing. Messages handed to `send` are never
+  delivered — data loss, not a test artifact.
+- reference as **answerer** (`wasmtime-x-reference`): `answerer: channel
+  closed before open` — the reference answerer sees the channel close (or
+  the connection die) before the channel ever opens. Also seen once with
+  a jco-node answerer as `add-ice-candidate: closed`.
+
+It reproduces with unrelated peer stacks on the other side (webrtc-rs via
+the wasmtime host, and `node-datachannel` via jco-node), so the common
+factor is the reference peer (`conformance/adapters/reference`, libwebrtc
+via LiveKit's bindings) — its close path as offerer, and possibly its
+open/teardown handling as answerer; note the W3C spec leaves it to the
+transport layer whether buffered messages are sent or discarded on close,
+and libwebrtc may be discarding. Undiagnosed beyond that. This is
+pre-existing on `main` (the pairs' code predates the changes that
+surfaced it; CI had simply been passing by chance) and is distinct from
+E16 (answerer-side TSFN loss in `node-datachannel`) — though it may
+account for some failures previously attributed to E16. Diagnose (packet
+capture or libwebrtc logging on the reference peer would settle which
+side drops them) and fix or work around; do not paper over it with a
+manifest expected-fail, since the test passes most runs.
 
 ## F. Conformance suite
 
