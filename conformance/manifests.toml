@@ -36,10 +36,10 @@
 # The native Wasmtime host over webrtc-rs (adapter: conformance/adapters/wasmtime).
 [target.wasmtime]
 
-# The browser-first host transpiled by jco, run under Node with `@roamhq/wrtc`
+# The browser-first host transpiled by jco, run under Node with `node-datachannel`
 # (adapter: conformance/adapters/jco, `run-node.mjs`). Implements the full
 # `connections` surface and drives real signaling over the suite mailbox.
-# `@roamhq/wrtc` delivers zero-length messages, so `zero-length-message` passes
+# `node-datachannel` delivers zero-length messages, so `zero-length-message` passes
 # and is deliberately NOT an expected-fail.
 [target.jco-node]
 

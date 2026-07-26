@@ -22,7 +22,7 @@ name: Conformance
 #
 # Enabled targets: wasmtime (native webrtc-rs), jco-node (the browser-first
 # host transpiled by jco, under Node 24+ with --experimental-wasm-jspi and
-# @roamhq/wrtc), jco-browser (the same host in headless Chromium, which has
+# node-datachannel), jco-browser (the same host in headless Chromium, which has
 # JSPI natively), wasip3-guest (the conformance guest composed via `wac plug`
 # with the wasip3-impl provider — the sans-I/O rtc stack over WASIp3
 # wasi:sockets — plus an in-guest wasi:http mailbox client and a CLI driver,
@@ -132,7 +132,7 @@ jobs:
           cache: npm
           cache-dependency-path: conformance/adapters/jco/package-lock.json
 
-      # Runtime dependencies only: the adapters' npm packages (@roamhq/wrtc,
+      # Runtime dependencies only: the adapters' npm packages (node-datachannel,
       # playwright-core) and the `wasmtime` CLI the wasip3-guest target runs
       # under. The netns lab never runs in CI, so its apt packages are skipped.
       - name: Install dependencies

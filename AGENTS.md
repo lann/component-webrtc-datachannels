@@ -47,7 +47,7 @@ wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   modeled after wasmtime_wasi_http::p3;
                                        #   add_to_linker + WasiWebrtcView (types + connections.data-channel-options/data-channel);
                                        #   crate name: wasmtime-webrtc-datachannels
-jco-impl/                              # browser-first host (Node + jco + @roamhq/wrtc)
+jco-impl/                              # browser-first host (Node + jco + node-datachannel)
 wasip3-impl/                           # wasm COMPONENT on `rtc` 0.20: runs the
                                        #   sans-I/O stack in-guest (SansIoPeer core
                                        #   + a wasi:sockets/clocks runtime driver)

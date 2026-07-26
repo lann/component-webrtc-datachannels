@@ -143,7 +143,7 @@ function startServer(signalingBase) {
     // modules. Each path is a single, dot-segment-free file name, which
     // scopes the server and rules out path traversal. `/webrtc.js` is served
     // from jco-impl: the connections host is one module shared with the demo
-    // hosts (in the browser its `@roamhq/wrtc` fallback import is never
+    // hosts (in the browser its `node-datachannel` fallback import is never
     // reached, so serving the file alone is enough).
     const match =
       /^\/(generated)\/([A-Za-z0-9._-]+)$|^\/(webrtc\.js|signaling\.js|driver\.js)$/.exec(pathname);

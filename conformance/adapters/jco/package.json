@@ -11,9 +11,10 @@
   },
   "devDependencies": {
     "@bytecodealliance/jco": "1.25.2",
-    "playwright-core": "^1.61.1"
+    "playwright-core": "^1.61.1",
+    "@bytecodealliance/jco-transpile": "0.5.1"
   },
   "overrides": {
-    "@bytecodealliance/jco-transpile": "0.5.0"
+    "@bytecodealliance/jco-transpile": "$@bytecodealliance/jco-transpile"
   }
 }

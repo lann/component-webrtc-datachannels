@@ -1,6 +1,6 @@
 // Headless-browser test for the browser-first host.
 //
-// `src/run.mjs` exercises the host under Node (backed by `@roamhq/wrtc`). This
+// `src/run.mjs` exercises the host under Node (backed by `node-datachannel`). This
 // test instead runs the *same* transpiled component and the *same* `webrtc.js`
 // host module inside a real, headless Chromium, which is the environment the
 // "browser-first" host actually targets. It is the browser counterpart to the
