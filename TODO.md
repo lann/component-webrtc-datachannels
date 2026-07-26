@@ -173,6 +173,18 @@ level, each passing in isolation); native (`node-datachannel`) and
 `webrtc.js` traces show send/dispatch completing cleanly, placing the
 fault in the generated async runtime.
 
+A candidate fix exists on the [`lann/jco` fork's `stale-subtask-event-guest-trap`
+branch](https://github.com/lann/jco/tree/stale-subtask-event-guest-trap)
+("fix(bindgen): restrict eager async import returns to result-less imports"),
+validated against this corpus: repeated full runs went from 3–6 failures to
+fully green. Until it lands upstream, `jco-impl` and
+`conformance/adapters/jco` consume a release build of that branch's
+`@bytecodealliance/jco-transpile` from this repository's `jco-transpile-dev`
+GitHub prerelease, pinned by URL and forced onto `jco`'s transitive copy via
+npm `overrides`. When upstream releases the fix, restore both packages'
+`@bytecodealliance/jco-transpile` pins to the registry version, drop the
+`overrides` blocks, and delete the `jco-transpile-dev` release.
+
 ## F. Conformance suite
 
 ### F5. Replace the bounded close-drain graces with flush-aware teardown

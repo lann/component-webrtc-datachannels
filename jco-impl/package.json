@@ -16,9 +16,10 @@
     "playwright-core": "^1.61.1"
   },
   "overrides": {
-    "@bytecodealliance/jco-transpile": "0.5.0"
+    "@bytecodealliance/jco-transpile": "$@bytecodealliance/jco-transpile"
   },
   "dependencies": {
-    "node-datachannel": "^0.32.3"
+    "node-datachannel": "^0.32.3",
+    "@bytecodealliance/jco-transpile": "https://github.com/lann/component-webrtc-datachannels/releases/download/jco-transpile-dev/jco-transpile-0.5.0-stale-subtask-fix-05e9efef.tgz"
   }
 }
