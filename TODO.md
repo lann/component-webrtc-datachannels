@@ -173,18 +173,15 @@ level, each passing in isolation); native (`node-datachannel`) and
 `webrtc.js` traces show send/dispatch completing cleanly, placing the
 fault in the generated async runtime.
 
-A candidate fix exists on the [`lann/jco` fork's `stale-subtask-event-guest-trap`
-branch](https://github.com/lann/jco/tree/stale-subtask-event-guest-trap)
-("fix(bindgen): restrict eager async import returns to result-less imports"),
-validated against this corpus: repeated full runs went from 3–6 failures to
-fully green. Until it lands upstream, `jco-impl` and
-`conformance/adapters/jco` consume a release build of that branch's
-`@bytecodealliance/jco-transpile` from this repository's `jco-transpile-dev`
-GitHub prerelease, pinned by URL and forced onto `jco`'s transitive copy via
-npm `overrides` (upstream's 0.5.1 release does not include the fix). When an
-upstream release does include it, restore both packages'
-`@bytecodealliance/jco-transpile` pins to the registry version, drop the
-`overrides` blocks, and delete the `jco-transpile-dev` release.
+Upstream's `@bytecodealliance/jco-transpile` 0.5.1 ships its own equivalent
+of the eager-return fix (validated against this corpus: repeated full runs
+went from 3–6 stale-subtask-event failures to fully green), so `jco-impl` and
+`conformance/adapters/jco` pin it directly. The `jco` CLI's own dependency
+range (`^0.4.2`) excludes 0.5.x, so both packages force the CLI's transitive
+copy onto the pinned version via npm `overrides` — keep those blocks until
+`jco` itself depends on a fixed `jco-transpile`. 0.5.1 still swallows
+driver-loop errors, so `patch-driver-loop-errors.mjs` remains warranted, as
+does the upstream report of the swallowing.
 
 ### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
 
