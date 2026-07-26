@@ -1,7 +1,7 @@
 // Driver for one peer of the two-process echo demo under the Node host: the
 // transpiled `echo-remote` component connects to a genuinely separate peer
 // instance through `rendezvous.js` (fetch against the local signaling server)
-// and `webrtc.js` (@roamhq/wrtc).
+// and `webrtc.js` (node-datachannel).
 //
 // Run two of these — an offerer and an answerer — against the same room
 // (or run both at once with `just examples::demo-node-remote`):

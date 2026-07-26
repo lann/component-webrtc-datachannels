@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Browser-first (Node) host for lann:webrtc-datachannels, using jco + @roamhq/wrtc.",
+  "description": "Browser-first (Node) host for lann:webrtc-datachannels, using jco + node-datachannel.",
   "scripts": {
     "transpile": "node check-flags.mjs && jco transpile ../examples/echo-demo/build/echo-demo.component.wasm --name echo-demo --async-mode jspi --async-exports 'demo:webrtc-echo/demo@0.1.0#run' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]data-channel.send' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]data-channel.receive' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]data-channel.send-via-stream' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.create-offer' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.create-answer' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.set-local-description' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.set-remote-description' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.add-ice-candidate' --async-imports 'lann:webrtc-datachannels/connections@0.1.0#[method]peer-connection.wait-connected' --map 'lann:webrtc-datachannels/connections@0.1.0=../webrtc.js' -o generated",
     "start": "node --experimental-wasm-jspi src/run.mjs",
@@ -15,10 +15,10 @@
     "@bytecodealliance/jco": "1.25.2",
     "playwright-core": "^1.61.1"
   },
-  "dependencies": {
-    "@roamhq/wrtc": "^0.8.0"
-  },
   "overrides": {
     "@bytecodealliance/jco-transpile": "0.5.0"
+  },
+  "dependencies": {
+    "node-datachannel": "^0.32.3"
   }
 }

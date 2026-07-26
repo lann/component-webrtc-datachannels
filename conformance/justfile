@@ -122,7 +122,7 @@ wasmtime: build-guest (bin "conformance-adapter-wasmtime" "conformance-adapter-w
 wasip3: build-wasip3 (bin "conformance-adapter-wasip3" "conformance-adapter-wasip3") && run-wasip3
 
 # Run the jco-node conformance adapter (guest transpiled by jco, run under Node
-# with @roamhq/wrtc). jco's async ABI needs JavaScript Promise Integration, so
+# with node-datachannel). jco's async ABI needs JavaScript Promise Integration, so
 # this uses `node --experimental-wasm-jspi` and requires Node 24+ (which ships
 # WebAssembly.Suspending). Writes conformance/results/jco-node.json.
 [doc("Build + run the jco-node target over loopback (Node 24+)")]

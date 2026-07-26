@@ -32,7 +32,7 @@ discarded without API cost.
   entry.
 - **jco adapters:** the browser-first host
   transpiled by jco (`adapters/jco/`), run two ways — under Node with
-  `@roamhq/wrtc` (`jco-node`, `run-node.mjs`) and inside headless Chromium via
+  `node-datachannel` (`jco-node`, `run-node.mjs`) and inside headless Chromium via
   playwright-core (`jco-browser`, `run-browser.mjs`). The jco host
   drives real signaling over the suite mailbox with `fetch` (`signaling.js`)
   and implements the full `connections` surface (`webrtc.js`); the shared

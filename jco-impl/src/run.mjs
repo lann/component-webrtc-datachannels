@@ -33,7 +33,7 @@ async function main() {
 
   const bytes = Number(stats.bytesEchoed);
   const mibps = bytes / (1024 * 1024) / (elapsed / 1000);
-  console.log("echo-demo (Node / @roamhq/wrtc host) result:");
+  console.log("echo-demo (Node / node-datachannel host) result:");
   console.log(`  messages sent:     ${stats.messagesSent}`);
   console.log(`  messages received: ${stats.messagesReceived}`);
   console.log(`  bytes echoed:      ${bytes}`);

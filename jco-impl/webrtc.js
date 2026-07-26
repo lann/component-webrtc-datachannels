@@ -3,8 +3,9 @@
 //
 // This is the "browser-first" host: it is written against the standard W3C
 // WebRTC API (`RTCPeerConnection` / `RTCDataChannel`), so the same logic runs
-// in a browser. Under Node it is backed by `@roamhq/wrtc`, the maintained fork
-// of `node-webrtc`, which provides those globals-compatible classes. It
+// in a browser. Under Node it is backed by `node-datachannel` (Node bindings
+// for libdatachannel), whose polyfill provides those W3C-compatible classes.
+// It
 // implements the full `connections` surface — `data-channel-options`,
 // `data-channel`, and `peer-connection` (offer/answer, trickle ICE, incoming
 // channels) — and is the single host module shared by the demo hosts here and
@@ -18,16 +19,23 @@
 
 // Resolve `RTCPeerConnection` isomorphically: a browser (including headless
 // Chromium) exposes the W3C class as a global; under Node it is provided by
-// `@roamhq/wrtc`, imported lazily so the bare specifier never has to resolve in
-// the browser. A missing Node dependency is surfaced with an actionable message
-// rather than a bare module-resolution error.
+// `node-datachannel`'s polyfill, imported lazily so the bare specifier never
+// has to resolve in the browser. A missing Node dependency is surfaced with an
+// actionable message rather than a bare module-resolution error.
+// Whether the backend resolves `createOffer` only once the connection has
+// negotiation material (true of libdatachannel, which derives descriptions
+// from the media/data sections that exist); see `createOffer` below.
+let offerNeedsChannel = false;
+
 async function resolveRTCPeerConnection() {
   if (globalThis.RTCPeerConnection) return globalThis.RTCPeerConnection;
   try {
-    return (await import("@roamhq/wrtc")).default.RTCPeerConnection;
+    const { RTCPeerConnection } = await import("node-datachannel/polyfill");
+    offerNeedsChannel = true;
+    return RTCPeerConnection;
   } catch (cause) {
     throw new Error(
-      "no RTCPeerConnection available: not running in a browser and @roamhq/wrtc " +
+      "no RTCPeerConnection available: not running in a browser and node-datachannel " +
         "could not be loaded (run `npm install` in jco-impl)",
       { cause },
     );
@@ -452,18 +460,42 @@ export class PeerConnection {
     this.#pc.addEventListener("connectionstatechange", latch);
     this.#pc.addEventListener("iceconnectionstatechange", latch);
 
-    // Local ICE candidates: a `null` (or empty) candidate ends the stream.
+    // Local ICE candidates. End-of-candidates has two W3C signals — a `null`
+    // (or empty) candidate in the `icecandidate` event, and `iceGatheringState`
+    // reaching `"complete"` — and backends differ in which they emit, so the
+    // stream ends on whichever arrives first. The node-datachannel backend
+    // emits only the gathering-state transition, and can be observed in the
+    // `"complete"` state before its trickled `icecandidate` events dispatch;
+    // the local description contains every gathered candidate by then, so the
+    // full set is recovered from it at that point (deduplicated against the
+    // trickled events, whose stragglers are dropped by the ended stream).
     this.#candidates = eventStream((push, end) => {
+      const seen = new Set();
+      const pushCandidate = (candidate, sdpMid, sdpMlineIndex) => {
+        // Normalize to the W3C `candidate:…` attribute form (some backends
+        // report the raw SDP line, `a=candidate:…`).
+        const normalized = candidate.trim().replace(/^a=/, "");
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+        push({ candidate: normalized, sdpMid, sdpMlineIndex });
+      };
       this.#pc.addEventListener("icecandidate", ({ candidate }) => {
         if (candidate == null || candidate.candidate === "") {
           end();
           return;
         }
-        push({
-          candidate: candidate.candidate,
-          sdpMid: candidate.sdpMid ?? undefined,
-          sdpMlineIndex: candidate.sdpMLineIndex ?? undefined,
-        });
+        pushCandidate(
+          candidate.candidate,
+          candidate.sdpMid ?? undefined,
+          candidate.sdpMLineIndex ?? undefined,
+        );
+      });
+      this.#pc.addEventListener("icegatheringstatechange", () => {
+        if (this.#pc.iceGatheringState !== "complete") return;
+        for (const c of sdpCandidates(this.#pc.localDescription?.sdp)) {
+          pushCandidate(c.candidate, c.sdpMid, c.sdpMlineIndex);
+        }
+        end();
       });
     });
 
@@ -531,6 +563,15 @@ export class PeerConnection {
   async createOffer() {
     this.#requireOpen();
     try {
+      // A channel-less offer never resolves when the backend needs
+      // negotiation material, so give it an SCTP section: a pre-negotiated
+      // probe channel is invisible to the remote peer (never announced
+      // in-band; the WIT options surface cannot collide with its id). The id
+      // sits at the top of libdatachannel's default stream range, far above
+      // the in-band ids assigned from zero.
+      if (offerNeedsChannel && this.#ownedChannels.size === 0) {
+        this.#pc.createDataChannel("", { negotiated: true, id: 1023 });
+      }
       const offer = await this.#pc.createOffer();
       return { kind: "offer", sdp: offer.sdp };
     } catch (err) {
@@ -727,8 +768,8 @@ export class PeerConnection {
 
   /**
    * Dispose hook jco invokes when the guest drops the resource: close the
-   * connection so `@roamhq/wrtc` tears down its native ICE/DTLS/SCTP threads
-   * and sockets even if the guest never called `close`.
+   * connection so `node-datachannel` tears down its native ICE/DTLS/SCTP
+   * threads and sockets even if the guest never called `close`.
    */
   [Symbol.dispose]() {
     try {
@@ -757,6 +798,7 @@ function eventStream(setup) {
     },
   });
   const push = (item) => {
+    if (ended) return;
     if (controller) controller.enqueue(item);
     else buffer.push(item);
   };
@@ -782,6 +824,33 @@ function emptyStream() {
       controller.close();
     },
   });
+}
+
+/**
+ * Extract the ICE candidates from an SDP description as
+ * `{ candidate, sdpMid, sdpMlineIndex }` records in the W3C trickle shape
+ * (`candidate` carries the attribute value without the `a=` prefix).
+ */
+function sdpCandidates(sdp) {
+  if (!sdp) return [];
+  const out = [];
+  let sdpMid;
+  let sdpMlineIndex = -1;
+  for (const line of sdp.split(/\r?\n/)) {
+    if (line.startsWith("m=")) {
+      sdpMlineIndex += 1;
+      sdpMid = undefined;
+    } else if (line.startsWith("a=mid:")) {
+      sdpMid = line.slice("a=mid:".length).trim();
+    } else if (line.startsWith("a=candidate:")) {
+      out.push({
+        candidate: line.slice("a=".length).trim(),
+        sdpMid,
+        sdpMlineIndex: sdpMlineIndex >= 0 ? sdpMlineIndex : undefined,
+      });
+    }
+  }
+  return out;
 }
 
 /**

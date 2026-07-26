@@ -16,7 +16,7 @@
 //!
 //! all within a single cooperative async task (the loops run under
 //! `futures::join!`). The same component binary runs unchanged under the Node
-//! (`jco` + `@roamhq/wrtc`) host and the Wasmtime (`webrtc-rs`) host, which is
+//! (`jco` + `node-datachannel`) host and the Wasmtime (`webrtc-rs`) host, which is
 //! what demonstrates cross-implementation compatibility.
 
 wit_bindgen::generate!({

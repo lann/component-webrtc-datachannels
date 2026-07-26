@@ -69,7 +69,7 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
-### E12. node-webrtc receive-side reordering: latent in jco-node
+### E12. node-webrtc receive-side reordering: file the write-ups upstream
 
 `@roamhq/wrtc` (node-webrtc) can dispatch an ordered channel's messages to
 JS with the head of the sequence displaced past later messages: its
@@ -78,19 +78,17 @@ messages then dispatch directly to the JS loop) *before* re-dispatching the
 backlog the temporary pre-wrapper observer cached, so arrivals adjacent to
 channel open overtake every earlier message (`rtc_data_channel.cc`; a
 standalone reproduction with sender-side SCTP instrumentation proved the
-senders' wire metadata correct). The reference peer was moved off
-node-webrtc (to Google's libwebrtc via LiveKit's Rust bindings) and no
-longer exposes it, and the `ordering` manifest skips were dropped — but the
-**jco-node host still runs on `@roamhq/wrtc`**, so the bug is latent behind
-the jco-node target and its pairs, historically masked by the JSPI startup
-delay between channel open and first sends. If `ordering` ever flakes on a
-jco-node row with a head-displaced index sequence, this is the cause: the
-`ordering` test retains its `ordered-delivery` tag so a manifest entry can
-scope the skip immediately. Upstream write-ups and the reproduction live
-with the local rtc checkout (`wrtc-receive-reordering-bug.md`,
-`rtc-ordered-delivery-bug.md` — the latter a distinct `rtc` default-options
-bug found in the same investigation — and `rtc-ordering-repro/`); file them
-at WonderInventions/node-webrtc and webrtc-rs/rtc.
+senders' wire metadata correct). No target in this repo runs on node-webrtc
+anymore: the reference peer moved to Google's libwebrtc via LiveKit's Rust
+bindings, and the jco-node host moved to `node-datachannel`
+(libdatachannel), closing the last latent exposure. The `ordering` test
+keeps its `ordered-delivery` tag so a manifest entry can scope a skip if a
+future backend needs one. What remains is filing the upstream reports: the
+write-ups and the reproduction live with the local rtc checkout
+(`wrtc-receive-reordering-bug.md`, `rtc-ordered-delivery-bug.md` — the
+latter a distinct `rtc` default-options bug found in the same
+investigation — and `rtc-ordering-repro/`); file them at
+WonderInventions/node-webrtc and webrtc-rs/rtc.
 
 ### E14. `webrtc-rs` drops inbound channel events on a full event queue
 
@@ -122,6 +120,58 @@ are handled (a libwebrtc offerer's close is observed fine — the
 `reference-x-wasip3-guest` direction passes). Fix upstream by emitting the
 stream reset from the handler close; drop the manifest entry when a fixed
 pin lands (the expected-fail's unexpected-pass tripwire enforces this).
+
+### E16. `node-datachannel` drops messages queued behind a remote close
+
+The jco-node backend can lose messages a peer sent immediately before
+closing the channel: `node-datachannel`'s native layer marshals each event
+type through its own thread-safe-function queue (no cross-queue ordering),
+and the remote close's marshaled callback runs a cleanup that resets the
+message callback — its TSFN `Abort()` discards message callbacks already
+queued but not yet dispatched (`src/cpp/data-channel-wrapper.cpp`:
+`onClosed`'s cleanup lambda → `doCleanup()`). The loss is below the JS API
+(the raw non-polyfill API reproduces it identically), so no host-side
+mitigation exists; the real fix is upstream — dispatch close through the
+same queue as messages, or defer the cleanup until the message queue
+drains. Upstream tracks it as
+[murat-dogan/node-datachannel#375](https://github.com/murat-dogan/node-datachannel/issues/375)
+(with a failing-test PR, #374). The race is timing-dependent: it surfaces
+as `channel-close-flush` failures with jco-node as the receiver (the
+jco-node loopback row, and interop pairs with a jco-node answerer). Drop
+the manifest entry when a fixed release ships (the expected-fail's
+unexpected-pass tripwire enforces this).
+
+### E17. jco async runtime: stale subtask events crash the guest, and the driver loop swallows the crash
+
+Report two intertwined jco (1.25.2, `-I async`/JSPI) bugs upstream at
+[bytecodealliance/jco](https://github.com/bytecodealliance/jco), with the
+evidence gathered here:
+
+- **Stale subtask event delivery.** Under the conformance corpus (many
+  concurrent async host imports — `futures::join!` of `send`/`receive` —
+  across sequential in-process tests), the generated runtime occasionally
+  delivers a `SUBTASK`/`RETURNED` event whose waitable index the guest has
+  already released. The guest's `wit-bindgen` callback dispatch then traps
+  — `RuntimeError: table index is out of bounds` in the `receive` waker
+  closure (the observed events were identical across distinct tests:
+  `{eventCode: 1, index: 3, result: 2}`), or aborts in `__rdl_dealloc` /
+  stream drop glue from the same stale-handle corruption. The generated
+  `AsyncSubtask.setOnProgressFn` handler unconditionally overwrites the
+  waitable's pending event on both start and resolve, which is the leading
+  suspect.
+- **Silent driver-loop error swallowing.** `_driverLoop`'s outer catch
+  only `_debugLog`s the error and exits, so the trapped guest task is
+  abandoned: the export's promise never settles and the failure surfaces
+  as an opaque timeout. `conformance/adapters/jco/patch-driver-loop-errors.mjs`
+  (run by the adapter's `transpile` script) rewrites the catch to
+  `console.error` as a local stopgap; drop it when upstream surfaces these
+  errors itself.
+
+In the corpus these appear as random per-run subsets of two-peer tests
+failing with bare `attempt timed-out` (3–6 per full run, any `--jobs`
+level, each passing in isolation); native (`node-datachannel`) and
+`webrtc.js` traces show send/dispatch completing cleanly, placing the
+fault in the generated async runtime.
 
 ## F. Conformance suite
 

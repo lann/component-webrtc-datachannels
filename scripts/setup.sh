@@ -28,8 +28,8 @@
 #     `shadow-dev` GitHub prerelease; fetch it with scripts/download-shadow.sh or
 #     build it locally with scripts/build-shadow.sh. The lab recipe prints this
 #     guidance and fails if the binary is missing when it runs.
-#   - the Node host's npm dependencies (jco + @roamhq/wrtc), and the conformance
-#     jco adapter's npm dependencies (jco + @roamhq/wrtc + playwright-core)
+#   - the Node host's npm dependencies (jco + node-datachannel), and the conformance
+#     jco adapter's npm dependencies (jco + playwright-core)
 #
 # wasm-tools, just, and cargo-nextest are installed with cargo-binstall, which
 # downloads the pinned prebuilt release binaries when available and automatically
