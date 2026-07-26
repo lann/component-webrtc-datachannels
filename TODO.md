@@ -181,9 +181,31 @@ fully green. Until it lands upstream, `jco-impl` and
 `conformance/adapters/jco` consume a release build of that branch's
 `@bytecodealliance/jco-transpile` from this repository's `jco-transpile-dev`
 GitHub prerelease, pinned by URL and forced onto `jco`'s transitive copy via
-npm `overrides`. When upstream releases the fix, restore both packages'
+npm `overrides` (upstream's 0.5.1 release does not include the fix). When an
+upstream release does include it, restore both packages'
 `@bytecodealliance/jco-transpile` pins to the registry version, drop the
 `overrides` blocks, and delete the `jco-transpile-dev` release.
+
+### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
+
+`channel-close-flush` fails on roughly a third of `reference-x-wasmtime`
+and `reference-x-jco-node` interop runs with `answerer: receive: closed`:
+the answerer observes the channel closed before it has received every
+payload the reference offerer sent immediately before closing. Messages
+that were handed to `send` are never delivered — this is data loss, not a
+test artifact. It reproduces with two unrelated answerer stacks
+(webrtc-rs via the wasmtime host, and `node-datachannel` via jco-node),
+so the common factor is the libwebrtc reference offerer (or the
+offerer-side close path in `conformance/adapters/reference`); note the
+W3C spec leaves it to the transport layer whether buffered messages are
+sent or discarded on close, and libwebrtc may be discarding. Undiagnosed
+beyond that. This is pre-existing on `main` (the pair's code is identical
+there; CI has simply been passing by chance) and is distinct from E16
+(answerer-side TSFN loss in `node-datachannel`) — though it may account
+for some failures previously attributed to E16. Diagnose (packet capture
+or libwebrtc logging on the reference peer would settle which side drops
+them) and fix or work around; do not paper over it with a manifest
+expected-fail, since the test passes most runs.
 
 ## F. Conformance suite
 
