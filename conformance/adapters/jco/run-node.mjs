@@ -1,34 +1,51 @@
 // The jco Node conformance adapter: runs the shared conformance guest against
-// the browser-first host (`webrtc.js` + `signaling.js`) under Node, backed by
-// `@roamhq/wrtc`, and emits the adapter result document the conformance runner
+// the browser-first host (`jco-impl/webrtc.js` + the adapter's `signaling.js`)
+// under Node, backed by
+// `node-datachannel`, and emits the adapter result document the conformance runner
 // consumes (`conformance/results/jco-node.json`).
 //
 // The transpiled guest (produced by `npm run transpile`) is instantiated in
 // jco's `--instantiation` mode so this one process can stand up two independent
 // guest instances — an offerer and an answerer — for the two-peer behavioral
-// tests, exactly as the wasmtime adapter runs two stores. The shared driver
+// tests. The shared driver
 // (`driver.js`) owns the plan/fold orchestration.
 //
 // jco's async ABI needs JavaScript Promise Integration (JSPI), so this must run
 // under a JSPI-capable runtime: Node 24+ with `--experimental-wasm-jspi`. The
-// `just conformance-jco-node` recipe supplies both.
+// `just conformance::jco-node` recipe supplies both.
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { availableParallelism } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
 import { runCorpus, MAX_INBOUND_BUFFER_BYTES } from "./driver.js";
-import * as connections from "./webrtc.js";
+// The single host module, shared with the demo hosts. Its bare
+// `node-datachannel` import resolves from jco-impl/node_modules (the module's own
+// location), so `npm install` in jco-impl is a prerequisite (scripts/setup.sh
+// runs it).
+import * as connections from "../../../jco-impl/webrtc.js";
 import { Session } from "./signaling.js";
 
 // Shrink the host's inbound-buffer bound so the `receive-buffer-overflow`
-// probe overflows it with a small flood (webrtc.js resolves the bound lazily
-// per channel, so setting the global here covers every instance).
-globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+// probe overflows it with a small flood (channels capture the bound at
+// creation, so configuring the module here covers every instance).
+connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
+
+// The default test concurrency: 2x the cores available to this process,
+// clamped to [2, 8]. The corpus is I/O-bound so the optimum exceeds the core
+// count (measured at 3x cores on the lighter Rust adapters), but each test
+// here runs inside a heavyweight JS runtime whose flake history is
+// load-induced timeouts, so the multiplier stays conservative: 4 jobs on
+// 2-core CI runners (the load proven stable there), scaling up on larger
+// machines.
+function defaultJobs() {
+  return Math.min(8, Math.max(2, 2 * availableParallelism()));
+}
 
 const { values } = parseArgs({
   options: {
@@ -45,8 +62,8 @@ const { values } = parseArgs({
     },
     only: { type: "string", multiple: true, default: [] },
     // How many tests to run concurrently (each test's peers use their own
-    // signaling room, so tests are independent).
-    jobs: { type: "string", default: "4" },
+    // signaling room, so tests are independent); defaults to defaultJobs().
+    jobs: { type: "string" },
     // Single-instance interop mode: run exactly one guest instance for one
     // `--test`/`--role`/`--room` against an already-running `--server`, printing
     // the raw `test-result` (`{ "tag": ... }`) as JSON to stdout. Used by the
@@ -145,7 +162,6 @@ async function main() {
       room: values.room,
       messageCount: Number(values["message-count"]),
       messageSize: Number(values["message-size"]),
-      trickle: true,
     };
     phase("modules compiled; instantiating guest");
     const instance = await newInstance();
@@ -165,7 +181,7 @@ async function main() {
       base,
       newInstance,
       only: values.only,
-      jobs: Number(values.jobs),
+      jobs: values.jobs ? Number(values.jobs) : defaultJobs(),
       log: (msg) => process.stderr.write(msg),
     });
 

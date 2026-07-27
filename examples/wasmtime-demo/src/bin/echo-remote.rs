@@ -9,8 +9,7 @@
 //!     peer connection), and
 //!   * the demo `rendezvous` signaling mailbox, implemented natively here with
 //!     an HTTP client speaking `conformance-signalingd`'s mailbox protocol
-//!     (`conformance/signaling/PROTOCOL.md`), mirroring the conformance
-//!     wasmtime adapter's mailbox host.
+//!     (`conformance/signaling/PROTOCOL.md`).
 //!
 //! Run two instances — an offerer and an answerer — pointed at the same room
 //! on the same signaling server, and a real WebRTC connection forms between
@@ -26,10 +25,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use wasmtime::component::{Accessor, Component, HasData, Linker, Resource, ResourceTable};
-use wasmtime::{Config, Engine, Result, Store};
+use wasmtime::{Result, Store};
 use wasmtime_webrtc_datachannels::{
     self as webrtc_host, WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView,
 };
+use wasmtime_webrtc_host::{engine, webrtc_ctx};
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -44,6 +44,8 @@ mod bindings {
         with: {
             "lann:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
+            "lann:webrtc-datachannels/connections.peer-connection-config":
+                wasmtime_webrtc_datachannels::PeerConnectionConfig,
             "lann:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
             "lann:webrtc-datachannels/connections.peer-connection":
@@ -235,27 +237,6 @@ async fn fetch_next(session: &RendezvousSession) -> std::result::Result<Option<V
 }
 
 // --- host entry point ----------------------------------------------------------
-
-fn engine() -> Result<Engine> {
-    let mut config = Config::new();
-    config.wasm_component_model(true);
-    config.wasm_component_model_async(true);
-    Engine::new(&config)
-}
-
-/// Build the WebRTC context, opting into loopback ICE candidates when the
-/// `WEBRTC_INCLUDE_LOOPBACK` environment variable is set — required when the
-/// offerer and answerer run on the same host without another mutually
-/// reachable address.
-fn webrtc_ctx() -> WasiWebrtcCtx {
-    let mut ctx = WasiWebrtcCtx::new();
-    if std::env::var_os("WEBRTC_INCLUDE_LOOPBACK").is_some() {
-        ctx.set_setting_engine_hook(|engine| {
-            engine.set_include_loopback_candidate(true);
-        });
-    }
-    ctx
-}
 
 struct Cli {
     component: String,

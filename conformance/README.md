@@ -30,25 +30,20 @@ discarded without API cost.
   native Wasmtime host (loopback ICE, in-process signaling) and emits the
   adapter result document the runner classifies against its `manifests.toml`
   entry.
-- **jco adapters + interop pairs:** the browser-first host
+- **jco adapters:** the browser-first host
   transpiled by jco (`adapters/jco/`), run two ways — under Node with
-  `@roamhq/wrtc` (`jco-node`, `run-node.mjs`) and inside headless Chromium via
-  playwright-core (`jco-browser`, `run-browser.mjs`) — plus the cross-runtime
-  interop pairs `wasmtime`<->`jco-node` and `wasmtime`<->`jco-browser`, each in
-  both orders (the `conformance-interop` binary in `adapters/wasmtime/`, which
-  drives one wasmtime peer via the adapter library and the jco peer via
-  `run-node.mjs --interop` / `run-browser.mjs --interop` — the browser
-  direction launches one headless-Chromium instance per test). The jco host
+  `node-datachannel` (`jco-node`, `run-node.mjs`) and inside headless Chromium via
+  playwright-core (`jco-browser`, `run-browser.mjs`). The jco host
   drives real signaling over the suite mailbox with `fetch` (`signaling.js`)
   and implements the full `connections` surface (`webrtc.js`); the shared
-  corpus orchestration lives in `driver.js`. Classified against the `jco-node`,
-  `jco-browser`, and the four jco pair entries in `manifests.toml`.
+  corpus orchestration lives in `driver.js`. Classified against the `jco-node`
+  and `jco-browser` entries in `manifests.toml`.
 
   jco's async ABI always uses JSPI (`WebAssembly.Suspending`), so the Node-driven
   targets (`jco-node` and the jco-node half of the interop pair) require **Node
   24+** run with `--experimental-wasm-jspi`; the `jco-browser` target runs the
   guest in headless Chrome, which has JSPI natively.
-- **wasip3-guest adapter + second interop pair:** the whole WebRTC
+- **wasip3-guest adapter:** the whole WebRTC
   stack in wasm (`adapters/wasip3/`): the shared conformance guest is composed
   (`wac plug`) with the `wasip3-impl` provider component (the sans-I/O `rtc`
   stack driven over WASIp3 `wasi:sockets` UDP), an in-guest `wasi:http` mailbox
@@ -58,11 +53,24 @@ discarded without API cost.
   `wasmtime run` (v46+; component-model async + WASIp3 + `wasi:http`) — one
   process per peer for the two-peer behavioral tests, connecting over
   `wasi:sockets` UDP loopback across processes and signaling through the suite
-  mailbox — and writes `results/wasip3-guest.json`. The `conformance-interop`
-  binary drives the `wasmtime`<->`wasip3-guest` pair in both orders the same
-  way it drives the jco-node pair. Classified against the `wasip3-guest`,
-  `wasmtime-x-wasip3-guest`, and `wasip3-guest-x-wasmtime` entries in
-  `manifests.toml`.
+  mailbox — and writes `results/wasip3-guest.json`.
+- **Reference peer + interop pairs:** the **non-wasm reference peer**
+  (`adapters/reference/`, the `conformance-reference-peer` binary): a native
+  program driving Google's libwebrtc — the stack browsers ship — through
+  [LiveKit's Rust bindings](https://crates.io/crates/libwebrtc), with no wasm
+  component or WIT bindings, speaking the same single-peer contract, mailbox
+  protocol, and guest-owned signal-blob schema as every other peer. It is the
+  suite's wire-level anchor: the `conformance-interop` binary (in
+  `adapters/wasmtime/`) pairs every target against it in both orders
+  (`wasmtime`, `jco-node`, and `wasip3-guest` over the full two-peer corpus;
+  `jco-browser` over the `interop-handshake` smoke test, one headless-Chromium
+  instance per test), so a red pair cell implicates the target's stack rather
+  than a second guest instance. It also runs the `reference` self-pair
+  (validating the reference peer itself) and the direct
+  implementation-vs-implementation pairs `wasmtime`<->`jco-node` and
+  `wasmtime`<->`wasip3-guest`, each in both orders. Classified against the
+  `reference` and pair entries in `manifests.toml`. The first build downloads
+  LiveKit's prebuilt static libwebrtc (`webrtc-sys`).
 
 ## Layering: adapters vs. environment executors
 
@@ -74,8 +82,9 @@ The suite separates *what runs a peer* from *where its network lives*:
   bind address, ICE servers): the in-process adapters
   (`conformance-adapter-wasmtime`, the jco drivers,
   `conformance-adapter-wasip3`) and the per-process peers — the native
-  `conformance-peer` binary and the composed wasip3 component under
-  `wasmtime run`. A peer knows nothing about namespaces, simulators, or how its
+  `conformance-peer` binary, the composed wasip3 component under
+  `wasmtime run`, and the `conformance-reference-peer` binary. A peer knows nothing
+  about namespaces, simulators, or how its
   addresses were provisioned; every out-of-process peer honours the same
   single-peer contract (`--test`/`--role`/`--server`/`--room`/…, one JSON
   `test-result` line on stdout).
@@ -104,28 +113,47 @@ This builds the conformance guest component and `conformance-signalingd`, runs
 the `wasmtime` adapter (which starts its own in-process signaling server and
 writes `conformance/results/wasmtime.json`), transpiles the guest for the jco
 adapters and runs the `jco-node` and `jco-browser` targets, composes and runs
-the `wasip3-guest` target under `wasmtime run`, runs the interop pairs
-(`wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser`, and
-`wasmtime`<->`wasip3-guest`, each in both orders), then invokes
+the `wasip3-guest` target under `wasmtime run`, runs the interop pairs (every
+target against the reference peer in both orders, the `reference` self-pair,
+and the direct `wasmtime`<->`jco-node` and `wasmtime`<->`wasip3-guest`
+implementation pairs), then invokes
 `conformance-runner`, which reads the test registry, the target manifests,
 and those adapter result documents, starts and health-checks a standalone
 signaling server, applies the expected-fail / unexpected-pass policy, tears the
 server down, and writes the markdown matrix to `conformance/matrix.md`. It exits
 nonzero on any `fail` or `unexpected-pass`.
 
-The jco targets and their interop pair invoke `node --experimental-wasm-jspi`, so
-a JSPI-capable **Node 24+** must be on `PATH` (see the jco note above). The
+CI ([`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml))
+runs the same recipes split build-once/run-many: a `build` job compiles every
+artifact (`just conformance::build-all`) and hands them to the runner jobs as a
+tarball artifact, so the `matrix` job (`just conformance::run-matrix`) and the
+`shadow-lab` job (`just conformance::run-shadow` + `classify-shadow`) execute
+prebuilt binaries without compiling — the Rust dependency tree is compiled and
+cached exactly once per run.
+
+The jco targets and their interop pairs invoke `node --experimental-wasm-jspi`,
+so a JSPI-capable **Node 24+** must be on `PATH` (see the jco note above); the
+reference peer is a native binary and needs no Node at all. The
 `conformance-interop` binary honours the `CONFORMANCE_NODE` environment variable
 if a specific node binary is needed. The `wasip3-guest` target and its interop
-pair invoke `wasmtime run` (v46+, installed by `scripts/setup.sh`; overridable
+pairs invoke `wasmtime run` (v46+, installed by `scripts/setup.sh`; overridable
 via `CONFORMANCE_WASMTIME`). To run a single target in isolation, use the
-per-target recipes (`just conformance-jco-node`, `just conformance-jco-browser`,
-`just conformance-wasip3`, `just conformance-interop`).
+per-target recipes (`just conformance::jco-node`, `just conformance::jco-browser`,
+`just conformance::wasip3`, `just conformance::interop`).
 
-Within each adapter, tests run **in parallel by default** (4 at a time): every
-test's peers use fresh guest instances (or processes) and their own signaling
-room, so tests are independent. Each adapter exposes a `--jobs` flag to change
-the concurrency (`--jobs 1` restores serial execution). Every test attempt is
+Within each adapter, tests run **in parallel by default**: every test's peers
+use fresh guest instances (or processes) and their own signaling room, so
+tests are independent. The default concurrency scales with the cores available
+to the adapter process (respecting its CPU affinity mask): 3 × cores clamped
+to [2, 12] for the wasmtime and wasip3-guest adapters, and a more conservative
+2 × cores clamped to [2, 8] for the jco targets and the interop pairs, whose
+per-test Node/Chromium startup runs on the hang-guard clock. The multipliers
+come from measuring the loopback corpus pinned to 2 CPUs (matching hosted CI
+runners): wall time improves steeply up to 3 × cores — where it sits within
+~2s of the corpus's intrinsic floor, the fixed-length `error-timed-out`
+probe — and higher values buy <2s while adding contention. Each adapter
+exposes a `--jobs` flag to override the default (`--jobs 1` restores serial
+execution). Every test attempt is
 individually bounded by a hang guard (90s, one attempt — no retries; generous
 because peer-process startup and 4-wide CI contention are on the clock, while
 the hosts' shorter `wait-connected` timeouts classify genuine connection
@@ -157,7 +185,7 @@ cargo run -p conformance-signalingd
 cargo run -p conformance-signalingd -- --host 0.0.0.0 --port 8080
 ```
 
-## netns lab (`just conformance-netns`)
+## netns lab (`just conformance::netns`)
 
 The default adapters connect their peers over the loopback interface. The **ICE
 lab** instead runs the two peers of each test over a real routed
@@ -175,9 +203,11 @@ placed with `ip netns exec`; the target-neutral environment executor
 (`conformance-netns`, in `adapters/common`) provisions the lab, runs the signaling
 server (and coturn) in the signaling namespace, drives the corpus, and tears the
 lab down. Like the Shadow lab, its `--peer-kind` flag selects the peer: the
-native `conformance-peer` binary (`wasmtime`, the default) or the composed
+native `conformance-peer` binary (`wasmtime`, the default), the composed
 wasip3 conformance component under `wasmtime run` (`wasip3-guest`, whose
-in-guest sans-I/O stack supports no STUN/TURN — only the `lan` scenario fits).
+in-guest sans-I/O stack supports no STUN/TURN — only the `lan` scenario fits),
+or the non-wasm reference peer binary (`reference`, whose ICE flags map onto
+libwebrtc's ICE configuration and support every scenario).
 Results are written to `conformance/results/<target>-<scenario>.json` with the
 scenario as the report's `environment`, so each scenario is its own matrix
 row.
@@ -196,14 +226,15 @@ exec`, and `turnserver` on `PATH` for the non-`lan` scenarios — both provided 
 [`scripts/setup.sh`](../scripts/setup.sh)):
 
 ```sh
-just conformance-netns lan
-just conformance-netns stun-srflx
-just conformance-netns turn-relay
-just conformance-netns nat-symmetric
+just conformance::netns lan
+just conformance::netns stun-srflx
+just conformance::netns turn-relay
+just conformance::netns nat-symmetric
 # or run both NAT scenarios (the NAT matrix) at once:
-just conformance-nat
-# or run the lan scenario with the wasip3-guest peer:
-just conformance-netns lan wasip3-guest
+just conformance::nat
+# or run the lan scenario with the wasip3-guest or reference peer:
+just conformance::netns lan wasip3-guest
+just conformance::netns lan reference
 ```
 
 For interactive debugging, a provisioned lab can be kept up across runs: run the
@@ -231,16 +262,19 @@ traffic to its own "public" address:
   peer and ICE must fall back to a TURN relay.
 
 The NAT scenarios are part of the workstation-only netns lab (see below); run
-them with `just conformance-nat`.
+them with `just conformance::nat`.
 
 The netns lab is **workstation-only**: CI does not run it. CI's non-loopback
 coverage comes from the Shadow lab (`shadow-lab` in
 [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml)),
 which needs no root or network namespaces; the netns lab remains the
 higher-fidelity environment for exercising the STUN/TURN/NAT candidate paths
-on a real kernel.
+on a real kernel. When adding non-loopback coverage, prefer the Shadow lab —
+whatever runs there runs in CI, gated on every change — and reserve the netns
+lab for what genuinely needs a real kernel network stack: the NAT behaviors
+(nftables conntrack) and a real coturn relay.
 
-## Shadow lab (`just conformance-shadow`)
+## Shadow lab (`just conformance::shadow`)
 
 The **Shadow lab** gives the same "two peers on separate hosts over a
 non-loopback path" property as the netns lab, but runs the peers inside the
@@ -265,9 +299,21 @@ per-role peer command template:
 - `wasip3-guest` runs the fully composed wasip3 conformance component under
   `wasmtime run` (the same invocation as the loopback adapter), pointing the
   in-guest provider at each host's simulated address through the
-  `WEBRTC_UDP_BIND_ADDR` environment variable.
+  `WEBRTC_UDP_BIND_ADDR` environment variable;
+- `reference` runs the non-wasm reference peer (`conformance-reference-peer`);
+  libwebrtc gathers candidates from the simulated host's own interface, so no
+  bind address is passed.
 
-Run both targets from the repository root (needs `shadow` on `PATH`). Shadow
+The `--offerer-kind` / `--answerer-kind` flags override `--peer-kind` per
+role, placing an **interop pair** — the two peers of each test running
+different targets on separate simulated hosts. The `shadow` recipe uses this
+to run the wasmtime <-> wasip3-guest pair in both orders
+(`wasmtime-x-wasip3-guest-shadow.json` / `wasip3-guest-x-wasmtime-shadow.json`),
+giving the implementation pair non-loopback coverage in CI; the loopback
+interop matrix (`conformance-interop`) remains the pair coverage for the
+Node-hosted and reference targets.
+
+Run the Shadow targets from the repository root (needs `shadow` on `PATH`). Shadow
 ships no upstream prebuilt binary, so install it into `~/.local` by downloading
 the prebuilt binary from this repository's `shadow-dev` GitHub prerelease
 ([`scripts/download-shadow.sh`](../scripts/download-shadow.sh)) or by building it
@@ -276,7 +322,7 @@ from source ([`scripts/build-shadow.sh`](../scripts/build-shadow.sh)).
 and fails if the binary is missing:
 
 ```sh
-just conformance-shadow
+just conformance::shadow
 ```
 
 Shadow does not implement UDP `SO_REUSEADDR`/`SO_REUSEPORT`, which webrtc's mDNS
@@ -293,8 +339,9 @@ received and stub only Shadow's documented failure (`ENOPROTOOPT` for the
 `recvmsg`); an unexpected error aborts the peer instead of being masked. The
 stubs engage only when the `CONFORMANCE_SHADOW_SYSCALL_SHIM` environment
 variable is set, which the executor does for the peer processes it places
-inside the simulation — every other environment gets pure pass-through. TODO
-item E5 tracks the upstream fixes that would retire the shim.
+inside the simulation — every other environment gets pure pass-through. If
+Shadow (or quinn-udp/webrtc upstream) grows support for these syscalls, the
+shim can be retired.
 
 CI runs the Shadow lab in a dedicated job (`shadow-lab` in
 [`.github/workflows/conformance.yml`](../.github/workflows/conformance.yml));

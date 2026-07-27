@@ -1,0 +1,173 @@
+# The demo components, hosts, and in-guest compositions. Loaded as the
+# `examples` module of the top-level justfile: invoke as
+# `just examples::<recipe>`.
+#
+# Recipes run from the repository root so cargo invocations, `target/` paths,
+# and `jco-impl/...` paths all match the top-level layout.
+set working-directory := ".."
+
+# Build the echo-demo guest component into examples/echo-demo/build/.
+build-component:
+    cargo build --release -p echo-demo --target wasm32-unknown-unknown
+    mkdir -p examples/echo-demo/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/echo_demo.wasm \
+        -o examples/echo-demo/build/echo-demo.component.wasm
+
+# Transpile the echo-demo component for the Node host (runs build-component).
+transpile: build-component
+    cd jco-impl && npm run transpile
+
+# Run the browser host test in headless Chrome (set CHROME_PATH to override).
+test-browser: transpile
+    cd jco-impl && npm run test:browser
+
+# Run the Node (browser-first) host demo.
+demo-node: transpile
+    cd jco-impl && npm start
+
+# Run the Wasmtime (native) host demo.
+demo-wasmtime count="1000" size="4096": build-component
+    cargo run --release --bin wasmtime-webrtc-host -- \
+        examples/echo-demo/build/echo-demo.component.wasm {{count}} {{size}}
+
+# Build the conformance-signalingd mailbox server (the two-process demos
+# rendezvous through it).
+[private]
+build-signalingd:
+    cargo build -p conformance-signalingd
+
+# Build the echo-remote guest component (one peer of the two-process echo
+# demo) into examples/echo-remote/build/echo-remote.component.wasm.
+[doc("Build the echo-remote guest component")]
+build-echo-remote:
+    cargo build --release -p echo-remote --target wasm32-unknown-unknown
+    mkdir -p examples/echo-remote/build
+    wasm-tools component new \
+        target/wasm32-unknown-unknown/release/echo_remote.wasm \
+        -o examples/echo-remote/build/echo-remote.component.wasm
+
+# Run the two-process echo demo under the Wasmtime host: start the signaling
+# server, then an answerer and an offerer as separate host processes that
+# rendezvous over HTTP and connect over a real WebRTC data channel.
+[doc("Run the two-process echo demo under the Wasmtime host")]
+demo-remote count="100" size="1024": build-echo-remote build-signalingd
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release -p wasmtime-webrtc-host --bin echo-remote
+    target/debug/conformance-signalingd --host 127.0.0.1 --port 0 > target/demo-remote-signalingd.log 2>&1 &
+    SIG=$!
+    trap 'kill $SIG 2>/dev/null || true' EXIT
+    for _ in $(seq 50); do
+        SERVER=$(sed -n 's/.*listening on \(http:[^ ]*\).*/\1/p' target/demo-remote-signalingd.log)
+        [ -n "$SERVER" ] && break
+        sleep 0.1
+    done
+    [ -n "$SERVER" ] || { echo "signaling server never reported a URL" >&2; exit 1; }
+    WEBRTC_INCLUDE_LOOPBACK=1 timeout 120 target/release/echo-remote \
+        examples/echo-remote/build/echo-remote.component.wasm \
+        --role answerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}} &
+    ANSWERER=$!
+    WEBRTC_INCLUDE_LOOPBACK=1 timeout 120 target/release/echo-remote \
+        examples/echo-remote/build/echo-remote.component.wasm \
+        --role offerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}}
+    wait $ANSWERER
+
+# Run the two-process echo demo under the Node host (transpiles the
+# echo-remote component; needs Node 24+ for JSPI).
+[doc("Run the two-process echo demo under the Node host (Node 24+)")]
+demo-node-remote count="100" size="1024": build-signalingd build-echo-remote
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd jco-impl && npm run transpile-remote && cd ..
+    target/debug/conformance-signalingd --host 127.0.0.1 --port 0 > target/demo-remote-signalingd.log 2>&1 &
+    SIG=$!
+    trap 'kill $SIG 2>/dev/null || true' EXIT
+    for _ in $(seq 50); do
+        SERVER=$(sed -n 's/.*listening on \(http:[^ ]*\).*/\1/p' target/demo-remote-signalingd.log)
+        [ -n "$SERVER" ] && break
+        sleep 0.1
+    done
+    [ -n "$SERVER" ] || { echo "signaling server never reported a URL" >&2; exit 1; }
+    cd jco-impl
+    timeout 120 node --experimental-wasm-jspi src/run-remote.mjs \
+        --role answerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}} &
+    ANSWERER=$!
+    timeout 120 node --experimental-wasm-jspi src/run-remote.mjs \
+        --role offerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}}
+    wait $ANSWERER
+
+# Compose the fully in-guest echo-remote peer: the echo-remote guest plugged
+# with the rendezvous-http signaling client (wasi:http) and the wasip3-impl
+# connections provider (wasi:sockets), under the CLI driver. The result runs
+# one peer per plain `wasmtime run` with every capability satisfied by WASI.
+[doc("Compose the fully in-guest echo-remote peer (rendezvous-http + wasip3-impl)")]
+compose-echo-remote: build-echo-remote build-wasip3-provider
+    cargo build --release -p rendezvous-http -p echo-remote-driver --target wasm32-wasip2
+    wac plug examples/echo-remote/build/echo-remote.component.wasm \
+        --plug target/wasm32-wasip2/release/rendezvous_http.wasm \
+        -o target/echo-remote-rendezvous.wasm
+    wac plug target/echo-remote-rendezvous.wasm \
+        --plug target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm \
+        -o target/echo-remote-connections.wasm
+    wac plug target/wasm32-wasip2/release/echo_remote_driver.wasm \
+        --plug target/echo-remote-connections.wasm \
+        -o target/echo-remote-composed.wasm
+
+# Fully in-guest two-process integration test: two `wasmtime run` invocations
+# of the composed echo-remote peer connect over wasi:sockets UDP loopback and
+# rendezvous over wasi:http against the signaling server — the entire WebRTC
+# stack and its signaling run inside wasm. Needs `wasmtime` (v46+) and `wac`.
+[doc("Two-process in-guest integration test: composed echo-remote peers over wasi:http signaling")]
+test-echo-remote-composed: compose-echo-remote build-signalingd
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target/debug/conformance-signalingd --host 127.0.0.1 --port 0 > target/demo-remote-signalingd.log 2>&1 &
+    SIG=$!
+    trap 'kill $SIG 2>/dev/null || true' EXIT
+    for _ in $(seq 50); do
+        SERVER=$(sed -n 's/.*listening on \(http:[^ ]*\).*/\1/p' target/demo-remote-signalingd.log)
+        [ -n "$SERVER" ] && break
+        sleep 0.1
+    done
+    [ -n "$SERVER" ] || { echo "signaling server never reported a URL" >&2; exit 1; }
+    timeout 120 wasmtime run -W component-model-async=y -S cli -S p3 -S http -S inherit-network \
+        target/echo-remote-composed.wasm \
+        --role answerer --server "$SERVER" --room echo-composed --count 20 --size 512 &
+    ANSWERER=$!
+    timeout 120 wasmtime run -W component-model-async=y -S cli -S p3 -S http -S inherit-network \
+        target/echo-remote-composed.wasm \
+        --role offerer --server "$SERVER" --room echo-composed --count 20 --size 512
+    wait $ANSWERER
+
+# Build the wasip3 provider component (the whole WebRTC stack runs in-guest;
+# it exports `lann:webrtc-datachannels/connections`) into
+# target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm.
+[doc("Build the wasip3 provider component (exports connections)")]
+build-wasip3-provider:
+    cargo build --release -p wasip3-webrtc-datachannels --target wasm32-wasip2
+
+# Build the webrtc-consumer component (imports `connections`) into
+# target/wasm32-wasip2/release/webrtc_consumer.wasm.
+[doc("Build the webrtc-consumer component (imports connections)")]
+build-webrtc-consumer:
+    cargo build --release -p webrtc-consumer --target wasm32-wasip2
+
+# Compose the consumer with the provider (`wac plug`) into
+# target/webrtc-composed.wasm. The consumer's `connections` import is satisfied
+# by the provider's export, yielding one self-contained component.
+[doc("Compose the consumer with the provider into target/webrtc-composed.wasm")]
+compose-webrtc: build-wasip3-provider build-webrtc-consumer
+    wac plug target/wasm32-wasip2/release/webrtc_consumer.wasm \
+        --plug target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm \
+        -o target/webrtc-composed.wasm
+
+# Basic in-guest integration test: run the composed consumer+provider under
+# `wasmtime`, standing up two peers that connect over loopback entirely inside
+# wasm and exchange a message each way. Requires `wasmtime` (v46+) and `wac`.
+# `timeout` bounds the whole run so a stuck handshake fails the recipe instead
+# of hanging CI; the guest itself also bounds `wait-connected` internally.
+[doc("In-guest integration test: the composed consumer+provider round trip under wasmtime")]
+test-webrtc-composed: compose-webrtc
+    timeout 120 wasmtime run -W component-model-async=y -S cli -S p3 -S inherit-network \
+        target/webrtc-composed.wasm

@@ -191,6 +191,14 @@ pub const TESTS: &[&str] = &[
     "peer-close-releases",
     "peer-invalid-sdp",
     "interop-handshake",
+    "config-defaults",
+    "config-setters-contract",
+    "config-invalid-ice-server",
+    "connection-state-changes",
+    "channel-state-changes",
+    "channel-post-close-receive",
+    "channel-drop-implies-close",
+    "channel-close-flush",
 ];
 
 /// The two-peer behavioral subset of [`TESTS`]: the tests whose outcome depends
@@ -210,16 +218,13 @@ pub const TWO_PEER_TESTS: &[&str] = &[
     "concurrent-send-receive",
     "max-retransmits-accepted",
     "interop-handshake",
+    "channel-close-flush",
 ];
 
 /// How a test is orchestrated across guest instances.
 pub enum Plan {
     /// A single `both` instance stands up both peers in-process (no signaling).
     InProcess,
-    /// A single instance that the guest reports `skipped` regardless of role.
-    /// (No registered test currently uses this plan; it remains for tests a
-    /// future corpus cannot run on any target.)
-    Skip,
     /// Two instances — an offerer and an answerer — share one signaling room.
     TwoPeer,
 }
@@ -245,7 +250,14 @@ pub fn plan_for(test_id: &str) -> Plan {
         | "receive-buffer-overflow"
         | "send-via-stream"
         | "receive-via-stream"
-        | "receive-via-stream-once" => Plan::InProcess,
+        | "receive-via-stream-once"
+        | "config-defaults"
+        | "config-setters-contract"
+        | "config-invalid-ice-server"
+        | "connection-state-changes"
+        | "channel-state-changes"
+        | "channel-post-close-receive"
+        | "channel-drop-implies-close" => Plan::InProcess,
         _ => Plan::TwoPeer,
     }
 }
@@ -273,6 +285,34 @@ pub fn params_for(test_id: &str) -> (u32, u32) {
 /// flooding the default 8 MiB bound (which starves concurrently running tests
 /// of the corpus).
 pub const CONFORMANCE_MAX_INBOUND_BUFFER_BYTES: u32 = 512 * 1024;
+
+/// The per-test hang guard shared by the loopback adapters. Generous:
+/// everything an attempt does is on the clock — including any out-of-process
+/// peer startup (a `wasmtime run` of a composed component, a fresh Node
+/// process compiling JSPI wasm, or a whole headless Chromium) under 4-wide CI
+/// contention — while the implementations' shorter `wait-connected` timeouts
+/// (20-30s) fire first, so a genuine connection failure still surfaces as a
+/// WIT outcome rather than tripping this bound.
+pub const LOOPBACK_TEST_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// The `wasmtime run` invocation prefix (subcommand and flags) shared by every
+/// runner of the composed wasip3 conformance component: the component-model
+/// async ABI plus the WASIp3 host APIs (`cli`, `p3`, `http`) and network
+/// access for the provider's `wasi:sockets` UDP and the mailbox's outgoing
+/// HTTP.
+pub const COMPOSED_WASMTIME_RUN_FLAGS: &[&str] = &[
+    "run",
+    "-W",
+    "component-model-async=y",
+    "-S",
+    "cli",
+    "-S",
+    "p3",
+    "-S",
+    "http",
+    "-S",
+    "inherit-network",
+];
 
 /// The environment variable naming the implementations' inbound-buffer bound.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
@@ -410,39 +450,104 @@ pub async fn run_test(
 
 // ----- corpus runner ----------------------------------------------------------
 
+/// The default `--jobs` for adapters whose tests run in-process or as light
+/// subprocesses (the wasmtime and wasip3-guest loopback adapters):
+/// 3 × the cores available to this process, clamped to [2, 12].
+///
+/// The corpus is I/O-bound (handshakes, timers, and the fixed-length
+/// `error-timed-out` probe dominate wall time), so the optimum exceeds the
+/// core count. Measured on the loopback corpus pinned to 2 CPUs (`taskset`,
+/// matching hosted CI runners): wall time improves steeply up to 3 × cores
+/// and is within ~2s of the corpus's intrinsic floor there, while higher
+/// values buy <2s more and add contention that has previously produced
+/// hang-guard timeouts. `available_parallelism` respects the process's CPU
+/// affinity mask, so `taskset`/cgroup-limited environments size accordingly.
+pub fn default_jobs() -> usize {
+    scaled_jobs(3, 12)
+}
+
+/// The default `--jobs` for adapters that boot a heavyweight process per test
+/// attempt (a JSPI Node runtime or a headless Chromium for the jco targets and
+/// the interop pairs): 2 × the available cores, clamped to [2, 8].
+///
+/// These per-test runtimes put startup on the hang-guard clock, and their
+/// flake history is load-induced timeouts — so the multiplier is
+/// conservative: 4 jobs on 2-core CI (the load proven stable there), scaling
+/// with larger machines.
+pub fn default_jobs_process_heavy() -> usize {
+    scaled_jobs(2, 8)
+}
+
+fn scaled_jobs(multiplier: usize, max: usize) -> usize {
+    let cores = std::thread::available_parallelism().map_or(1, |n| n.get());
+    (cores * multiplier).clamp(2, max)
+}
+
 /// Run `tests` (each via `run`, filtered by `only` when non-empty) concurrently,
 /// bounded by `jobs`, logging each result as it lands.
 ///
 /// Tests are independent — fresh instances/processes, a fresh room per test —
 /// so they can safely overlap; `buffered` preserves the registry order of the
-/// results.
+/// results. An `only` filter that selects nothing is an error: silently
+/// running zero tests would let a typo'd id produce an empty (green) report.
 pub async fn run_corpus<F, Fut>(
     tests: &[&'static str],
     only: &[String],
     jobs: usize,
     run: F,
-) -> Vec<RawResult>
+) -> Result<Vec<RawResult>>
 where
     F: Fn(&'static str) -> Fut,
     Fut: Future<Output = RawResult>,
 {
-    futures::stream::iter(
-        tests
+    let selected: Vec<&'static str> = tests
+        .iter()
+        .copied()
+        .filter(|test_id| only.is_empty() || only.iter().any(|t| t == test_id))
+        .collect();
+    anyhow::ensure!(
+        !selected.is_empty(),
+        "--only selected no tests (registered: {})",
+        tests.join(", ")
+    );
+    Ok(futures::stream::iter(selected)
+        .map(|test_id| {
+            let fut = run(test_id);
+            async move {
+                let result = fut.await;
+                eprintln!("{test_id} … {:?}", result.status);
+                result
+            }
+        })
+        .buffered(jobs.max(1))
+        .collect()
+        .await)
+}
+
+/// Verify the guest's `list-tests` ids match this adapter's registered corpus
+/// (`tests`) exactly, so the hand-mirrored lists cannot silently drift from
+/// the corpus the guest actually implements.
+pub fn verify_corpus(guest_ids: &[String], tests: &[&'static str]) -> Result<()> {
+    let guest: std::collections::BTreeSet<&str> = guest_ids.iter().map(|s| s.as_str()).collect();
+    let local: std::collections::BTreeSet<&str> = tests.iter().copied().collect();
+    let missing_here: Vec<&&str> = guest.difference(&local).collect();
+    let missing_in_guest: Vec<&&str> = local.difference(&guest).collect();
+    anyhow::ensure!(
+        missing_here.is_empty() && missing_in_guest.is_empty(),
+        "adapter test list diverges from the guest's list-tests export: \
+         in guest but not adapter: [{}]; in adapter but not guest: [{}]",
+        missing_here
             .iter()
-            .copied()
-            .filter(|test_id| only.is_empty() || only.iter().any(|t| t == test_id)),
-    )
-    .map(|test_id| {
-        let fut = run(test_id);
-        async move {
-            let result = fut.await;
-            eprintln!("{test_id} … {:?}", result.status);
-            result
-        }
-    })
-    .buffered(jobs.max(1))
-    .collect()
-    .await
+            .map(|s| **s)
+            .collect::<Vec<_>>()
+            .join(", "),
+        missing_in_guest
+            .iter()
+            .map(|s| **s)
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    Ok(())
 }
 
 // ----- signaling server -------------------------------------------------------

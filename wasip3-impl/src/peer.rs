@@ -1,14 +1,14 @@
 //! The runtime-agnostic sans-I/O peer: [`SansIoPeer`].
 //!
 //! This wraps an [`rtc`] `RTCPeerConnection` and exposes only what a driver
-//! needs — signaling primitives, the six sans-I/O stepping calls
-//! (`poll_transmit`/`handle_input`/`poll_timeout`/`handle_timeout` and the
+//! needs — signaling primitives, the sans-I/O stepping calls
+//! (`poll_transmit`/`handle_input`/`handle_timeout` and the
 //! drained events), and message sends. It performs **no** I/O and awaits
 //! nothing, so the same core can be fed by the in-guest `wasi:sockets` driver
 //! (see [`crate::runtime`]).
 //!
-//! The sans-I/O model has no OS interface enumeration (the `rtc` fork stubs
-//! `ifaces()` out on wasm), so candidates are supplied explicitly by the driver
+//! The sans-I/O model has no OS interface enumeration (`rtc` stubs `ifaces()`
+//! out on wasm), so candidates are supplied explicitly by the driver
 //! via [`SansIoPeer::add_local_host_candidate`] rather than gathered.
 
 use std::net::SocketAddr;
@@ -78,10 +78,12 @@ pub struct SansIoPeer {
 }
 
 impl SansIoPeer {
-    /// Create an **answerer**: a peer that begins with no data channels and is
-    /// expected to receive an offer, adopt the remote-created channel via
-    /// negotiation, and produce an answer.
-    pub fn answerer() -> Result<Self> {
+    /// Create a peer with no data channels. Either side of the exchange starts
+    /// here: an offerer adds a channel via
+    /// [`create_data_channel`](Self::create_data_channel) and produces an
+    /// offer; an answerer receives the offer, adopts the remote-created
+    /// channel via negotiation, and produces an answer.
+    pub fn new() -> Result<Self> {
         Ok(Self { pc: build_pc()? })
     }
 
@@ -108,29 +110,6 @@ impl SansIoPeer {
         let offer = self.pc.create_offer(None)?;
         self.pc.set_local_description(offer)?;
         local_sdp(&self.pc)
-    }
-
-    /// Create an **offerer** with a single in-band data channel of the given
-    /// `label`, and produce its SDP offer (already set as the local
-    /// description). Add a local candidate with
-    /// [`add_local_host_candidate`](Self::add_local_host_candidate) before
-    /// driving the peer.
-    pub fn offerer(
-        label: &str,
-        ordered: bool,
-        max_retransmits: Option<u16>,
-    ) -> Result<(Self, String)> {
-        let mut pc = build_pc()?;
-        let init = RTCDataChannelInit {
-            ordered,
-            max_retransmits,
-            ..Default::default()
-        };
-        pc.create_data_channel(label, Some(init))?;
-        let offer = pc.create_offer(None)?;
-        pc.set_local_description(offer)?;
-        let sdp = local_sdp(&pc)?;
-        Ok((Self { pc }, sdp))
     }
 
     /// Apply the remote peer's SDP offer. Any ICE candidates embedded in the
@@ -222,13 +201,8 @@ impl SansIoPeer {
         });
     }
 
-    /// The next timer deadline, if the peer is waiting on one.
-    pub fn poll_timeout(&mut self) -> Option<Instant> {
-        self.pc.poll_timeout()
-    }
-
-    /// Notify the peer that the deadline from [`poll_timeout`](Self::poll_timeout)
-    /// has elapsed.
+    /// Notify the peer that time has advanced so its internal timers
+    /// (retransmits, keep-alives) can fire.
     pub fn handle_timeout(&mut self, now: Instant) {
         let _ = self.pc.handle_timeout(now);
     }
@@ -298,6 +272,15 @@ impl SansIoPeer {
         if let Some(mut dc) = self.pc.data_channel(id) {
             let _ = dc.close();
         }
+    }
+
+    /// Bytes handed to the channel's sends that SCTP has not yet released —
+    /// zero once everything queued has reached the wire (or been abandoned).
+    pub fn channel_outstanding_bytes(&mut self, id: RTCDataChannelId) -> usize {
+        self.pc
+            .data_channel(id)
+            .map(|dc| dc.outstanding_bytes())
+            .unwrap_or(0)
     }
 
     /// Close the peer connection.

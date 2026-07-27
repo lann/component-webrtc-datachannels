@@ -8,8 +8,6 @@
 //! client with `wasmtime run -S http`.
 //!
 //! Composed (`wac plug`) under the `echo-remote` guest's `rendezvous` import.
-//! The HTTP round-trip plumbing mirrors the conformance suite's
-//! `conformance-wasip3-mailbox` component, which speaks the same protocol.
 
 use std::cell::Cell;
 
@@ -86,10 +84,13 @@ struct HttpOutcome {
 /// Send one request through the WASIp3 HTTP client and collect the response.
 ///
 /// Every request carries an explicit `content-length` (the body is always
-/// fully known here, and usually empty): with a declared length the host
-/// frames the request by `content-length` and a zero-length body is complete
-/// on the wire immediately, avoiding the chunked-terminator race described in
-/// the conformance mailbox client this mirrors.
+/// fully known here, and usually empty). Without it, the wasip3 compat layer
+/// presents even an empty body as an open-ended stream and the host sends the
+/// request with `Transfer-Encoding: chunked`, whose late-written terminator
+/// races a server that responds without reading the request body (the RST it
+/// elicits can destroy the buffered response). With a declared length the
+/// host frames the request by `content-length` and a zero-length body is
+/// complete on the wire immediately.
 async fn round_trip(
     method: http::Method,
     url: &str,

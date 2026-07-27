@@ -42,9 +42,6 @@ interface runner {
         message-count: u32,
         /// Payload size, in bytes, for size-parameterized tests.
         message-size: u32,
-        /// Whether to trickle ICE candidates (`true`) or embed them in the SDP
-        /// (`false`); a pure blob-schedule knob for `trickle-variants`.
-        trickle: bool,
     }
 
     /// The WIT-observable outcome of one test.
@@ -61,7 +58,8 @@ interface runner {
     }
 
     /// The corpus this guest can run, with each test's id and tags. Mirrors
-    /// `conformance/tests.toml` so the runner can cross-check the registry.
+    /// `conformance/tests.toml`; the adapters verify their registered test
+    /// lists against this export before every run.
     list-tests: func() -> list<test-descriptor>;
 
     /// Run one test by id with `config` and report its WIT-observable outcome.

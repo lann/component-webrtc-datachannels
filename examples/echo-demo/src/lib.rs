@@ -16,7 +16,7 @@
 //!
 //! all within a single cooperative async task (the loops run under
 //! `futures::join!`). The same component binary runs unchanged under the Node
-//! (`jco` + `@roamhq/wrtc`) host and the Wasmtime (`webrtc-rs`) host, which is
+//! (`jco` + `node-datachannel`) host and the Wasmtime (`webrtc-rs`) host, which is
 //! what demonstrates cross-implementation compatibility.
 
 wit_bindgen::generate!({
@@ -112,8 +112,8 @@ impl Guest for Component {
 /// ICE — and return both peers with the two ends of the negotiated channel.
 async fn connect_pair() -> Result<(PeerConnection, PeerConnection, DataChannel, DataChannel), Error>
 {
-    let offerer = PeerConnection::new();
-    let answerer = PeerConnection::new();
+    let offerer = PeerConnection::new(None);
+    let answerer = PeerConnection::new(None);
 
     let options = DataChannelOptions::new();
     options.set_label("echo");
@@ -127,8 +127,10 @@ async fn connect_pair() -> Result<(PeerConnection, PeerConnection, DataChannel, 
     answerer.set_local_description(answer.clone()).await?;
     offerer.set_remote_description(answer).await?;
 
-    // Trickle each side's candidates to the other; the stream ending is the
-    // end-of-candidates signal.
+    // Relay each side's candidates to the other. This batches rather than
+    // trickles: `collect_candidates` waits for the stream to end (the
+    // end-of-candidates signal) before any are added — fine here, where both
+    // peers live in one instance and gathering needs no remote input.
     for candidate in collect_candidates(offerer.local_ice_candidates()).await {
         answerer.add_ice_candidate(candidate).await?;
     }

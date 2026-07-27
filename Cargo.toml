@@ -13,10 +13,26 @@ members = [
     "conformance/signaling/server",
     "conformance/guest",
     "conformance/adapters/common",
+    "conformance/adapters/reference",
     "conformance/adapters/wasmtime",
     "conformance/adapters/wasip3",
     "conformance/adapters/wasip3/mailbox",
     "conformance/adapters/wasip3/driver",
+]
+# The crates cargo operates on when invoked without a package selection: the
+# native (host-target) crates. The rest are wasm-only components that must be
+# built with an explicit `-p <crate> --target wasm32-...`, so bare
+# `cargo clippy` / `cargo nextest run` / `cargo test` cover exactly the native
+# set instead of needing a per-crate `--exclude` list.
+default-members = [
+    "wasmtime-impl",
+    "examples/wasmtime-demo",
+    "conformance/runner",
+    "conformance/signaling/server",
+    "conformance/adapters/common",
+    "conformance/adapters/reference",
+    "conformance/adapters/wasmtime",
+    "conformance/adapters/wasip3",
 ]
 resolver = "2"
 

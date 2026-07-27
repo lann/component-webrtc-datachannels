@@ -11,6 +11,24 @@
 //! [`add_to_linker`] to satisfy the `types` and `connections` imports with a
 //! real WebRTC/SCTP data channel.
 //!
+//! A host generating its own bindings with `wasmtime::component::bindgen!`
+//! must map the `connections` resources onto this crate's host types:
+//!
+//! ```text
+//! with: {
+//!     "lann:webrtc-datachannels/connections.data-channel-options":
+//!         wasmtime_webrtc_datachannels::DataChannelOptions,
+//!     "lann:webrtc-datachannels/connections.data-channel":
+//!         wasmtime_webrtc_datachannels::DataChannel,
+//!     "lann:webrtc-datachannels/connections.peer-connection":
+//!         wasmtime_webrtc_datachannels::PeerConnection,
+//! },
+//! ```
+//!
+//! The crate has no tests of its own: its behavior is asserted end to end by
+//! the conformance suite (`conformance/`) and the demo-host integration tests
+//! (`examples/wasmtime-demo/tests`).
+//!
 //! [`wasmtime_wasi_http::p3`]: https://docs.rs/wasmtime-wasi-http
 
 pub mod bindings;
@@ -18,8 +36,9 @@ mod data_channel;
 mod error;
 mod host;
 mod peer_connection;
+mod state_watch;
 
-pub use data_channel::{DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES, MAX_INBOUND_BUFFER_ENV};
+pub use data_channel::{DataChannel, DEFAULT_MAX_INBOUND_BUFFER_BYTES};
 pub use error::{WebrtcError, WebrtcResult};
 pub use peer_connection::PeerConnection;
 
@@ -49,8 +68,8 @@ pub struct WebrtcIceServer {
 ///
 /// The default value reproduces the crate's built-in behavior: bind a single
 /// ephemeral UDP socket on IPv4 loopback, no STUN/TURN servers, and the `all`
-/// ICE transport policy. The conformance netns lab (see `conformance/README.md`
-/// Phase 5) overrides these to bind a scenario-specific interface address and to
+/// ICE transport policy. The conformance netns lab (see `conformance/README.md`)
+/// overrides these to bind a scenario-specific interface address and to
 /// point at a STUN/TURN server, forcing server-reflexive or relay candidate
 /// paths.
 #[derive(Clone, Debug, Default)]
@@ -80,16 +99,34 @@ impl WebrtcIceConfig {
 /// `WasiHttpCtx`); it exists so hosts have a stable place to grow configuration
 /// without changing the [`WasiWebrtcView`] shape.
 ///
-/// The only knob so far is the [`SettingEngine`] hook (see
-/// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue of
-/// wasmtime-wasi-http's `WasiHttpHooks`: the crate itself hardcodes no
-/// environment-driven ICE behavior, leaving loopback and similar tweaks to
-/// demo/test hosts.
-#[derive(Clone, Default)]
+/// The knobs so far: the [`SettingEngine`] hook (see
+/// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue
+/// of wasmtime-wasi-http's `WasiHttpHooks`; the [`WebrtcIceConfig`] ICE
+/// server configuration (see [`set_ice_config`](Self::set_ice_config)); the
+/// `wait-connected` timeout (see
+/// [`set_connect_timeout`](Self::set_connect_timeout)); and the per-channel
+/// inbound buffer bound (see
+/// [`set_max_inbound_buffer_bytes`](Self::set_max_inbound_buffer_bytes)). The
+/// crate reads no ambient environment: every knob is set through this context
+/// by the embedding host, which owns any env-driven configuration.
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct WasiWebrtcCtx {
     setting_engine_hook: Option<SettingEngineHook>,
     ice_config: WebrtcIceConfig,
+    connect_timeout: std::time::Duration,
+    max_inbound_buffer_bytes: usize,
+}
+
+impl Default for WasiWebrtcCtx {
+    fn default() -> Self {
+        Self {
+            setting_engine_hook: None,
+            ice_config: WebrtcIceConfig::default(),
+            connect_timeout: peer_connection::DEFAULT_CONNECT_TIMEOUT,
+            max_inbound_buffer_bytes: data_channel::DEFAULT_MAX_INBOUND_BUFFER_BYTES,
+        }
+    }
 }
 
 impl std::fmt::Debug for WasiWebrtcCtx {
@@ -142,8 +179,8 @@ impl WasiWebrtcCtx {
     /// context creates (bind addresses, STUN/TURN servers, relay-only policy).
     ///
     /// The default leaves the crate's built-in loopback behavior unchanged; the
-    /// conformance netns lab overrides it per scenario (see `conformance/README.md`
-    /// Phase 5).
+    /// conformance netns lab overrides it per scenario (see
+    /// `conformance/README.md`).
     pub fn set_ice_config(&mut self, config: WebrtcIceConfig) {
         self.ice_config = config;
     }
@@ -152,6 +189,32 @@ impl WasiWebrtcCtx {
     /// apply it without holding a borrow of the context.
     pub fn ice_config(&self) -> WebrtcIceConfig {
         self.ice_config.clone()
+    }
+
+    /// Set how long `peer-connection.wait-connected` waits before failing with
+    /// `error.timed-out` (the WIT leaves the bound implementation-defined).
+    /// Default: 30 seconds.
+    pub fn set_connect_timeout(&mut self, timeout: std::time::Duration) {
+        self.connect_timeout = timeout;
+    }
+
+    /// The configured `wait-connected` timeout.
+    pub fn connect_timeout(&self) -> std::time::Duration {
+        self.connect_timeout
+    }
+
+    /// Set the per-channel inbound buffer bound, in payload bytes (see the
+    /// `data-channel` WIT docs for the overflow contract). Default:
+    /// [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. The crate itself never reads the
+    /// environment; a host offering the bound as an env knob reads and
+    /// validates the value itself and applies it here.
+    pub fn set_max_inbound_buffer_bytes(&mut self, bytes: usize) {
+        self.max_inbound_buffer_bytes = bytes;
+    }
+
+    /// The configured per-channel inbound buffer bound.
+    pub fn max_inbound_buffer_bytes(&self) -> usize {
+        self.max_inbound_buffer_bytes
     }
 }
 
@@ -210,6 +273,22 @@ impl Default for DataChannelOptions {
             max_retransmits: None,
         }
     }
+}
+
+/// Host state behind a `peer-connection-config` resource.
+///
+/// A configuration builder like [`DataChannelOptions`], but with fallible
+/// setters per the WIT contract: capability-gated options are rejected
+/// eagerly, so a config a connection is constructed with was accepted in
+/// full. This host supports STUN/TURN servers and the `relay` policy (both
+/// map onto [`WebrtcIceConfig`]), so its setters validate rather than
+/// reject: a malformed server entry fails `invalid`.
+#[derive(Clone, Debug, Default)]
+pub struct PeerConnectionConfig {
+    /// The accepted STUN/TURN servers.
+    pub ice_servers: Vec<WebrtcIceServer>,
+    /// Whether only relay (TURN) candidates may be used.
+    pub relay_only: bool,
 }
 
 /// Add the `lann:webrtc-datachannels` interfaces implemented by this crate

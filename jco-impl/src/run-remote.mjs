@@ -1,16 +1,32 @@
 // Driver for one peer of the two-process echo demo under the Node host: the
 // transpiled `echo-remote` component connects to a genuinely separate peer
 // instance through `rendezvous.js` (fetch against the local signaling server)
-// and `webrtc.js` (@roamhq/wrtc).
+// and `webrtc.js` (node-datachannel).
 //
-// Run two of these — an offerer and an answerer — against the same room:
+// Run two of these — an offerer and an answerer — against the same room
+// (or run both at once with `just examples::demo-node-remote`):
 //
 //   cargo run -p conformance-signalingd &   # or any server speaking the protocol
-//   node src/run-remote.mjs --role answerer --server http://127.0.0.1:8080 --room demo &
-//   node src/run-remote.mjs --role offerer  --server http://127.0.0.1:8080 --room demo
+//   npm run start-remote -- --role answerer --server http://127.0.0.1:8080 --room demo &
+//   npm run start-remote -- --role offerer  --server http://127.0.0.1:8080 --room demo
 import { parseArgs } from "node:util";
 
 import { remote } from "../generated-remote/echo-remote.js";
+import { setMaxInboundBufferBytes } from "../webrtc.js";
+
+// Honor the conventional inbound-buffer knob: the host module itself reads no
+// environment, so this Node host reads the variable, fails loud on a
+// malformed value, and applies it through the module's configure hook.
+const rawBufferBound = process.env.WEBRTC_MAX_INBOUND_BUFFER_BYTES;
+if (rawBufferBound !== undefined && rawBufferBound !== "") {
+  const bytes = Number(rawBufferBound);
+  if (!(bytes > 0)) {
+    throw new Error(
+      `invalid WEBRTC_MAX_INBOUND_BUFFER_BYTES ${JSON.stringify(rawBufferBound)}: expected a positive byte count`,
+    );
+  }
+  setMaxInboundBufferBytes(bytes);
+}
 
 const { values } = parseArgs({
   options: {

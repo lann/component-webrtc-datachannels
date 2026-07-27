@@ -3,17 +3,18 @@
 // URL of a signaling server, it runs each registered test to a raw
 // `pass`/`fail`/`skip` result and returns the adapter result rows.
 //
-// It mirrors the wasmtime adapter's orchestration (`conformance/adapters/
-// wasmtime/src/main.rs`): a test is run either as a single in-process `both`
-// instance (peer-connection API, error-taxonomy, and streaming probes), a
-// single instance the guest reports `skipped` regardless of role (currently
-// none), or two instances — an offerer and an answerer sharing one signaling
+// A test is run either as a single in-process `both`
+// instance (peer-connection API, error-taxonomy, and streaming probes) or as
+// two instances — an offerer and an answerer sharing one signaling
 // room — for the behavioral/interop tests. Tests run in a single
 // attempt (no retries): a nondeterministic failure is a real signal and must
 // surface, not be masked by a second attempt. The guest owns every assertion;
 // the driver only orchestrates and records.
 
-/** The registry of test ids, mirroring `conformance/tests.toml`. */
+/**
+ * The registry of test ids, mirroring `conformance/tests.toml` (verified
+ * against the guest's `list-tests` export before each run).
+ */
 export const TESTS = [
   "label-round-trip",
   "binary-message",
@@ -44,6 +45,14 @@ export const TESTS = [
   "peer-close-releases",
   "peer-invalid-sdp",
   "interop-handshake",
+  "config-defaults",
+  "config-setters-contract",
+  "config-invalid-ice-server",
+  "connection-state-changes",
+  "channel-state-changes",
+  "channel-post-close-receive",
+  "channel-drop-implies-close",
+  "channel-close-flush",
 ];
 
 // How a test is orchestrated across guest instances.
@@ -66,13 +75,18 @@ const IN_PROCESS = new Set([
   "send-via-stream",
   "receive-via-stream",
   "receive-via-stream-once",
+  "config-defaults",
+  "config-setters-contract",
+  "config-invalid-ice-server",
+  "connection-state-changes",
+  "channel-state-changes",
+  "channel-post-close-receive",
+  "channel-drop-implies-close",
 ]);
-const SKIP = new Set([]);
 
-/** The orchestration plan for a test id: `in-process`, `skip`, or `two-peer`. */
+/** The orchestration plan for a test id: `in-process` or `two-peer`. */
 export function planFor(testId) {
   if (IN_PROCESS.has(testId)) return "in-process";
-  if (SKIP.has(testId)) return "skip";
   return "two-peer";
 }
 
@@ -97,18 +111,17 @@ export function paramsFor(testId) {
 }
 
 // The inbound-buffer bound (in bytes) the jco runners configure through the
-// host's `WEBRTC_MAX_INBOUND_BUFFER_BYTES` knob: small enough that the
-// `receive-buffer-overflow` probe overflows it with a ~1 MiB flood instead of
-// flooding the default 8 MiB bound (which starves concurrently running tests
-// of the corpus). Mirrors the native adapters'
-// CONFORMANCE_MAX_INBOUND_BUFFER_BYTES.
+// host module's exported `setMaxInboundBufferBytes` hook: small enough that
+// the `receive-buffer-overflow` probe overflows it with a ~1 MiB flood
+// instead of flooding the default 8 MiB bound (which starves concurrently
+// running tests of the corpus).
 export const MAX_INBOUND_BUFFER_BYTES = 512 * 1024;
 
 // The hang guard for one test, bounding a run whose data-channel wait never
 // resolves. Generous: the whole attempt is on the clock under 4-wide CI
 // contention, while the host's shorter `wait-connected` timeout fires first,
 // so a genuine connection failure still surfaces as a WIT outcome rather than
-// tripping this bound. Mirrors the native adapters' TEST_TIMEOUT.
+// tripping this bound.
 const TEST_TIMEOUT_MS = 90_000;
 
 /** Build a test config for one instance. */
@@ -119,7 +132,6 @@ function makeConfig(role, base, room, count, size) {
     room,
     messageCount: count,
     messageSize: size,
-    trickle: true,
   };
 }
 
@@ -134,7 +146,7 @@ function withTimeout(promise, ms, message) {
 
 /**
  * Fold two per-instance results into one: any fail loses, else any skip, else
- * pass. Mirrors the wasmtime adapter's `fold_two`.
+ * pass.
  */
 function foldTwo(offerer, answerer) {
   if (offerer.tag === "fail" && answerer.tag === "fail") {
@@ -174,10 +186,8 @@ async function runTest(newInstance, base, testId, roomSeq) {
           ]);
           return foldTwo(offerer, answerer);
         }
-        case "in-process":
+        default: // in-process
           return runInstance(newInstance, testId, makeConfig("both", base, room, count, size));
-        default: // skip
-          return runInstance(newInstance, testId, makeConfig("offerer", base, room, count, size));
       }
     })();
     result = await withTimeout(run, TEST_TIMEOUT_MS, "attempt timed-out");
@@ -202,13 +212,36 @@ async function runTest(newInstance, base, testId, roomSeq) {
  *   factory producing a fresh guest instance
  * @param {string[]} [opts.only] run only these test ids (empty => all)
  * @param {number} [opts.jobs] how many tests to run concurrently; each test's
- *   peers use their own signaling room, so tests are independent
+ *   peers use their own signaling room, so tests are independent. The
+ *   launchers (run-node.mjs / run-browser.mjs) pass a core-scaled default
  * @param {(msg: string) => void} [opts.log] progress logger
  * @returns {Promise<Array<{ test_id: string, status: string, detail?: string }>>}
  */
 export async function runCorpus({ base, newInstance, only = [], jobs = 4, log = () => {} }) {
+  // Verify the registered corpus matches the guest's list-tests export before
+  // running anything, so a drifted mirror fails fast and loudly.
+  {
+    const instance = await newInstance();
+    const guest = new Set((await instance.runner.listTests()).map((t) => t.id));
+    const local = new Set(TESTS);
+    const missingHere = [...guest].filter((id) => !local.has(id));
+    const missingInGuest = [...local].filter((id) => !guest.has(id));
+    if (missingHere.length || missingInGuest.length) {
+      throw new Error(
+        "driver test list diverges from the guest's list-tests export: " +
+          `in guest but not driver: [${missingHere.join(", ")}]; ` +
+          `in driver but not guest: [${missingInGuest.join(", ")}]`,
+      );
+    }
+  }
+
   const roomSeq = { n: 0 };
   const ids = TESTS.filter((testId) => !only.length || only.includes(testId));
+  // An `only` filter that selects nothing is an error: silently running zero
+  // tests would let a typo'd id produce an empty (green) report.
+  if (!ids.length) {
+    throw new Error(`--only selected no tests (registered: ${TESTS.join(", ")})`);
+  }
   const results = new Array(ids.length);
   let next = 0;
   const worker = async () => {

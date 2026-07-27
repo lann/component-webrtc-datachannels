@@ -1,27 +1,37 @@
 name: Conformance
 
-# The conformance suite (see conformance/README.md). The `matrix` job builds the
-# conformance guest once and runs the loopback scenarios across all enabled
-# targets, including the pairwise interop matrix, uploading the matrix artifact
-# and failing on any unexpected status. The `shadow-lab` job runs the two-peer
-# corpus for the wasmtime and wasip3-guest targets over a routed, non-loopback
-# path inside the Shadow network simulator, which needs no root or network
-# namespaces and is deterministic.
+# The conformance suite (see conformance/README.md), structured as
+# build-once/run-many: the `build` job compiles every artifact the suite
+# executes (release adapter binaries, the guest/composed wasm components, the
+# jco transpile output, and the debug signalingd/runner) and hands them to the
+# runner jobs as a tarball artifact, so the Rust dependency tree is compiled —
+# and cached — exactly once per run.
 #
-# The netns lab (`just conformance-netns`, `just conformance-nat`) — the
+# The `matrix` job runs the loopback scenarios across all enabled targets,
+# including the interop matrix, uploading the matrix artifact and
+# failing on any unexpected status. The `shadow-lab` job runs the two-peer
+# corpus for the wasmtime, wasip3-guest, and reference targets — plus the
+# wasmtime <-> wasip3-guest interop pair in both orders — over a routed,
+# non-loopback path inside the Shadow network simulator, which needs no root
+# or network namespaces and is deterministic.
+#
+# The netns lab (`just conformance::netns`, `just conformance::nat`) — the
 # higher-fidelity real-kernel environment with STUN/TURN/NAT candidate paths —
 # is workstation-only and is not exercised in CI; Shadow provides CI's
 # non-loopback coverage.
 #
 # Enabled targets: wasmtime (native webrtc-rs), jco-node (the browser-first
 # host transpiled by jco, under Node 24+ with --experimental-wasm-jspi and
-# @roamhq/wrtc), jco-browser (the same host in headless Chromium, which has
+# node-datachannel), jco-browser (the same host in headless Chromium, which has
 # JSPI natively), wasip3-guest (the conformance guest composed via `wac plug`
 # with the wasip3-impl provider — the sans-I/O rtc stack over WASIp3
 # wasi:sockets — plus an in-guest wasi:http mailbox client and a CLI driver,
-# run under `wasmtime run`), and the cross-runtime interop pairs
-# `wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser` (one headless-Chromium
-# instance per test), and `wasmtime`<->`wasip3-guest`, each in both orders.
+# run under `wasmtime run`), and reference (the non-wasm reference peer: a
+# native binary driving Google's libwebrtc via LiveKit's Rust bindings). The
+# interop matrix
+# anchors every target against the reference peer in both orders (jco-browser
+# at handshake-only smoke scope) and retains the `wasmtime`<->`jco-node` and
+# `wasmtime`<->`wasip3-guest` implementation pairs.
 
 on:
   push:
@@ -33,12 +43,11 @@ permissions:
   contents: read
 
 jobs:
-  # Every PR. Builds the conformance guest and runs the enabled targets
-  # (wasmtime, jco-node, jco-browser, wasip3-guest, and the wasmtime<->jco-node
-  # interop pair) over loopback via `just conformance`.
-  matrix:
+  # Compile everything the runner jobs execute (`just conformance::build-all`)
+  # and upload it as one tarball artifact. This is the only job in this
+  # workflow with a cargo cache.
+  build:
     runs-on: ubuntu-latest
-    # WebRTC handshakes can hang; cap the job so a stuck run fails fast.
     timeout-minutes: 30
     steps:
       - name: Checkout code
@@ -47,11 +56,8 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      # jco's async ABI always uses JSPI (WebAssembly.Suspending), which Node
-      # only exposes on 24+ behind --experimental-wasm-jspi. The jco-node target
-      # and the jco-node half of the interop pair run the guest under Node, so
-      # the driver node must be 24+. (The jco-browser target runs the guest in
-      # headless Chrome, which has JSPI natively.)
+      # The jco transpile of the conformance guest runs here (Node only; no
+      # JSPI or Chrome needed at build time).
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -62,32 +68,88 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          # One cache entry per job: GitHub caches are immutable per key, so a
-          # key shared across jobs is only ever saved by whichever job finishes
-          # first. This job's artifact set (release-profile natives plus the
-          # wasm32-unknown-unknown / wasm32-wasip2 guest builds) barely overlaps
-          # the other jobs', so under a shared key it recompiled every
-          # dependency on every run and could never save the result.
-          shared-key: conformance-matrix
-          cache-all-crates: true
+          shared-key: conformance-build
+          # Save only on main: PR jobs restore main's cache (falling back to a
+          # prefix match when the PR changes Cargo.lock) but never save, so PR
+          # branches don't multiply cache entries toward the repository's
+          # 10 GB cap and evict the caches every run depends on.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: ./scripts/setup.sh
+        run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
         # cargo-binstall resolves releases through api.github.com; unauthenticated
         # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
         # (intermittent 403s). The token moves it to the per-token limit.
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Test signaling server
-        run: cargo nextest run -p conformance-signalingd
+      - name: Build conformance artifacts
+        run: just conformance::build-all
 
-      # `just conformance` runs the jco adapters (Node + headless Chrome) and the
-      # interop pair, all of which invoke `node --experimental-wasm-jspi`. The
-      # setup-node step above puts a JSPI-capable Node 24 on PATH; the interop
-      # orchestrator honours CONFORMANCE_NODE if a specific node is needed.
+      # Tar (rather than upload the paths directly) to preserve the executable
+      # bits, which upload-artifact's zip archive drops.
+      - name: Pack artifacts
+        run: |
+          tar czf /tmp/conformance-build.tar.gz \
+            target/release/conformance-adapter-wasmtime \
+            target/release/conformance-adapter-wasip3 \
+            target/release/conformance-interop \
+            target/release/conformance-peer \
+            target/release/conformance-reference-peer \
+            target/release/conformance-shadow \
+            target/debug/conformance-signalingd \
+            target/debug/conformance-runner \
+            conformance/guest/build/conformance-guest.component.wasm \
+            conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
+            conformance/adapters/jco/generated
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-build
+          path: /tmp/conformance-build.tar.gz
+          retention-days: 1
+
+  # Run the loopback suite (all targets + interop pairs) against the prebuilt
+  # artifacts. No Rust compilation happens here, so no cargo cache.
+  matrix:
+    needs: build
+    runs-on: ubuntu-latest
+    # WebRTC handshakes can hang; cap the job so a stuck run fails fast.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      # The jco-node target and the jco halves of the interop pairs run the
+      # guest under `node --experimental-wasm-jspi`, which needs Node 24+.
+      # (The jco-browser target runs in headless Chrome, which has JSPI
+      # natively.)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: conformance/adapters/jco/package-lock.json
+
+      # Runtime dependencies only: the adapters' npm packages (node-datachannel,
+      # playwright-core) and the `wasmtime` CLI the wasip3-guest target runs
+      # under. The netns lab never runs in CI, so its apt packages are skipped.
+      - name: Install dependencies
+        run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: conformance-build
+
+      - name: Unpack artifacts
+        run: tar xzf conformance-build.tar.gz
+
       - name: Run conformance suite
-        run: just conformance
+        run: just conformance::run-matrix
 
       - name: Upload conformance matrix
         if: always()
@@ -97,16 +159,12 @@ jobs:
           path: conformance/matrix.md
           if-no-files-found: warn
 
-  # The Shadow lab. Runs the two-peer corpus for the wasmtime and
-  # wasip3-guest targets inside the Shadow discrete-event network simulator
-  # (https://github.com/shadow/shadow), which gives the same "two peers on
-  # separate hosts over a non-loopback path" property as the netns lab but
-  # simulates the network in user space — so it needs NO root or network
-  # namespaces and is deterministic. Shadow ships no prebuilt binary, so it is
-  # built once by the shadow-build workflow and published to the `shadow-dev`
-  # prerelease; this job downloads that binary instead of rebuilding
-  # (see scripts/download-shadow.sh).
+  # Run the Shadow lab against the prebuilt artifacts. Shadow ships no
+  # prebuilt binary, so it is built once by the shadow-build workflow and
+  # published to the `shadow-dev` prerelease; this job downloads that binary
+  # instead of rebuilding (see scripts/download-shadow.sh).
   shadow-lab:
+    needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
     # Needed to read the `shadow-dev` release asset via `gh release download`.
@@ -115,17 +173,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          # One cache entry per job (see the matrix job for why a cross-job
-          # shared key never actually shared compiled artifacts).
-          shared-key: conformance-shadow-lab
-          cache-all-crates: true
 
       # Fetch the prebuilt Shadow from the `shadow-dev` prerelease into ~/.local
       # (bin/shadow + lib/libshadow_*.so) and put ~/.local/bin on PATH for the
@@ -136,31 +183,32 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/download-shadow.sh
 
-      # The Shadow lab needs the Rust/wasm toolchain (including wac and the
-      # wasm32-wasip2 target for the composed wasip3-guest peer) but no
-      # coturn/iproute2; skip the Node and netns-lab deps. Shadow was downloaded
-      # above.
+      # Runtime dependencies only (`wasmtime` for the composed wasip3-guest
+      # peer); skip the jco Node hosts' and netns-lab deps. Shadow was
+      # downloaded above; the reference peer arrives prebuilt in the artifact
+      # tarball.
       - name: Install dependencies
         run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
-        # cargo-binstall resolves releases through api.github.com; unauthenticated
-        # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
-        # (intermittent 403s). The token moves it to the per-token limit.
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Run Shadow lab
-        run: just conformance-shadow
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: conformance-build
 
-      # Classify the Shadow results (<target>-shadow.json for wasmtime and
-      # wasip3-guest) against the manifests and render the environment-columned
-      # matrix; exits nonzero on any failure.
+      - name: Unpack artifacts
+        run: tar xzf conformance-build.tar.gz
+
+      - name: Run Shadow lab
+        run: just conformance::run-shadow
+
+      # Classify the Shadow results (<target>-shadow.json for wasmtime,
+      # wasip3-guest, reference, and the wasmtime <-> wasip3-guest interop
+      # pair in both orders) against the manifests and render the
+      # environment-columned matrix; exits nonzero on any failure.
       - name: Classify Shadow matrix
-        run: |
-          cargo run -p conformance-runner -- \
-            --tests conformance/tests.toml \
-            --manifests conformance/manifests.toml \
-            --results conformance/results \
-            --matrix-out conformance/shadow-matrix.md
+        run: just conformance::classify-shadow
 
       - name: Upload Shadow matrix
         if: always()

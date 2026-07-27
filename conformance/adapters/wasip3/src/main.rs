@@ -24,18 +24,15 @@ use anyhow::Result;
 use clap::Parser;
 
 use conformance_adapter_common::{
-    fold_two, params_for, plan_for, run_corpus, write_report, AdapterReport, Plan, RawResult, TESTS,
+    fold_two, params_for, plan_for, run_corpus, write_report, AdapterReport, Plan, RawResult,
+    LOOPBACK_TEST_TIMEOUT, TESTS,
 };
 use conformance_adapter_wasip3::Wasip3Peer;
 
 // ----- orchestration --------------------------------------------------------
 
-/// The hang guard for one test. Generous: everything is on the clock —
-/// including the per-instance `wasmtime run` startup of the composed component
-/// — under 4-wide CI contention, while the provider's shorter `wait-connected`
-/// timeout fires first, so a genuine connection failure still surfaces as a
-/// WIT outcome rather than tripping this bound.
-const TEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The hang guard for one test (see [`LOOPBACK_TEST_TIMEOUT`]).
+const TEST_TIMEOUT: Duration = LOOPBACK_TEST_TIMEOUT;
 
 /// Run one test to a raw result (single attempt; no retries).
 async fn run_test(
@@ -63,10 +60,6 @@ async fn run_test(
                 peer.run(base_url, test_id, &room, "both", count, size)
                     .await
             }
-            Plan::Skip => {
-                peer.run(base_url, test_id, &room, "offerer", count, size)
-                    .await
-            }
         }
     })
     .await
@@ -80,7 +73,7 @@ async fn run_test(
 #[command(name = "conformance-adapter-wasip3", version)]
 struct Cli {
     /// Path to the fully composed component (guest + provider + mailbox +
-    /// driver; see `just build-conformance-wasip3`).
+    /// driver; see `just conformance::build-wasip3`).
     #[arg(
         long,
         default_value = "conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm"
@@ -109,9 +102,10 @@ struct Cli {
 
     /// How many tests to run concurrently. Each test's peers are separate
     /// `wasmtime run` processes with their own signaling room and ephemeral
-    /// ports, so tests are independent; the default keeps the number of
-    /// concurrent processes (two per test) modest.
-    #[arg(long, default_value_t = 4)]
+    /// ports, so tests are independent; the default scales with the cores
+    /// available to this process (see
+    /// `conformance_adapter_common::default_jobs`).
+    #[arg(long, default_value_t = conformance_adapter_common::default_jobs())]
     jobs: usize,
 }
 
@@ -122,7 +116,7 @@ async fn main() -> Result<()> {
 
     anyhow::ensure!(
         cli.component.exists(),
-        "composed component {} not found (run `just build-conformance-wasip3`)",
+        "composed component {} not found (run `just conformance::build-wasip3`)",
         cli.component.display()
     );
     let peer = Wasip3Peer {
@@ -134,11 +128,16 @@ async fn main() -> Result<()> {
     let server = conformance_adapter_common::start_signaling_server().await?;
     let base_url = server.base_url();
 
+    // Verify the registered corpus matches the guest's list-tests export
+    // before running anything, so a drifted mirror fails fast and loudly.
+    let guest_tests = peer.list_tests().await?;
+    conformance_adapter_common::verify_corpus(&guest_tests, TESTS)?;
+
     let room_seq = AtomicU64::new(0);
     let results = run_corpus(TESTS, &cli.only, cli.jobs, |test_id| {
         run_test(&peer, &base_url, test_id, &room_seq)
     })
-    .await;
+    .await?;
 
     server.shutdown().await;
 

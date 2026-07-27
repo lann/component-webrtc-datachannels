@@ -3,12 +3,14 @@
 //
 // This is the "browser-first" host: it is written against the standard W3C
 // WebRTC API (`RTCPeerConnection` / `RTCDataChannel`), so the same logic runs
-// in a browser. Under Node it is backed by `@roamhq/wrtc`, the maintained fork
-// of `node-webrtc`, which provides those globals-compatible classes. It
+// in a browser. Under Node it is backed by `node-datachannel` (Node bindings
+// for libdatachannel), whose polyfill provides those W3C-compatible classes.
+// It
 // implements the full `connections` surface — `data-channel-options`,
 // `data-channel`, and `peer-connection` (offer/answer, trickle ICE, incoming
-// channels) — and is kept in behavioral sync with its conformance twin,
-// `conformance/adapters/jco/webrtc.js`, which the conformance suite asserts.
+// channels) — and is the single host module shared by the demo hosts here and
+// the jco conformance adapters (`conformance/adapters/jco`), which import and
+// serve it from this path; the conformance suite asserts its behavior.
 //
 // `jco --map` wires this module in as the component's `connections` import.
 // Errors are surfaced to the guest by throwing the WIT `error` variant value
@@ -17,16 +19,23 @@
 
 // Resolve `RTCPeerConnection` isomorphically: a browser (including headless
 // Chromium) exposes the W3C class as a global; under Node it is provided by
-// `@roamhq/wrtc`, imported lazily so the bare specifier never has to resolve in
-// the browser. A missing Node dependency is surfaced with an actionable message
-// rather than a bare module-resolution error.
+// `node-datachannel`'s polyfill, imported lazily so the bare specifier never
+// has to resolve in the browser. A missing Node dependency is surfaced with an
+// actionable message rather than a bare module-resolution error.
+// Whether the backend resolves `createOffer` only once the connection has
+// negotiation material (true of libdatachannel, which derives descriptions
+// from the media/data sections that exist); see `createOffer` below.
+let offerNeedsChannel = false;
+
 async function resolveRTCPeerConnection() {
   if (globalThis.RTCPeerConnection) return globalThis.RTCPeerConnection;
   try {
-    return (await import("@roamhq/wrtc")).default.RTCPeerConnection;
+    const { RTCPeerConnection } = await import("node-datachannel/polyfill");
+    offerNeedsChannel = true;
+    return RTCPeerConnection;
   } catch (cause) {
     throw new Error(
-      "no RTCPeerConnection available: not running in a browser and @roamhq/wrtc " +
+      "no RTCPeerConnection available: not running in a browser and node-datachannel " +
         "could not be loaded (run `npm install` in jco-impl)",
       { cause },
     );
@@ -41,23 +50,42 @@ const MAX_BUFFERED_AMOUNT = 8 * 1024 * 1024;
 // How long `wait-connected` waits before failing with `error.timed-out`.
 const CONNECT_TIMEOUT_MS = 20_000;
 
+// How long `close()` keeps the underlying connection alive after the close is
+// observed locally, so messages already handed to the transport flush to the
+// wire before teardown discards the SCTP send queue (a reply or rendezvous
+// sentinel sent just before `close()` would otherwise be lost, stranding the
+// remote peer). The teardown runs as soon as every channel's `bufferedAmount`
+// drains, with this as the upper bound for a peer that never drains.
+const CLOSE_DRAIN_MS = 1_000;
+
 // The default bound on buffered inbound payload bytes awaiting `receive`.
 // There is no wire-level inbound backpressure (the W3C API has no read-side
 // flow control), so this bound is what protects memory from a slow guest
 // reader: exceeding it closes the channel and, once the buffered backlog
-// drains, `receive` fails with `error.receive-buffer-overflow`. Overridable —
-// primarily as a test knob, so the conformance overflow probe needs only a
-// small flood — through the `WEBRTC_MAX_INBOUND_BUFFER_BYTES` environment
-// variable (Node) or a global of the same name (browsers).
+// drains, `receive` fails with `error.receive-buffer-overflow`.
 const DEFAULT_MAX_INBOUND_BUFFERED = 8 * 1024 * 1024;
 
-/** The configured inbound buffer bound, resolved lazily per channel. */
-function maxInboundBuffered() {
-  const configured = Number(
-    globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES ??
-      globalThis.process?.env?.WEBRTC_MAX_INBOUND_BUFFER_BYTES,
-  );
-  return configured > 0 ? configured : DEFAULT_MAX_INBOUND_BUFFERED;
+/** The configured inbound buffer bound; channels capture it at creation. */
+let maxInboundBuffered = DEFAULT_MAX_INBOUND_BUFFERED;
+
+/**
+ * Set the per-channel inbound buffer bound, in payload bytes. This module
+ * reads no ambient configuration (no environment variables or globals): a
+ * host that offers the bound as a knob reads and validates the value itself
+ * and applies it here. Channels capture the bound at creation. Throws on
+ * anything but a positive finite number.
+ */
+export function setMaxInboundBufferBytes(bytes) {
+  if (!(Number.isFinite(bytes) && bytes > 0)) {
+    throw new Error(`invalid inbound buffer bound ${bytes}: expected a positive byte count`);
+  }
+  maxInboundBuffered = bytes;
+}
+
+/** The UTF-8 byte length of a string payload (the WIT bound counts bytes). */
+const utf8 = new TextEncoder();
+function utf8ByteLength(text) {
+  return utf8.encode(text).byteLength;
 }
 
 /**
@@ -109,6 +137,66 @@ export class DataChannelOptions {
 }
 
 /**
+ * The `peer-connection-config` resource: a configuration builder with
+ * fallible setters (the WIT `config-error` is thrown as `{ tag, val }`),
+ * following `wasi:http`'s `request-options` precedent. This host maps the
+ * accepted options straight onto the W3C `RTCConfiguration`, so both ICE
+ * servers and the `relay` policy are supported; setters validate eagerly (a
+ * malformed server entry throws `invalid` here, never at connection time).
+ */
+export class PeerConnectionConfig {
+  #iceServers = [];
+  #policy = "all";
+
+  /** The ICE servers a successful `setIceServers` stored. */
+  iceServers() {
+    return this.#iceServers;
+  }
+
+  /** @param {Array<{urls: string[], username: string, credential: string}>} servers */
+  setIceServers(servers) {
+    for (const server of servers) {
+      if (!server.urls.length) {
+        throw { tag: "invalid", val: "ice-server has no urls" };
+      }
+      for (const url of server.urls) {
+        if (!/^(stun|stuns|turn|turns):/.test(url)) {
+          throw {
+            tag: "invalid",
+            val: `ice-server url ${JSON.stringify(url)} has no stun:/stuns:/turn:/turns: scheme`,
+          };
+        }
+      }
+    }
+    this.#iceServers = servers;
+  }
+
+  /** The configured candidate policy. */
+  iceTransportPolicy() {
+    return this.#policy;
+  }
+
+  /** @param {"all" | "relay"} policy */
+  setIceTransportPolicy(policy) {
+    this.#policy = policy;
+  }
+
+  /** The `RTCConfiguration` these options describe. */
+  toConfiguration() {
+    const configuration = { iceTransportPolicy: this.#policy };
+    if (this.#iceServers.length) {
+      configuration.iceServers = this.#iceServers.map((server) => {
+        const entry = { urls: server.urls };
+        if (server.username) entry.username = server.username;
+        if (server.credential) entry.credential = server.credential;
+        return entry;
+      });
+    }
+    return configuration;
+  }
+}
+
+/**
  * The `data-channel` resource, implemented over an `RTCDataChannel`.
  *
  * `send`/`receive` each carry exactly one data-channel message, preserving
@@ -121,6 +209,12 @@ export class DataChannel {
   // Set once `receive-via-stream` has claimed the inbound messages; further
   // `receive`/`receive-via-stream` calls fail with `receiving-via-stream`.
   #streamClaimed = false;
+  /** True once `close()` has been called on this resource. */
+  #localClosed = false;
+  /** Take-once claim for `state-changes` (the WIT contract). */
+  #stateTaken = false;
+  /** Wake callbacks for the `state-changes` watch (see `stateStream`). */
+  #statePokes = new Set();
 
   constructor(channel) {
     this.#channel = channel;
@@ -155,6 +249,7 @@ export class DataChannel {
    * inbound messages).
    */
   async receive() {
+    if (this.#localClosed) throw { tag: "closed" };
     if (this.#streamClaimed) throw { tag: "receiving-via-stream" };
     return this.#incoming.next();
   }
@@ -198,6 +293,7 @@ export class DataChannel {
    * with it. The stream ends when the channel closes.
    */
   receiveViaStream() {
+    if (this.#localClosed) throw { tag: "closed" };
     if (this.#streamClaimed) throw { tag: "receiving-via-stream" };
     this.#streamClaimed = true;
     const incoming = this.#incoming;
@@ -239,13 +335,51 @@ export class DataChannel {
   }
 
   /**
-   * Dispose hook jco invokes when the guest drops the resource: close the
-   * channel so its native resources are released even if the guest never
-   * closed the owning peer connection.
+   * Close the data channel. The close is observed locally at once — pending
+   * and later operations fail `closed`, the unread inbound backlog is
+   * discarded per the WIT contract — while the native graceful close (which
+   * still transmits already-buffered data) runs the closing procedure;
+   * `state-changes` reports `closed` when it completes. Idempotent.
+   */
+  close() {
+    if (this.#localClosed) return;
+    this.#localClosed = true;
+    this.#incoming.discard();
+    try {
+      this.#channel.close();
+    } catch {
+      // Already closed.
+    }
+    for (const poke of this.#statePokes) poke();
+  }
+
+  /**
+   * A stream of lifecycle states: a coalescing watch whose first element
+   * reflects the state at the first read, ending after `closed` (see the WIT
+   * contract). Take-once: later calls return a stream that ends immediately.
+   */
+  stateChanges() {
+    if (this.#stateTaken) return emptyStream();
+    this.#stateTaken = true;
+    return stateStream(
+      () => this.#channel.readyState,
+      (wake) => {
+        for (const event of ["open", "closing", "close", "error"]) {
+          this.#channel.addEventListener(event, wake);
+        }
+        this.#statePokes.add(wake);
+      },
+      (state) => state === "closed",
+    );
+  }
+
+  /**
+   * Dispose hook jco invokes when the guest drops the resource: dropping
+   * without `close` implies `close`, per the WIT contract.
    */
   [Symbol.dispose]() {
     try {
-      this.#channel.close();
+      this.close();
     } catch {
       // Already closed.
     }
@@ -278,6 +412,8 @@ export class PeerConnection {
   #everConnected = false;
   /** True once `close()` has been called. */
   #closed = false;
+  /** True once the connection reached the terminal `failed` state. */
+  #failed = false;
   /** Take-once claims for the resource's two streams (see the WIT contract). */
   #candidatesTaken = false;
   #channelsTaken = false;
@@ -287,37 +423,86 @@ export class PeerConnection {
    * so a pending waiter would otherwise hang to its timeout.
    */
   #closeHooks = new Set();
+  /**
+   * Every underlying `RTCDataChannel` this connection created or adopted, so
+   * `close()` can close them all at once (see its doc).
+   */
+  #ownedChannels = new Set();
+  /** Take-once claim for `state-changes` (the WIT contract). */
+  #stateTaken = false;
+  /** Wake callbacks for the `state-changes` watch (see `stateStream`). */
+  #statePokes = new Set();
 
-  constructor() {
-    this.#pc = new RTCPeerConnection();
+  /** @param {PeerConnectionConfig | undefined} config */
+  constructor(config) {
+    // Every option a supplied config carries was accepted by its setters, so
+    // it maps straight onto the W3C configuration; `undefined` leaves the
+    // browser defaults.
+    this.#pc = new RTCPeerConnection(config ? config.toConfiguration() : undefined);
 
     // Latch `connected` as soon as it is reached, independent of any
     // `waitConnected` caller: the WIT contract keeps reporting a
     // once-connected connection as connected even after a later close.
+    // Latch `failed` the same way: a failed connection is terminally over
+    // per the WIT contract, so it makes the same observations `close()`
+    // makes — pending waiters are woken and the resource's streams end.
     const latch = () => {
       if (this.#isConnectedNow()) this.#everConnected = true;
+      if (!this.#failed && this.#isFailedNow()) {
+        this.#failed = true;
+        for (const hook of this.#closeHooks) hook();
+        this.#closeHooks.clear();
+        this.#candidates.end();
+        this.#channels.end();
+        for (const poke of this.#statePokes) poke();
+      }
     };
     this.#pc.addEventListener("connectionstatechange", latch);
     this.#pc.addEventListener("iceconnectionstatechange", latch);
 
-    // Local ICE candidates: a `null` (or empty) candidate ends the stream.
+    // Local ICE candidates. End-of-candidates has two W3C signals — a `null`
+    // (or empty) candidate in the `icecandidate` event, and `iceGatheringState`
+    // reaching `"complete"` — and backends differ in which they emit, so the
+    // stream ends on whichever arrives first. The node-datachannel backend
+    // emits only the gathering-state transition, and can be observed in the
+    // `"complete"` state before its trickled `icecandidate` events dispatch;
+    // the local description contains every gathered candidate by then, so the
+    // full set is recovered from it at that point (deduplicated against the
+    // trickled events, whose stragglers are dropped by the ended stream).
     this.#candidates = eventStream((push, end) => {
+      const seen = new Set();
+      const pushCandidate = (candidate, sdpMid, sdpMlineIndex) => {
+        // Normalize to the W3C `candidate:…` attribute form (some backends
+        // report the raw SDP line, `a=candidate:…`).
+        const normalized = candidate.trim().replace(/^a=/, "");
+        if (seen.has(normalized)) return;
+        seen.add(normalized);
+        push({ candidate: normalized, sdpMid, sdpMlineIndex });
+      };
       this.#pc.addEventListener("icecandidate", ({ candidate }) => {
         if (candidate == null || candidate.candidate === "") {
           end();
           return;
         }
-        push({
-          candidate: candidate.candidate,
-          sdpMid: candidate.sdpMid ?? undefined,
-          sdpMlineIndex: candidate.sdpMLineIndex ?? undefined,
-        });
+        pushCandidate(
+          candidate.candidate,
+          candidate.sdpMid ?? undefined,
+          candidate.sdpMLineIndex ?? undefined,
+        );
+      });
+      this.#pc.addEventListener("icegatheringstatechange", () => {
+        if (this.#pc.iceGatheringState !== "complete") return;
+        for (const c of sdpCandidates(this.#pc.localDescription?.sdp)) {
+          pushCandidate(c.candidate, c.sdpMid, c.sdpMlineIndex);
+        }
+        end();
       });
     });
 
     // Data channels opened by the remote peer.
     this.#channels = eventStream((push) => {
       this.#pc.addEventListener("datachannel", ({ channel }) => {
+        this.#ownedChannels.add(channel);
         push(new DataChannel(channel));
       });
     });
@@ -329,7 +514,7 @@ export class PeerConnection {
    * input handling, so a malformed argument after close is still `closed`).
    */
   #requireOpen() {
-    if (this.#closed || this.#pc.connectionState === "closed") {
+    if (this.#closed || this.#failed || this.#isFailedNow() || this.#pc.connectionState === "closed") {
       throw { tag: "closed" };
     }
   }
@@ -342,6 +527,12 @@ export class PeerConnection {
     );
   }
 
+  #isFailedNow() {
+    return (
+      this.#pc.connectionState === "failed" || this.#pc.iceConnectionState === "failed"
+    );
+  }
+
   /**
    * Create a data channel negotiated in-band with the peer.
    * @param {DataChannelOptions} options
@@ -350,6 +541,7 @@ export class PeerConnection {
     this.#requireOpen();
     try {
       const channel = this.#pc.createDataChannel(options.label(), options.toInit());
+      this.#ownedChannels.add(channel);
       return new DataChannel(channel);
     } catch (err) {
       throw { tag: "other", val: String(err) };
@@ -371,6 +563,15 @@ export class PeerConnection {
   async createOffer() {
     this.#requireOpen();
     try {
+      // A channel-less offer never resolves when the backend needs
+      // negotiation material, so give it an SCTP section: a pre-negotiated
+      // probe channel is invisible to the remote peer (never announced
+      // in-band; the WIT options surface cannot collide with its id). The id
+      // sits at the top of libdatachannel's default stream range, far above
+      // the in-band ids assigned from zero.
+      if (offerNeedsChannel && this.#ownedChannels.size === 0) {
+        this.#pc.createDataChannel("", { negotiated: true, id: 1023 });
+      }
       const offer = await this.#pc.createOffer();
       return { kind: "offer", sdp: offer.sdp };
     } catch (err) {
@@ -447,6 +648,32 @@ export class PeerConnection {
   }
 
   /**
+   * A stream of lifecycle states: a coalescing watch whose first element
+   * reflects the state at the first read, ending after a terminal state
+   * (`failed` or `closed` — see the WIT contract). The local `#closed` and
+   * `#failed` latches win over the live `connectionState`, so nothing is
+   * ever observed after a terminal state. Take-once: later calls return a
+   * stream that ends immediately.
+   */
+  stateChanges() {
+    if (this.#stateTaken) return emptyStream();
+    this.#stateTaken = true;
+    return stateStream(
+      () => {
+        if (this.#closed) return "closed";
+        if (this.#failed) return "failed";
+        return this.#pc.connectionState;
+      },
+      (wake) => {
+        this.#pc.addEventListener("connectionstatechange", wake);
+        this.#pc.addEventListener("iceconnectionstatechange", wake);
+        this.#statePokes.add(wake);
+      },
+      (state) => state === "failed" || state === "closed",
+    );
+  }
+
+  /**
    * Resolve once the connection reaches `connected`.
    *
    * `connected` is latched per the WIT contract: once the connection has ever
@@ -458,10 +685,7 @@ export class PeerConnection {
    */
   async waitConnected() {
     const pc = this.#pc;
-    const isFailed = () =>
-      pc.connectionState === "failed" ||
-      pc.iceConnectionState === "failed" ||
-      pc.connectionState === "closed";
+    const isFailed = () => this.#isFailedNow() || pc.connectionState === "closed";
 
     if (this.#isConnectedNow()) this.#everConnected = true;
     if (this.#everConnected) return;
@@ -501,21 +725,51 @@ export class PeerConnection {
    * Close the peer connection and any of its data channels. Idempotent; wakes
    * pending `waitConnected` callers (the W3C `close()` transitions the state
    * without firing events).
+   *
+   * The close is observed **locally** at once — methods fail `closed`, the
+   * resource's streams end, and every owned channel is closed (its graceful
+   * W3C `close()` still transmits already-buffered data) — but the
+   * connection-level teardown is deferred until every channel's
+   * `bufferedAmount` drains, bounded by `CLOSE_DRAIN_MS`: an immediate
+   * `pc.close()` discards the SCTP send queue, so a message sent just before
+   * `close()` (for example a rendezvous sentinel the remote peer still needs)
+   * would be lost.
    */
   close() {
     if (this.#closed) return;
     this.#closed = true;
-    this.#pc.close();
     for (const hook of this.#closeHooks) hook();
     this.#closeHooks.clear();
     this.#candidates.end();
     this.#channels.end();
+    for (const poke of this.#statePokes) poke();
+    // Close the channels now (keeping the post-close contract observable at
+    // once), then tear the connection down once their send buffers drain.
+    for (const channel of this.#ownedChannels) {
+      try {
+        channel.close();
+      } catch {
+        // Already closed.
+      }
+    }
+    const deadline = Date.now() + CLOSE_DRAIN_MS;
+    const drained = () =>
+      [...this.#ownedChannels].every((channel) => channel.bufferedAmount === 0);
+    const tick = setInterval(() => {
+      if (drained() || Date.now() >= deadline) {
+        clearInterval(tick);
+        this.#pc.close();
+      }
+    }, 10);
+    // Under Node, do not hold an exiting process open for the drain: process
+    // exit already flushed-or-lost everything this timer could affect.
+    tick.unref?.();
   }
 
   /**
    * Dispose hook jco invokes when the guest drops the resource: close the
-   * connection so `@roamhq/wrtc` tears down its native ICE/DTLS/SCTP threads
-   * and sockets even if the guest never called `close`.
+   * connection so `node-datachannel` tears down its native ICE/DTLS/SCTP
+   * threads and sockets even if the guest never called `close`.
    */
   [Symbol.dispose]() {
     try {
@@ -544,6 +798,7 @@ function eventStream(setup) {
     },
   });
   const push = (item) => {
+    if (ended) return;
     if (controller) controller.enqueue(item);
     else buffer.push(item);
   };
@@ -569,6 +824,33 @@ function emptyStream() {
       controller.close();
     },
   });
+}
+
+/**
+ * Extract the ICE candidates from an SDP description as
+ * `{ candidate, sdpMid, sdpMlineIndex }` records in the W3C trickle shape
+ * (`candidate` carries the attribute value without the `a=` prefix).
+ */
+function sdpCandidates(sdp) {
+  if (!sdp) return [];
+  const out = [];
+  let sdpMid;
+  let sdpMlineIndex = -1;
+  for (const line of sdp.split(/\r?\n/)) {
+    if (line.startsWith("m=")) {
+      sdpMlineIndex += 1;
+      sdpMid = undefined;
+    } else if (line.startsWith("a=mid:")) {
+      sdpMid = line.slice("a=mid:".length).trim();
+    } else if (line.startsWith("a=candidate:")) {
+      out.push({
+        candidate: line.slice("a=".length).trim(),
+        sdpMid,
+        sdpMlineIndex: sdpMlineIndex >= 0 ? sdpMlineIndex : undefined,
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -677,13 +959,59 @@ function concatChunks(chunks, total) {
  * with the next message, or rejects with `{ tag: 'closed' }` once the channel
  * closes with no more messages pending.
  *
- * Buffering is bounded by `maxInboundBuffered()` payload bytes: a message that
+ * Buffering is bounded by the configured inbound bound in payload bytes: a message that
  * would exceed it closes the channel and discards that and any later messages;
  * the pre-overflow backlog stays deliverable, after which `next()` rejects with
  * `{ tag: 'receive-buffer-overflow' }`.
  */
+/**
+ * A pull-based coalescing state watch backing the `state-changes` streams:
+ * each element is `current()` at the time it is produced (the first element
+ * reflects the state at the first read), consecutive elements are distinct,
+ * and the stream closes after a terminal state. `subscribe` registers a
+ * wake callback for potential state changes and is called once.
+ *
+ * @param {() => string} current
+ * @param {(wake: () => void) => void} subscribe
+ * @param {(state: string) => boolean} isTerminal
+ */
+function stateStream(current, subscribe, isTerminal) {
+  let delivered;
+  let notify = null;
+  subscribe(() => {
+    if (notify) {
+      const wake = notify;
+      notify = null;
+      wake();
+    }
+  });
+  return new ReadableStream({
+    async pull(controller) {
+      for (;;) {
+        // Arm the wake before checking, so a transition between the check
+        // and the wait is not missed.
+        const woken = new Promise((resolve) => {
+          notify = resolve;
+        });
+        const state = current();
+        if (state !== delivered) {
+          delivered = state;
+          controller.enqueue(state);
+          if (isTerminal(state)) controller.close();
+          return;
+        }
+        if (isTerminal(state)) {
+          controller.close();
+          return;
+        }
+        await woken;
+      }
+    },
+  });
+}
+
 function incomingQueue(channel) {
-  const limit = maxInboundBuffered();
+  const limit = maxInboundBuffered;
   const messages = [];
   const waiters = [];
   let buffered = 0;
@@ -702,7 +1030,9 @@ function incomingQueue(channel) {
 
   channel.addEventListener("message", ({ data }) => {
     if (overflowed) return;
-    const size = typeof data === "string" ? data.length : data.byteLength;
+    // Account string payloads in UTF-8 bytes (the WIT bound counts payload
+    // bytes; `.length` would count UTF-16 code units).
+    const size = typeof data === "string" ? utf8ByteLength(data) : data.byteLength;
     if (buffered + size > limit && !waiters.length) {
       // The bounded inbound buffer overflowed: close the channel and discard
       // this and any later messages. Already-buffered messages stay deliverable.
@@ -743,6 +1073,18 @@ function incomingQueue(channel) {
     rejectWaiters(error) {
       while (waiters.length) {
         waiters.shift().reject(error);
+      }
+    },
+    /**
+     * Discard the unread backlog and fail pending and future reads `closed`
+     * (a local `close`, per the WIT contract).
+     */
+    discard() {
+      messages.length = 0;
+      buffered = 0;
+      closed = true;
+      while (waiters.length) {
+        waiters.shift().reject({ tag: "closed" });
       }
     },
   };

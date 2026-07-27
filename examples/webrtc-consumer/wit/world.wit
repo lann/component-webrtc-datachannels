@@ -1,12 +1,13 @@
 // The `webrtc-consumer` world.
 //
 // A minimal consumer of `lann:webrtc-datachannels/connections`: it imports the
-// guest-driven `peer-connection` surface and, composed (`wac plug`) against the
-// `wasip3-impl` provider component, exercises a full in-guest WebRTC round trip.
+// guest-driven `peer-connection` surface and, composed with a provider
+// component that exports `connections`, exercises a full in-guest WebRTC
+// round trip.
 //
-// The `wasi:cli/run` export and the WASIp3 stdio the consumer prints through
-// come from the `wasip3` crate's own bindings, so this world declares only the
-// `connections` import that `wac plug` satisfies with the provider's export.
+// The world deliberately declares only the `connections` import a composition
+// must satisfy; the component's `wasi:cli/run` export and stdio imports are
+// declared by its own language bindings rather than here.
 package demo:webrtc-consumer;
 
 world consumer {

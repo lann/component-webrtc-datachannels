@@ -8,10 +8,11 @@
 //! [`wasmtime_webrtc_datachannels`]'s `add_to_linker`.
 
 use wasmtime::component::{Accessor, Component, HasData, Linker, ResourceTable};
-use wasmtime::{Config, Engine, Result, Store};
+use wasmtime::{Result, Store};
 use wasmtime_webrtc_datachannels::{
     self as webrtc_host, WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView,
 };
+use wasmtime_webrtc_host::{engine, webrtc_ctx};
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -26,6 +27,8 @@ mod bindings {
         with: {
             "lann:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
+            "lann:webrtc-datachannels/connections.peer-connection-config":
+                wasmtime_webrtc_datachannels::PeerConnectionConfig,
             "lann:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
             "lann:webrtc-datachannels/connections.peer-connection":
@@ -52,32 +55,17 @@ impl WasiWebrtcView for Ctx {
     }
 }
 
-fn engine() -> Result<Engine> {
-    let mut config = Config::new();
-    config.wasm_component_model(true);
-    config.wasm_component_model_async(true);
-    Engine::new(&config)
-}
-
-/// Build the WebRTC context, opting into loopback ICE candidates when the
-/// `WEBRTC_INCLUDE_LOOPBACK` environment variable is set. The component stands
-/// up both peers in this one process, so on hosts without another mutually
-/// reachable address this is required for them to pair.
-fn webrtc_ctx() -> WasiWebrtcCtx {
-    let mut ctx = WasiWebrtcCtx::new();
-    if std::env::var_os("WEBRTC_INCLUDE_LOOPBACK").is_some() {
-        ctx.set_setting_engine_hook(|engine| {
-            engine.set_include_loopback_candidate(true);
-        });
-    }
-    ctx
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "../echo-demo/build/echo-demo.component.wasm".to_string());
+    let path = std::env::args().nth(1).unwrap_or_else(|| {
+        // Resolve the default relative to this crate, not the CWD, so
+        // `cargo run` works from anywhere in the repository.
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../echo-demo/build/echo-demo.component.wasm"
+        )
+        .to_string()
+    });
     let message_count: u32 = std::env::args()
         .nth(2)
         .and_then(|s| s.parse().ok())

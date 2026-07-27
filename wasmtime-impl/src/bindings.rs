@@ -1,8 +1,9 @@
 //! Raw `bindgen!` output for the `lann:webrtc-datachannels` package.
 //!
 //! The crate implements the `types` interface and, in the `connections`
-//! interface, the `data-channel-options` builder, the `data-channel` resource,
-//! and the `peer-connection` resource (the guest-driven signaling surface). See
+//! interface, the `data-channel-options` and `peer-connection-config`
+//! builders, the `data-channel` resource,
+//! and the `peer-connection` resource. See
 //! [`crate`] for the public API built on top of these bindings.
 
 #[allow(missing_docs, reason = "generated code")]
@@ -22,11 +23,17 @@ mod generated {
             // imported as such by guests, so it must be bound synchronously
             // (still `trappable`, but not `async`).
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.label": trappable,
+            // `data-channel.close` is synchronous in the WIT (it initiates the
+            // closing procedure and returns) and needs no store access.
+            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.close": trappable,
             // `data-channel.receive-via-stream` is synchronous in the WIT: it
             // hands back the inbound stream without awaiting, so it is bound
             // synchronously. It still needs `store` to allocate the returned
-            // `stream<stream-message>` on the guest's behalf.
+            // `stream<stream-message>` on the guest's behalf. The
+            // `state-changes` streams (on both resources) are bound the same
+            // way for the same reason.
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.receive-via-stream": store | trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.state-changes": store | trappable,
             // The `peer-connection` resource's synchronous functions are bound
             // synchronously. The `constructor`, `create-data-channel`, and
             // `close` need no store access; the stream-returning functions need
@@ -36,11 +43,12 @@ mod generated {
             "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.create-data-channel": trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.incoming-data-channels": store | trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.local-ice-candidates": store | trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.state-changes": store | trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.close": trappable,
-            // `data-channel-options` is a plain configuration builder: its
-            // constructor and every getter/setter are synchronous WIT
-            // functions, so they are bound synchronously (no `async`, no
-            // `store`).
+            // `data-channel-options` and `peer-connection-config` are plain
+            // configuration builders: their constructors and every
+            // getter/setter are synchronous WIT functions, so they are bound
+            // synchronously (no `async`, no `store`).
             "lann:webrtc-datachannels/connections@0.1.0.[constructor]data-channel-options": trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.label": trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-label": trappable,
@@ -48,9 +56,15 @@ mod generated {
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-ordered": trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.max-retransmits": trappable,
             "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-max-retransmits": trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[constructor]peer-connection-config": trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-servers": trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-servers": trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-transport-policy": trappable,
+            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-transport-policy": trappable,
         },
         with: {
             "lann:webrtc-datachannels/connections.data-channel-options": crate::DataChannelOptions,
+            "lann:webrtc-datachannels/connections.peer-connection-config": crate::PeerConnectionConfig,
             "lann:webrtc-datachannels/connections.data-channel": crate::DataChannel,
             "lann:webrtc-datachannels/connections.peer-connection": crate::PeerConnection,
         },

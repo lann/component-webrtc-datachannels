@@ -6,7 +6,7 @@ Component Model's async features** (`stream`, `future`, async imports/exports),
 with a *single* guest component binary running unchanged against very
 different stacks:
 
-- a **browser-first** host (Node.js + [`jco`] + [`@roamhq/wrtc`]),
+- a **browser-first** host (Node.js + [`jco`] + [`node-datachannel`]),
 - a **native Rust** host ([Wasmtime] + [`webrtc-rs`]), and
 - an **in-guest** component ([`wasip3-impl`](wasip3-impl)) that runs the whole
   sans-I/O WebRTC stack inside wasm over `wasi:sockets`.
@@ -16,7 +16,7 @@ genuine WebRTC/SCTP data channel; the [conformance suite](conformance) asserts
 they behave compatibly.
 
 [`jco`]: https://github.com/bytecodealliance/jco
-[`@roamhq/wrtc`]: https://github.com/WonderInventions/node-webrtc
+[`node-datachannel`]: https://github.com/murat-dogan/node-datachannel
 [Wasmtime]: https://github.com/bytecodealliance/wasmtime
 [`webrtc-rs`]: https://github.com/webrtc-rs/webrtc
 
@@ -27,12 +27,12 @@ they behave compatibly.
 | [`wit/`](wit) | The streaming **WIT interface**, the `lann:webrtc-datachannels@0.1.0` package. Each demo component keeps its own demo-only WIT and symlinks this package in as a dependency. |
 | [`examples/echo-demo`](examples/echo-demo) | A **Rust example component** exercising a data channel one message at a time. |
 | [`wasmtime-impl`](wasmtime-impl) | The **Wasmtime host crate** (webrtc-rs), modeled after `wasmtime_wasi_http::p3`. Provides `add_to_linker` + `WasiWebrtcView` for the `types` interface and the `data-channel` resource of `connections` (the `peer-connection` resource is unimplemented). Crate name: `wasmtime-webrtc-datachannels`. |
-| [`jco-impl`](jco-impl) | The **browser-first host** (Node stand-in for the browser, jco + @roamhq/wrtc). |
+| [`jco-impl`](jco-impl) | The **browser-first host** (Node stand-in for the browser, jco + node-datachannel). |
 | [`examples/wasmtime-demo`](examples/wasmtime-demo) | The **native Rust host** (Wasmtime + webrtc-rs): demo binaries built on `wasmtime-impl`. |
 | [`examples/cli-signaling`](examples/cli-signaling) | The **manual-signaling CLI guest component** (Rust), driving `connections.peer-connection` with guest-side vanilla ICE. |
-| [`examples/webrtc-consumer`](examples/webrtc-consumer) | A **minimal consumer component** that imports `connections`. Composed (`wac plug`) with `wasip3-impl` for the in-guest round-trip integration test (`just test-webrtc-composed`). |
+| [`examples/webrtc-consumer`](examples/webrtc-consumer) | A **minimal consumer component** that imports `connections`. Composed (`wac plug`) with `wasip3-impl` for the in-guest round-trip integration test (`just examples::test-webrtc-composed`). |
 | [`wasip3-impl`](wasip3-impl) | The **third implementation**: a wasm **component** (built for `wasm32-wasip2`) that runs the sans-I/O `rtc` 0.20 WebRTC stack *in-guest* — importing only `wasi:sockets`/`wasi:clocks` — and **exports** `lann:webrtc-datachannels/connections`. Its `SansIoPeer` core is driven over `wasi:sockets` UDP and WASI timers by an in-guest runtime pump. Composable via `wac plug`. Crate name: `wasip3-webrtc-datachannels`. |
-| [`conformance/`](conformance) | The **cross-implementation conformance suite**: a shared conformance guest run by per-target adapters (wasmtime, jco under Node and headless Chrome, the composed wasip3 stack), interop pairs, an netns lab, a Shadow lab, and a runner that renders the results matrix. `just conformance`; see [`conformance/README.md`](conformance/README.md). |
+| [`conformance/`](conformance) | The **cross-implementation conformance suite**: a shared conformance guest run by per-target adapters (wasmtime, jco under Node and headless Chrome, the composed wasip3 stack), a non-wasm reference peer (Google's libwebrtc via LiveKit's Rust bindings) every target is paired against, an netns lab, a Shadow lab, and a runner that renders the results matrix. `just conformance`; see [`conformance/README.md`](conformance/README.md). |
 | [`AGENTS.md`](AGENTS.md) | Orientation for agents/contributors, linking the `lann/wasm-component-starter` knowledge base. |
 
 ## The interface
@@ -131,22 +131,22 @@ Node exposes on 24+ behind `--experimental-wasm-jspi`.
 ```sh
 cd jco-impl
 npm install
-npm run build:component   # build the guest .wasm component
-npm run transpile         # jco transpile with JSPI async + host maps
-node --experimental-wasm-jspi src/run.mjs
+just examples::build-component   # build the guest .wasm component (cargo + wasm-tools)
+npm run transpile                # jco transpile with JSPI async + host maps
+npm start
 ```
 
-The host builds two `RTCPeerConnection`s with `@roamhq/wrtc`, performs a real
+The host builds two `RTCPeerConnection`s with `node-datachannel`, performs a real
 SDP/ICE handshake, and echoes on the far side.
 
 The same `webrtc.js` host module runs unchanged in a real browser: it resolves
 `RTCPeerConnection` from the browser global when present and falls back to
-`@roamhq/wrtc` under Node. A headless-Chrome test drives the *identical*
+`node-datachannel` under Node. A headless-Chrome test drives the *identical*
 transpiled component through that browser path and is what runs in CI:
 
 ```sh
 cd jco-impl
-npm run build:component && npm run transpile
+just examples::build-component && npm run transpile
 npm run test:browser     # headless Chrome (137+); set CHROME_PATH to override
 ```
 
@@ -158,5 +158,5 @@ cargo run --release --bin wasmtime-webrtc-host -- ../echo-demo/build/echo-demo.c
 #                                                                                       ^msg count ^msg size
 ```
 
-(Run the Node `build:component` step once first, or build the component
+(Run `just examples::build-component` once first, or build the component
 manually, to produce the `.wasm`.)

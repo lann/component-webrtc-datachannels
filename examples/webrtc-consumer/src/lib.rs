@@ -28,7 +28,7 @@ mod bindings {
 use bindings::lann::webrtc_datachannels::connections::{
     DataChannel, DataChannelOptions, PeerConnection,
 };
-use bindings::lann::webrtc_datachannels::types::{IceCandidate, Message};
+use bindings::lann::webrtc_datachannels::types::{Error, IceCandidate, Message};
 
 /// The label of the negotiated data channel. Both peers observe it.
 const CHANNEL_LABEL: &str = "webrtc-consumer-demo";
@@ -58,8 +58,8 @@ impl wasip3::exports::cli::run::Guest for Component {
 wasip3::cli::command::export!(Component);
 
 /// The number of connection attempts before giving up. The in-guest WebRTC
-/// handshake occasionally stalls (an upstream sans-I/O timing flake in the
-/// `rtc` fork surfaces as `error::timed-out` from `wait-connected`); each
+/// handshake occasionally stalls (an upstream sans-I/O timing flake in `rtc`
+/// surfaces as `error::timed-out` from `wait-connected`); each
 /// attempt uses fresh peer connections (fresh sockets and ICE state), so a
 /// bounded retry keeps the integration test reliable while still asserting a
 /// real end-to-end round trip.
@@ -83,10 +83,32 @@ async fn demo() -> Result<(String, String)> {
     unreachable!("the loop returns on the final attempt")
 }
 
+/// Marker error for a `wait-connected` timeout (the only retryable failure),
+/// carried through `anyhow` so retryability is decided by type, not by
+/// substring-matching a rendered message.
+#[derive(Debug)]
+struct ConnectTimeout;
+
+impl std::fmt::Display for ConnectTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("wait-connected timed out")
+    }
+}
+
+impl std::error::Error for ConnectTimeout {}
+
 /// Whether `err` is a `wait-connected` timeout (the only retryable failure).
 fn is_timeout(err: &anyhow::Error) -> bool {
-    let text = format!("{err:?}");
-    text.contains("wait-connected") && text.contains("TimedOut")
+    err.downcast_ref::<ConnectTimeout>().is_some()
+}
+
+/// Convert a `wait-connected` result into `anyhow`, preserving the timeout
+/// variant as the typed [`ConnectTimeout`] marker.
+fn connect_result(side: &str, result: Result<(), Error>) -> Result<()> {
+    result.map_err(|e| match e {
+        Error::TimedOut => anyhow::Error::new(ConnectTimeout),
+        e => anyhow!("{side} wait-connected: {e:?}"),
+    })
 }
 
 /// Stand up an offerer and an answerer over the imported `connections`
@@ -95,8 +117,8 @@ fn is_timeout(err: &anyhow::Error) -> bool {
 async fn connect_once() -> Result<(String, String)> {
     print("Creating the offerer and answerer via the imported provider…\n").await;
 
-    let offerer = PeerConnection::new();
-    let answerer = PeerConnection::new();
+    let offerer = PeerConnection::new(None);
+    let answerer = PeerConnection::new(None);
 
     // The offerer creates the channel and produces an offer.
     let options = DataChannelOptions::new();
@@ -144,8 +166,8 @@ async fn connect_once() -> Result<(String, String)> {
 
     // Wait for both peers to connect, concurrently.
     let (o, a) = futures::join!(offerer.wait_connected(), answerer.wait_connected());
-    o.map_err(|e| anyhow!("offerer wait-connected: {e:?}"))?;
-    a.map_err(|e| anyhow!("answerer wait-connected: {e:?}"))?;
+    connect_result("offerer", o)?;
+    connect_result("answerer", a)?;
 
     // The answerer adopts the channel the offerer created.
     let answer_dc = first_incoming(&answerer).await?;

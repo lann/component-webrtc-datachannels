@@ -63,8 +63,7 @@ impl Matrix {
     /// classified against that target's manifest. A target with no adapter
     /// report is still planned from its manifest as a single planning-only row
     /// (empty environment): its tests appear as `skip-unsupported` (where a tag
-    /// is declared unsupported) or `missing` (otherwise), which is exactly the
-    /// empty-target state Phase 0 relies on.
+    /// is declared unsupported) or `missing` (otherwise).
     pub fn classify(
         registry: &Registry,
         manifests: &[Manifest],

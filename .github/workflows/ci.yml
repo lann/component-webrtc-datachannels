@@ -41,10 +41,16 @@ jobs:
           # The standalone manual-signaling test guest builds into a nested
           # target dir under ./target; keep the whole tree so it is not pruned.
           cache-all-crates: true
+          # Save only on main: PR jobs restore main's cache (falling back to a
+          # prefix match when the PR changes Cargo.lock) but never save, so PR
+          # branches don't multiply cache entries toward the repository's
+          # 10 GB cap and evict the caches every run depends on.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        # This job never runs the Node host, so skip its npm dependencies.
-        run: SKIP_NODE=1 ./scripts/setup.sh
+        # This job never runs the Node host or the netns lab, so skip their
+        # dependencies.
+        run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
         # cargo-binstall resolves releases through api.github.com; unauthenticated
         # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
         # (intermittent 403s). The token moves it to the per-token limit.
@@ -68,7 +74,7 @@ jobs:
       # Build the wasip3 provider + webrtc-consumer, compose them with `wac
       # plug`, and run the composed in-guest WebRTC round trip under wasmtime.
       - name: Run composed WebRTC integration test
-        run: just test-webrtc-composed
+        run: just examples::test-webrtc-composed
 
   # Guest component build + browser (jco) host test. Runs in parallel with the
   # native Rust checks above.
@@ -90,8 +96,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           # Node 24+ so `node --experimental-wasm-jspi` has JSPI
-          # (WebAssembly.Suspending); matches the conformance workflow and the
-          # documented prerequisite in AGENTS.md.
+          # (WebAssembly.Suspending).
           node-version: "24"
           # Cache the Node host's npm downloads so `npm install` in setup.sh
           # restores from cache instead of refetching every run.
@@ -108,9 +113,12 @@ jobs:
           # cross-job shared key never actually shared compiled artifacts).
           shared-key: browser
           cache-all-crates: true
+          # Save only on main (see the rust-checks job).
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
-        run: ./scripts/setup.sh
+        # The netns lab never runs in CI, so its apt packages are skipped.
+        run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
         # cargo-binstall resolves releases through api.github.com; unauthenticated
         # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
         # (intermittent 403s). The token moves it to the per-token limit.
@@ -118,10 +126,10 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build echo-demo guest component
-        run: just build-component
+        run: just examples::build-component
 
       - name: Transpile echo-demo component (Node host)
-        run: just transpile
+        run: just examples::transpile
 
       - name: Run browser host test (headless Chrome)
-        run: just test-browser
+        run: just examples::test-browser

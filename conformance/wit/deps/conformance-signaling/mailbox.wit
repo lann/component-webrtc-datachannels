@@ -11,17 +11,11 @@
 // This is deliberately separate from the demo `demo:webrtc-echo/rendezvous`
 // proposal and from any future standardized signaling interface, so it can
 // evolve with the tests and be discarded without API cost.
-//
-// It lives here (under the conformance suite's own `wit/deps/`) rather than at
-// the repository root because it is suite-owned test infrastructure, not part
-// of the shared `lann:webrtc-datachannels` surface. The shared package is still
-// pulled in through the sibling `deps/lann-webrtc-datachannels` symlink.
 package conformance:signaling@0.1.0;
 
-/// The guest-facing mailbox interface. Per-target implementations relay blobs
-/// to and from `conformance-signalingd`: a native HTTP client for the wasmtime
-/// adapter, a `fetch`-based client for the jco adapters, and an in-guest
-/// `wasi:http` client for the wasip3-guest adapter.
+/// The guest-facing mailbox interface. Implementations relay blobs to and
+/// from `conformance-signalingd` over HTTP; the guest itself never speaks the
+/// wire protocol.
 interface mailbox {
     use lann:webrtc-datachannels/types@0.1.0.{error};
 

@@ -25,6 +25,10 @@
 //!   `wasmtime run`, binding the in-guest provider to its namespace address
 //!   through `WEBRTC_UDP_BIND_ADDR`. The in-guest sans-I/O stack supports no
 //!   STUN/TURN, so only the `lan` scenario fits this kind.
+//! - `reference` runs the non-wasm reference peer (`conformance-reference-peer`,
+//!   Google's libwebrtc via LiveKit's Rust bindings), supporting every
+//!   scenario: its ICE flags map onto libwebrtc's ICE server and transport
+//!   policy configuration.
 //!
 //! Requires root (for `ip netns exec`); the lab topology
 //! ([`conformance_adapter_common::lab`]) is provisioned and torn down by this
@@ -48,8 +52,9 @@ use conformance_adapter_common::{
 /// The hang guard for one test. Lab handshakes (real routing, and a TURN relay
 /// for `turn-relay`) are slower to establish than loopback, but the lab runs
 /// native peers at low concurrency on a dedicated workstation, so it needs
-/// less headroom than the loopback adapters' 90s (which absorbs peer-process
-/// startup under 4-wide CI contention).
+/// less headroom than the loopback adapters'
+/// [`conformance_adapter_common::LOOPBACK_TEST_TIMEOUT`] (which absorbs
+/// peer-process startup under 4-wide CI contention).
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Parser)]
@@ -102,6 +107,11 @@ struct Cli {
     /// the `wasmtime` peer kind.
     #[arg(long, default_value = "target/release/conformance-peer")]
     peer_bin: PathBuf,
+
+    /// The `conformance-reference-peer` binary, used by the `reference` peer
+    /// kind.
+    #[arg(long, default_value = "target/release/conformance-reference-peer")]
+    reference_peer: PathBuf,
 
     /// Base signaling HTTP port in the signaling namespace. Each test uses its
     /// own signaling server on a distinct port (base + attempt index) so tests
@@ -186,6 +196,7 @@ async fn main() -> Result<()> {
         &cli.guest,
         &cli.wasmtime_bin,
         &cli.component,
+        &cli.reference_peer,
     )?;
 
     if cli.provision {
@@ -201,7 +212,7 @@ async fn main() -> Result<()> {
 
     // Each test starts its own short-lived signaling server (in the signaling
     // namespace, on its own port) around its handshake, so a server only ever
-    // brokers one room — matching the mailbox's per-room lifecycle.
+    // brokers one room.
     run_corpus(&cli, scenario, &topology, &peer_command).await
 }
 
@@ -230,7 +241,7 @@ async fn run_corpus(
         conformance_adapter_common::run_corpus(TWO_PEER_TESTS, &cli.only, cli.jobs, |test_id| {
             run_ice_test(cli, scenario, topology, peer_command, test_id, &room_seq)
         })
-        .await;
+        .await?;
 
     let report = AdapterReport {
         target: target.clone(),
@@ -267,11 +278,12 @@ async fn run_ice_test(
         let signaling_url = format!("http://{}:{}", topology.signaling_addr, port);
 
         // Bring up this attempt's signaling server; killed when `_signaling`
-        // drops at the end of the attempt.
-        let _signaling = start_signaling(cli, topology, port).context("signaling server")?;
-        // Let it bind before the peers connect; peer-side long-poll retries cover
-        // any residual race.
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        // drops at the end of the attempt. `start_signaling` waits for the
+        // server's readiness line, so the peers never race the bind (the
+        // mailbox clients treat a failed HTTP round trip as fatal).
+        let _signaling = start_signaling(cli, topology, port)
+            .await
+            .context("signaling server")?;
 
         let offerer = run_peer(
             scenario,
@@ -339,14 +351,18 @@ async fn run_peer(
 }
 
 /// Start a signaling server on `port` inside the signaling namespace.
-fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard> {
-    let child = std::process::Command::new("ip")
+/// Spawn this attempt's signaling server inside the signaling namespace and
+/// wait — bounded — for the `listening on <url>` line it prints once bound
+/// (kept stable by `conformance-signalingd` for exactly this kind of
+/// consumer). Its stdout is forwarded to stderr so diagnostics stay visible.
+async fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard> {
+    let mut child = std::process::Command::new("ip")
         .args(["netns", "exec", &topology.signaling_ns])
         .arg(&cli.signaling_bin)
         .args(["--host", &topology.signaling_addr])
         .args(["--port", &port.to_string()])
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .with_context(|| {
@@ -355,6 +371,25 @@ fn start_signaling(cli: &Cli, topology: &LabTopology, port: u16) -> Result<Guard
                 cli.signaling_bin.display(),
                 topology.signaling_ns
             )
+        })?;
+
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        use std::io::BufRead as _;
+        for line in std::io::BufReader::new(stdout).lines() {
+            let Ok(line) = line else { break };
+            eprintln!("[signalingd] {line}");
+            if line.contains("listening on") {
+                let _ = ready_tx.send(());
+            }
+        }
+    });
+    tokio::task::spawn_blocking(move || ready_rx.recv_timeout(Duration::from_secs(10)))
+        .await
+        .context("joining signaling readiness wait")?
+        .map_err(|_| {
+            anyhow::anyhow!("signaling server did not report `listening on` within 10s")
         })?;
     Ok(Guard { child: Some(child) })
 }

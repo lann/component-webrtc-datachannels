@@ -1,6 +1,6 @@
 // Headless-browser test for the browser-first host.
 //
-// `src/run.mjs` exercises the host under Node (backed by `@roamhq/wrtc`). This
+// `src/run.mjs` exercises the host under Node (backed by `node-datachannel`). This
 // test instead runs the *same* transpiled component and the *same* `webrtc.js`
 // host module inside a real, headless Chromium, which is the environment the
 // "browser-first" host actually targets. It is the browser counterpart to the
@@ -34,7 +34,8 @@
 //        "granted" and lets real host candidates (raw loopback/LAN IPs, no
 //        mDNS) flow. Only then is the component run.
 //
-// Run with:  npm run build:component && npm run transpile && npm run test:browser
+// Run with:  just examples::test-browser   (or: npm run transpile && npm run
+// test:browser after `just examples::build-component`)
 import { chromium } from "playwright-core";
 import http from "node:http";
 import { access, readFile } from "node:fs/promises";
@@ -94,9 +95,10 @@ function startServer() {
       return;
     }
     // Strict allowlist: only the transpiled bundle under /generated/ and the
-    // browser host module are served, and each request path must be a single,
-    // dot-segment-free file name. This both scopes the server to what the test
-    // needs and rules out path traversal (no "/" or ".." can reach the join).
+    // browser host module are served, and each request path must be a single
+    // file name. The regex scopes the server to what the test needs; the
+    // explicit ".." check below is what rules out path traversal (the regex's
+    // character class alone would match "..").
     const match = /^\/(generated)\/([A-Za-z0-9._-]+)$|^\/(webrtc\.js)$/.exec(pathname);
     if (!match || pathname.includes("..")) {
       res.statusCode = 404;
@@ -123,7 +125,7 @@ async function main() {
     await access(COMPONENT);
   } catch {
     throw new Error(
-      `missing ${COMPONENT}; run "npm run build:component && npm run transpile" first`,
+      `missing ${COMPONENT}; run "just examples::transpile" first`,
     );
   }
 

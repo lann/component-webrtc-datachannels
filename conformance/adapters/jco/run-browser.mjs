@@ -1,5 +1,6 @@
 // The jco browser conformance adapter: runs the same shared conformance guest
-// and the same `webrtc.js` + `signaling.js` host modules inside a real, headless
+// and the same host modules (`jco-impl/webrtc.js` + the adapter's
+// `signaling.js`) inside a real, headless
 // Chromium — the environment the "browser-first" host actually targets — and
 // emits the adapter result document the conformance runner consumes
 // (`conformance/results/jco-browser.json`). It is the browser counterpart of the
@@ -26,6 +27,7 @@
 // so the browser makes only same-origin requests and no CORS handling is needed.
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { availableParallelism } from "node:os";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +37,17 @@ import { chromium } from "playwright-core";
 
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(ADAPTER_DIR, "..", "..", "..");
+
+// The default test concurrency: 2x the cores available to this process,
+// clamped to [2, 8]. The corpus is I/O-bound so the optimum exceeds the core
+// count (measured at 3x cores on the lighter Rust adapters), but each test
+// here runs inside a heavyweight JS runtime whose flake history is
+// load-induced timeouts, so the multiplier stays conservative: 4 jobs on
+// 2-core CI runners (the load proven stable there), scaling up on larger
+// machines.
+function defaultJobs() {
+  return Math.min(8, Math.max(2, 2 * availableParallelism()));
+}
 
 const { values } = parseArgs({
   options: {
@@ -48,8 +61,8 @@ const { values } = parseArgs({
     },
     only: { type: "string", multiple: true, default: [] },
     // How many tests to run concurrently (each test's peers use their own
-    // signaling room, so tests are independent).
-    jobs: { type: "string", default: "4" },
+    // signaling room, so tests are independent); defaults to defaultJobs().
+    jobs: { type: "string" },
     // Base URL of an already-running signaling server. When omitted, this
     // adapter spawns its own `conformance-signalingd`.
     server: { type: "string" },
@@ -126,9 +139,12 @@ function startServer(signalingBase) {
       return;
     }
 
-    // Strict allowlist: the transpiled bundle under /generated/ and the adapter
-    // host modules. Each path is a single, dot-segment-free file name, which
-    // scopes the server and rules out path traversal.
+    // Strict allowlist: the transpiled bundle under /generated/ and the host
+    // modules. Each path is a single, dot-segment-free file name, which
+    // scopes the server and rules out path traversal. `/webrtc.js` is served
+    // from jco-impl: the connections host is one module shared with the demo
+    // hosts (in the browser its `node-datachannel` fallback import is never
+    // reached, so serving the file alone is enough).
     const match =
       /^\/(generated)\/([A-Za-z0-9._-]+)$|^\/(webrtc\.js|signaling\.js|driver\.js)$/.exec(pathname);
     if (!match || pathname.includes("..")) {
@@ -136,9 +152,12 @@ function startServer(signalingBase) {
       res.end("not found");
       return;
     }
-    const file = match[3]
-      ? join(ADAPTER_DIR, match[3])
-      : join(values.generated, match[2]);
+    const file =
+      match[3] === "webrtc.js"
+        ? join(REPO_ROOT, "jco-impl", "webrtc.js")
+        : match[3]
+          ? join(ADAPTER_DIR, match[3])
+          : join(values.generated, match[2]);
     try {
       const body = await readFile(file);
       res.setHeader("content-type", MIME[extname(file)] ?? "application/octet-stream");
@@ -169,8 +188,14 @@ async function proxy(req, res, signalingBase) {
     return;
   }
   res.statusCode = upstream.status;
-  const contentType = upstream.headers.get("content-type");
-  if (contentType) res.setHeader("content-type", contentType);
+  // Forward every upstream header (the protocol's `x-seq`/`x-done` included),
+  // skipping the hop-by-hop and length framing Node manages itself.
+  for (const [name, value] of upstream.headers) {
+    if (["connection", "keep-alive", "transfer-encoding", "content-length"].includes(name)) {
+      continue;
+    }
+    res.setHeader(name, value);
+  }
   res.end(Buffer.from(await upstream.arrayBuffer()));
 }
 
@@ -219,9 +244,9 @@ async function runInPage({ base, only, jobs }) {
   ]);
 
   // Shrink the host's inbound-buffer bound so the `receive-buffer-overflow`
-  // probe overflows it with a small flood (webrtc.js resolves the bound lazily
-  // per channel).
-  globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+  // probe overflows it with a small flood (channels capture the bound at
+  // creation).
+  connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
   const names = [
     "conformance-guest.core.wasm",
@@ -265,7 +290,7 @@ async function runInteropInPage({ base, testId, config }) {
       import(`${base}/signaling.js`),
       import(`${base}/generated/conformance-guest.js`),
     ]);
-  globalThis.WEBRTC_MAX_INBOUND_BUFFER_BYTES = MAX_INBOUND_BUFFER_BYTES;
+  connections.setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
   const names = [
     "conformance-guest.core.wasm",
@@ -348,7 +373,6 @@ async function main() {
         room: values.room,
         messageCount: Number(values["message-count"]),
         messageSize: Number(values["message-size"]),
-        trickle: true,
       };
       const result = await page.evaluate(runInteropInPage, {
         base,
@@ -359,7 +383,7 @@ async function main() {
       return;
     }
 
-    results = await page.evaluate(runInPage, { base, only: values.only, jobs: Number(values.jobs) });
+    results = await page.evaluate(runInPage, { base, only: values.only, jobs: values.jobs ? Number(values.jobs) : defaultJobs() });
   } finally {
     await browser.close();
     server.close();

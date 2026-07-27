@@ -15,58 +15,49 @@ lettering has gaps.
 
 ### A3. Cross-host conformance: loopback matrix + labs in place; interop matrix incomplete
 
-The suite (see `conformance/README.md`) is built and green in CI: a shared
-conformance guest, the `conformance-signalingd` mailbox, adapters for
-`wasmtime`, `jco-node`, `jco-browser`, and `wasip3-guest`, the interop pairs
-`wasmtime`<->`jco-node`, `wasmtime`<->`jco-browser`, and
-`wasmtime`<->`wasip3-guest` (both orders each) — all run in CI over loopback
-via `just conformance` — plus the Shadow lab in CI (non-loopback,
-deterministic) and the workstation-only netns lab (`just conformance-netns` /
-`just conformance-nat`) covering `lan`, `stun-srflx` (behind a one-to-one
-full-cone NAT), `turn-relay`, and `nat-symmetric`. The full netns lab has been
-confirmed on a Linux workstation: all four scenarios pass 11/11. Still open:
+The suite (see `conformance/README.md`) is built and green in CI: the shared
+conformance guest (37 tests), the `conformance-signalingd` mailbox, adapters
+for `wasmtime`, `jco-node`, `jco-browser`, and `wasip3-guest`, the interop
+pairs (every target against the non-wasm libwebrtc reference peer in both
+orders, the reference self-pair, and the direct `wasmtime`<->`jco-node`
+and `wasmtime`<->`wasip3-guest` pairs) — all run in CI over loopback via
+`just conformance` — plus the Shadow lab in CI (non-loopback,
+deterministic: the single-runtime targets and the
+`wasmtime`<->`wasip3-guest` interop pair in both orders via the executor's
+per-role `--offerer-kind`/`--answerer-kind`) and the workstation-only netns
+lab (`just conformance::netns`
+/ `just conformance::nat`) covering `lan`, `stun-srflx` (behind a one-to-one
+full-cone NAT), `turn-relay`, and `nat-symmetric`. Still open, each a
+concrete extension of the existing machinery:
 
-- **Non-loopback interop.** The interop pairs run over loopback only; the
-  labs run single-runtime peers.
-- **netns-lab peer coverage.** The lab's `--peer-kind` covers `wasmtime` (all
-  scenarios) and `wasip3-guest` (`lan` only — the in-guest sans-I/O stack
-  supports no STUN/TURN); a jco-node lab peer (a per-peer Node runner placed
-  in a namespace) is deferred.
+- **Non-loopback interop beyond the wasm pair.** The Shadow lab covers the
+  `wasmtime`<->`wasip3-guest` pair; the reference-anchored directions still
+  run over loopback only. Run the reference interop pairs under Shadow
+  (libwebrtc already runs there as a single-runtime target), and teach the
+  netns executor per-role peer kinds for the STUN/TURN/NAT scenarios the
+  simulator cannot model (the target-neutral `PeerCommand` placement in
+  `conformance/adapters/common/src/peer_command.rs` already abstracts the
+  per-peer invocation; the Shadow executor's per-role flags are the
+  pattern).
+- **jco-node netns peer.** Add a per-peer Node runner placeable in a
+  namespace (the missing `--peer-kind`), unlocking both lab coverage for
+  the jco host and jco directions for non-loopback interop.
+- **TURN through guest config.** The netns TURN scenarios configure ICE
+  host-side (`WebrtcIceConfig`); now that `peer-connection-config` exists,
+  add a scenario that passes the TURN server through the guest-facing
+  config instead, asserting the accepted-XOR-connects contract end to end —
+  and extending TURN coverage to the jco peer (the browser
+  `RTCPeerConnection` accepts `iceServers` directly) once the jco lab peer
+  lands. (The Wasmtime host's embedder-policy veto over guest-supplied
+  servers — surfacing through the same `config-error` channel — remains
+  unimplemented; add it when a policy use case appears.)
+- **Re-validate the netns lab against the current corpus.** The last full
+  workstation confirmation predates the corpus growth (the two-peer subset
+  is now 12 tests, including `channel-close-flush`); the lab is
+  workstation-only, so this needs a manual `just conformance::netns` /
+  `just conformance::nat` pass.
 
 ## E. Implementations
-
-### E5. Retire the Shadow syscall shim once upstream closes the gap
-
-`webrtc` is at `0.20.0-rc.4`; its quinn-udp GSO/GRO UDP batching
-([`webrtc-rs/webrtc#820`](https://github.com/webrtc-rs/webrtc/pull/820))
-needs syscalls the Shadow simulator does not implement — Shadow rejects the
-`IPPROTO_IP` receive-metadata `setsockopt`s (`IP_PKTINFO` et al.) with
-`ENOPROTOOPT`, which quinn-udp treats as fatal to socket construction, and
-does not implement `recvmmsg` (`ENOSYS`), which quinn-udp's Linux receive
-path calls with no fallback. The conformance Shadow lab bridges this with
-an in-binary syscall shim compiled into its `conformance-peer` build
-(`conformance/adapters/wasmtime/src/bin/peer/shadow_shim.rs`, armed by the
-`CONFORMANCE_SHADOW_SYSCALL_SHIM` environment variable the Shadow executor
-sets on its simulated peers): each override forwards the call and stubs only
-Shadow's documented failure; anything unexpected aborts the peer. Loopback
-and netns paths never set the variable and get pure pass-through.
-
-The shim is a bridge, not a fix. Retire it when any upstream lands and
-reaches a published release:
-
-- **quinn-udp**: tolerate the receive-metadata option failures (a branch
-  exists:
-  [`lann/quinn#tolerate-unsupported-recv-cmsg-options`](https://github.com/lann/quinn/tree/tolerate-unsupported-recv-cmsg-options))
-  *and* restore a `recvmmsg` `ENOSYS` fallback (existed pre-0.6; both are
-  needed).
-- **webrtc**: degrade `wrap_udp_socket` to a plain socket when
-  `UdpSocketState::new` fails, honoring #820's per-packet-fallback promise.
-- **Shadow**: implement `recvmmsg` (loop the existing `recvmsg` handler)
-  and the `IP_PKTINFO`/`IP_MTU_DISCOVER`/`IP_RECVTOS` options.
-
-If a future `webrtc` bump grows the syscall surface again, the shim aborts
-(unexpected `setsockopt` errno) or the lab hangs with Shadow's "unsupported
-syscall" warning — extend the shim or fix upstream, per its module docs.
 
 ### E6. Unwind the `rtc` git pin once upstream ships a release
 
@@ -78,37 +69,158 @@ srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
 published release. Drop the patch and return to a plain crates.io version
 once a release including it ships.
 
+### E12. node-webrtc receive-side reordering: file the write-ups upstream
+
+`@roamhq/wrtc` (node-webrtc) can dispatch an ordered channel's messages to
+JS with the head of the sequence displaced past later messages: its
+`RTCDataChannel` constructor re-registers the libwebrtc observer (new
+messages then dispatch directly to the JS loop) *before* re-dispatching the
+backlog the temporary pre-wrapper observer cached, so arrivals adjacent to
+channel open overtake every earlier message (`rtc_data_channel.cc`; a
+standalone reproduction with sender-side SCTP instrumentation proved the
+senders' wire metadata correct). No target in this repo runs on node-webrtc
+anymore: the reference peer moved to Google's libwebrtc via LiveKit's Rust
+bindings, and the jco-node host moved to `node-datachannel`
+(libdatachannel), closing the last latent exposure. The `ordering` test
+keeps its `ordered-delivery` tag so a manifest entry can scope a skip if a
+future backend needs one. What remains is filing the upstream reports: the
+write-ups and the reproduction live with the local rtc checkout
+(`wrtc-receive-reordering-bug.md`, `rtc-ordered-delivery-bug.md` — the
+latter a distinct `rtc` default-options bug found in the same
+investigation — and `rtc-ordering-repro/`); file them at
+WonderInventions/node-webrtc and webrtc-rs/rtc.
+
+### E14. `webrtc-rs` drops inbound channel events on a full event queue
+
+The `webrtc` 0.20 driver forwards each inbound message into a bounded
+(256-entry) per-channel event queue with `try_send`, logging and
+**discarding** the event when the queue is full
+(`peer_connection/driver.rs`, "Failed to send DataChannelMessage … Full").
+For reliable channels the loss is usually repaired by SCTP retransmission,
+but under load it surfaces as message loss: `channel-close-flush` at
+16x512 flaked in the `reference-x-wasmtime` direction under the full
+interop corpus (the wasmtime receiver's pump lags, the queue fills, and
+payloads vanish between SCTP and the application). The corpus works around
+it by running that test at the default 4x256. Upstream fix would be a
+blocking send (backpressure into SCTP) or a receive-window tie-in; track
+alongside E12's reference-pair findings.
+
+### E15. `rtc` emits no SCTP stream reset on data-channel close
+
+The sans-I/O `rtc` stack's channel-level close is local-only: the
+handler-level `close()` is a stub (`src/peer_connection/handler/
+datachannel.rs`, `fn close … Ok(())`), so `RTCDataChannel::close()` marks
+the local state and emits **no** RECONFIG/stream reset. A remote peer never
+observes the close — `channel-close-flush` with a wasip3 offerer hangs a
+libwebrtc answerer past the attempt guard (recorded as the
+`wasip3-guest-x-reference` expected-fail in `conformance/manifests.toml`),
+and only passes against `rtc`/`webrtc-rs` answerers because those detect
+the offerer's process exit as a connection death instead. Incoming resets
+are handled (a libwebrtc offerer's close is observed fine — the
+`reference-x-wasip3-guest` direction passes). Fix upstream by emitting the
+stream reset from the handler close; drop the manifest entry when a fixed
+pin lands (the expected-fail's unexpected-pass tripwire enforces this).
+
+### E16. `node-datachannel` drops messages queued behind a remote close
+
+The jco-node backend can lose messages a peer sent immediately before
+closing the channel: `node-datachannel`'s native layer marshals each event
+type through its own thread-safe-function queue (no cross-queue ordering),
+and the remote close's marshaled callback runs a cleanup that resets the
+message callback — its TSFN `Abort()` discards message callbacks already
+queued but not yet dispatched (`src/cpp/data-channel-wrapper.cpp`:
+`onClosed`'s cleanup lambda → `doCleanup()`). The loss is below the JS API
+(the raw non-polyfill API reproduces it identically), so no host-side
+mitigation exists; the real fix is upstream — dispatch close through the
+same queue as messages, or defer the cleanup until the message queue
+drains. Upstream tracks it as
+[murat-dogan/node-datachannel#375](https://github.com/murat-dogan/node-datachannel/issues/375)
+(with a failing-test PR, #374). The race is timing-dependent: it surfaces
+as `channel-close-flush` failures with jco-node as the receiver (the
+jco-node loopback row, and interop pairs with a jco-node answerer). Drop
+the manifest entry when a fixed release ships (the expected-fail's
+unexpected-pass tripwire enforces this).
+
+### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
+
+`channel-close-flush` fails on roughly a third of `reference-x-wasmtime`
+and `reference-x-jco-node` interop runs with `answerer: receive: closed`:
+the answerer observes the channel closed before it has received every
+payload the reference offerer sent immediately before closing. Messages
+that were handed to `send` are never delivered — this is data loss, not a
+test artifact. It reproduces with two unrelated answerer stacks
+(webrtc-rs via the wasmtime host, and `node-datachannel` via jco-node),
+so the common factor is the libwebrtc reference offerer (or the
+offerer-side close path in `conformance/adapters/reference`); note the
+W3C spec leaves it to the transport layer whether buffered messages are
+sent or discarded on close, and libwebrtc may be discarding. Undiagnosed
+beyond that. This is pre-existing on `main` (the pair's code is identical
+there; CI has simply been passing by chance) and is distinct from E16
+(answerer-side TSFN loss in `node-datachannel`) — though it may account
+for some failures previously attributed to E16. Diagnose (packet capture
+or libwebrtc logging on the reference peer would settle which side drops
+them) and fix or work around; do not paper over it with a manifest
+expected-fail, since the test passes most runs.
+
 ## F. Conformance suite
 
-### F5. Interop barrier sentinel can be lost to the winner's immediate close
+### F5. Replace the bounded close-drain graces with flush-aware teardown
 
-The interop "attempt timed-out" flake family is now diagnosed (via the
-phase-marker logs): in a two-peer test the side that finishes its barrier
-first closes immediately, and a close that tears the connection down
-without draining can discard the just-sent barrier sentinel before it
-reaches the wire, leaving the slower peer waiting for a sentinel that
-never arrives (the browser does not surface the dirty teardown as a
-channel close within the 90s guard). The **wasmtime host** now defers its
-network teardown by a bounded `CLOSE_DRAIN` grace (the close is still
-observed locally at once), mirroring `wasip3-impl`'s drain — which covers
-every observed instance (wasmtime answerer + jco peer). Still open: the
-**jco host**'s `close()` calls `pc.close()` immediately, so the symmetric
-race (jco answerer strands a wasmtime offerer) remains possible; a
-matching deferred-teardown there must keep the local close observation
-immediate (the `#closed` gate) *and* mark the connection's channels closed
-at once, or the delayed teardown would regress `post-close-send`.
+The interop "attempt timed-out" flake family (a peer closing immediately
+after its last send, discarding the just-sent barrier sentinel with the
+SCTP send queue) is now handled in every implementation: the Wasmtime host
+defers network teardown by a bounded `CLOSE_DRAIN` grace on `close()` and
+on resource drop, the in-guest `wasip3-impl` driver drains before its
+rtc-level close, and the jco host closes its channels at once (keeping the
+post-close contract) but tears the connection down only after every
+channel's `bufferedAmount` drains, bounded by `CLOSE_DRAIN_MS`.
 
-## G. Development environment / CI
+Remaining: the **channel-level** close is now flush-aware in all three
+implementations (`bufferedAmount` in the jco host; `outstanding_bytes`
+from `webrtc`/`rtc` in the Rust implementations, polled bounded before the
+transport close). The **connection-level** graces are still blind timers
+(`CLOSE_DRAIN` on close/drop in the Wasmtime host and the wasip3 pump's
+drain window): a too-slow path can still lose the final message at the
+bound, and every close pays the full grace even when nothing is queued.
+Summing the per-channel outstanding bytes before the connection teardown
+would give the connection path the same shape.
 
-### G1. jco transpile flags are not checked against the WIT
+### F7. Unify the remaining corpus mirrors (plan + params)
 
-Any interface/method rename must be mirrored by hand in the
-`--async-exports` / `--async-imports` / `--map` strings in
-`jco-impl/package.json:9` (AGENTS.md documents this), but nothing verifies it —
-a mismatch fails only at transpile or runtime. Add a CI check (or generate the
-flags from the WIT) so a drifted rename fails fast with a clear message.
+The test ids are now cross-checked (each full-corpus adapter verifies its
+registered list against the guest's `list-tests` export before running; the
+runner rejects results for unregistered ids and warns on missing cells in
+report-backed rows; empty `--only` selections are errors). Still mirrored by
+hand with no consistency check:
+
+- the orchestration plan (guest `run()` dispatch, `plan_for()` in
+  `conformance/adapters/common/src/lib.rs`, `IN_PROCESS` in
+  `conformance/adapters/jco/driver.js`), and
+- the message params (`params_for()` / `paramsFor()`, plus re-defaulted
+  `4`/`256` in the peer binaries).
+
+The natural next step is to make `list-tests` authoritative for these too:
+extend `test-descriptor` with the plan (and params), have the adapters
+consume it, and delete the mirrors. Separately, `Missing` in a full-corpus
+loopback row could be escalated from a warning to a failure once expected
+coverage is expressible per target (the interop pairs legitimately run the
+two-peer subset).
+
+### F11. jco in-process test timeouts cannot cancel the timed-out attempt
+
+The jco adapters' `withTimeout` (`conformance/adapters/jco/driver.js`)
+abandons but cannot cancel a timed-out test attempt: the wedged guest
+instances, their `RTCPeerConnection`s and pending long-polls keep running in
+the same Node/browser process for the rest of the corpus and can degrade
+later tests with no attribution (contrast: the wasmtime adapter drops the
+`Store`, and subprocess peers are `kill_on_drop`). Consider per-test child
+processes for jco-node (matching the other adapters' isolation) or at least
+noting the contamination risk in the result document.
 
 ## Suggested priority
 
-1. Cheap hygiene: the transpile-flag CI check (G1), the remaining
-   conformance-matrix gaps (A3).
+1. Flush-aware teardown at the connection level (F5, upstream-gated) and
+   the upstream reports it depends on (E14, E15).
+2. The rest as touched: the remaining corpus-mirror unification (F7), jco
+   in-process timeout isolation (F11), the remaining conformance-matrix
+   gaps (A3).

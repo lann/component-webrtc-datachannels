@@ -34,10 +34,13 @@ use crate::wasi::sockets::types::{
 
 /// The pump's timer-service tick interval. The stack's retransmit and
 /// keep-alive deadlines are serviced on the next tick rather than at their
-/// exact instant, bounding timer latency at one interval — mirroring the
-/// reference driver's 50ms cap — in exchange for a tick future that is never
-/// cancelled mid-flight.
+/// exact instant, bounding timer latency at one interval, in exchange for a
+/// tick future that is never cancelled mid-flight.
 const MAX_WAIT_NANOS: u64 = 50_000_000;
+
+/// How long a locally-closed channel's flush (waiting for the core to release
+/// its pending sends) may take before the rtc-level close proceeds anyway.
+pub const CHANNEL_CLOSE_FLUSH_BOUND: Duration = Duration::from_secs(1);
 
 /// How long the pump keeps draining after a local `close` when the core has not
 /// yet reported the close complete: long enough for the final queued sends (a
@@ -63,8 +66,8 @@ pub struct InboundMessage {
 /// future resolves as soon as the version has advanced past it, so a
 /// notification between the check and the await is never lost. The pump
 /// notifies after applying core events; `begin_close` and the
-/// `receive-via-stream` claim notify directly. This replaces fixed-interval
-/// polling, so idle waiters wake only on actual state changes.
+/// `receive-via-stream` claim notify directly, so idle waiters wake only on
+/// actual state changes, never on a timer.
 #[derive(Default)]
 pub struct StateWatch {
     version: Cell<u64>,
@@ -123,7 +126,8 @@ impl Future for Changed {
 /// matches the W3C `RTCDataChannel` floor, where none is possible), so this
 /// bound is what protects memory from a slow reader: when it would be exceeded
 /// the channel is closed and, once the buffered backlog drains, `receive`
-/// fails with `error.receive-buffer-overflow`. Matches the other hosts' bound.
+/// fails with `error.receive-buffer-overflow`. The value is the 8 MiB
+/// convention the WIT inbound-buffering contract documents.
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
 /// The environment variable overriding [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]
@@ -131,16 +135,22 @@ pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 /// bound so its overflow probe needs only a small flood.
 pub const MAX_INBOUND_BUFFER_ENV: &str = "WEBRTC_MAX_INBOUND_BUFFER_BYTES";
 
-/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set to
-/// a positive integer, else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`].
+/// The configured inbound buffer bound: [`MAX_INBOUND_BUFFER_ENV`] when set,
+/// else [`DEFAULT_MAX_INBOUND_BUFFER_BYTES`]. A set-but-invalid value (not a
+/// positive integer) panics rather than silently reverting to the default:
+/// the variable is primarily a test knob, and a typo that silently restores
+/// the 8 MiB bound would invalidate exactly the test that set it.
 fn max_inbound_buffer_bytes() -> usize {
     static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *LIMIT.get_or_init(|| {
-        std::env::var(MAX_INBOUND_BUFFER_ENV)
+    *LIMIT.get_or_init(|| match std::env::var(MAX_INBOUND_BUFFER_ENV) {
+        Ok(value) if !value.is_empty() => value
+            .parse()
             .ok()
-            .and_then(|value| value.parse().ok())
             .filter(|&bytes| bytes > 0)
-            .unwrap_or(DEFAULT_MAX_INBOUND_BUFFER_BYTES)
+            .unwrap_or_else(|| {
+                panic!("invalid {MAX_INBOUND_BUFFER_ENV} {value:?}: expected a positive byte count")
+            }),
+        _ => DEFAULT_MAX_INBOUND_BUFFER_BYTES,
     })
 }
 
@@ -166,6 +176,13 @@ pub struct Channel {
     pub stream_claimed: bool,
     /// True once the channel (or its connection) has closed.
     pub closed: bool,
+    /// A local `close()` awaiting its flush: the pump performs the rtc-level
+    /// close once the channel's outstanding bytes drain (or the bounded flush
+    /// window lapses), so pending sends reach the wire first. While set (with
+    /// `closed`), `state-changes` reports `closing` rather than `closed`.
+    pub local_close_pending: bool,
+    /// The bound on the local close's flush wait.
+    pub close_flush_deadline: Option<Instant>,
 }
 
 impl Channel {
@@ -178,6 +195,8 @@ impl Channel {
             overflowed: false,
             stream_claimed: false,
             closed: false,
+            local_close_pending: false,
+            close_flush_deadline: None,
         }
     }
 
@@ -196,6 +215,17 @@ pub struct Shared {
     pub peer: SansIoPeer,
     /// Every channel seen so far, in open order.
     pub channels: Vec<Channel>,
+    /// The ids of channels created locally via `create-data-channel`, so
+    /// `incoming-data-channels` can deliver only remote-created channels.
+    pub local_channels: Vec<RTCDataChannelId>,
+    /// Channels whose inbound messages `receive-via-stream` claimed before the
+    /// pump observed their open (they are not yet in `channels`); the claim is
+    /// applied to the tracked channel when its open event drains.
+    pub pending_stream_claims: Vec<RTCDataChannelId>,
+    /// Channels locally closed before the pump observed their open; applied to
+    /// the tracked channel when its open event drains, so a
+    /// `create-data-channel` + `close` pair never resurrects the channel.
+    pub pending_closes: Vec<RTCDataChannelId>,
     /// Whether the connection reached `connected`.
     pub connected: bool,
     /// Whether the connection failed.
@@ -287,6 +317,9 @@ impl Runtime {
         let shared = Rc::new(RefCell::new(Shared {
             peer,
             channels: Vec::new(),
+            local_channels: Vec::new(),
+            pending_stream_claims: Vec::new(),
+            pending_closes: Vec::new(),
             connected: false,
             failed: false,
             closed: false,
@@ -310,7 +343,7 @@ impl Runtime {
 
     /// A cheap handle the exported resources use to nudge the pump after they
     /// mutate the core.
-    pub fn waker(&self) -> mpsc::UnboundedSender<()> {
+    pub fn pump_nudge(&self) -> mpsc::UnboundedSender<()> {
         self.wake_tx.clone()
     }
 
@@ -348,6 +381,29 @@ impl Runtime {
             flush(&shared, &socket).await;
             let (done, had_events) = {
                 let mut s = shared.borrow_mut();
+                // Service locally-closed channels: perform the rtc-level close
+                // once the channel's pending sends have been released by SCTP
+                // (or the bounded flush window lapses), so a close never
+                // discards data the guest already handed to the transport.
+                let mut serviced = false;
+                for index in 0..s.channels.len() {
+                    let (id, pending, deadline) = {
+                        let c = &s.channels[index];
+                        (c.id, c.local_close_pending, c.close_flush_deadline)
+                    };
+                    if !pending {
+                        continue;
+                    }
+                    let flushed = s.peer.channel_outstanding_bytes(id) == 0;
+                    let expired = deadline.is_none_or(|d| Instant::now() >= d);
+                    if flushed || expired {
+                        s.peer.close_data_channel(id);
+                        let c = &mut s.channels[index];
+                        c.local_close_pending = false;
+                        c.close_flush_deadline = None;
+                        serviced = true;
+                    }
+                }
                 if s.close_requested {
                     s.close_requested = false;
                     s.peer.close();
@@ -365,7 +421,7 @@ impl Runtime {
                     || (s.closed
                         && (s.shutdown_complete
                             || s.drain_deadline.is_none_or(|d| Instant::now() >= d)));
-                (done, had_events)
+                (done, had_events || serviced)
             };
             if had_events {
                 watch.notify();
@@ -443,6 +499,17 @@ fn apply_event(s: &mut Shared, event: PeerEvent) {
                 // tracked already-closed, so `send`/`receive` on its handle
                 // observe `closed` rather than a spuriously usable channel.
                 channel.closed = s.closed || s.failed;
+                // Apply a `receive-via-stream` claim or a local close made
+                // while the channel was still opening (see
+                // `Shared::pending_stream_claims` / `Shared::pending_closes`).
+                channel.stream_claimed = s.pending_stream_claims.contains(&id);
+                s.pending_stream_claims.retain(|&claimed| claimed != id);
+                if s.pending_closes.contains(&id) {
+                    channel.closed = true;
+                    channel.local_close_pending = true;
+                    channel.close_flush_deadline = Some(Instant::now() + CHANNEL_CLOSE_FLUSH_BOUND);
+                }
+                s.pending_closes.retain(|&closed| closed != id);
                 s.channels.push(channel);
             }
         }

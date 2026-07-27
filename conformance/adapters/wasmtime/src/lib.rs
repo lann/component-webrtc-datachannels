@@ -32,6 +32,8 @@ pub mod bindings {
         with: {
             "lann:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
+            "lann:webrtc-datachannels/connections.peer-connection-config":
+                wasmtime_webrtc_datachannels::PeerConnectionConfig,
             "lann:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
             "lann:webrtc-datachannels/connections.peer-connection":
@@ -274,6 +276,7 @@ pub fn new_store(engine: &Engine) -> Store<Ctx> {
     webrtc.set_setting_engine_hook(|engine| {
         engine.set_include_loopback_candidate(true);
     });
+    apply_env_buffer_bound(&mut webrtc);
     Store::new(
         engine,
         Ctx {
@@ -303,6 +306,7 @@ pub fn new_store_with_ice(engine: &Engine, ice: WebrtcIceConfig, disable_mdns: b
             engine.set_multicast_dns_mode(rtc::ice::mdns::MulticastDnsMode::Disabled);
         });
     }
+    apply_env_buffer_bound(&mut webrtc);
     Store::new(
         engine,
         Ctx {
@@ -310,6 +314,27 @@ pub fn new_store_with_ice(engine: &Engine, ice: WebrtcIceConfig, disable_mdns: b
             table: ResourceTable::new(),
         },
     )
+}
+
+/// Apply the `WEBRTC_MAX_INBOUND_BUFFER_BYTES` override to the host context
+/// when set (the host crate itself reads no environment). A malformed value
+/// panics: silently reverting to the default bound would invalidate exactly
+/// the overflow test that set it.
+fn apply_env_buffer_bound(webrtc: &mut WasiWebrtcCtx) {
+    let env = conformance_adapter_common::MAX_INBOUND_BUFFER_ENV;
+    match std::env::var(env) {
+        Ok(value) if !value.is_empty() => {
+            let bytes = value
+                .parse::<usize>()
+                .ok()
+                .filter(|&bytes| bytes > 0)
+                .unwrap_or_else(|| {
+                    panic!("invalid {env} {value:?}: expected a positive byte count")
+                });
+            webrtc.set_max_inbound_buffer_bytes(bytes);
+        }
+        _ => {}
+    }
 }
 
 /// Build a test config for one instance.
@@ -320,7 +345,6 @@ pub fn make_config(role: Role, base_url: &str, room: &str, count: u32, size: u32
         room: room.to_string(),
         message_count: count,
         message_size: size,
-        trickle: true,
     }
 }
 
@@ -403,4 +427,21 @@ async fn run_instance_in_store(
         TestResult::Fail(detail) => TestOutcome::Fail(detail),
         TestResult::Skipped(reason) => TestOutcome::Skipped(reason),
     })
+}
+
+/// Instantiate the guest once and return the test ids from its `list-tests`
+/// export, so an adapter can verify its registered corpus mirrors the corpus
+/// the guest actually implements (see
+/// [`verify_corpus`](conformance_adapter_common::verify_corpus)).
+pub async fn list_guest_tests(engine: &Engine, component: &Component) -> Result<Vec<String>> {
+    let mut store = new_store(engine);
+    let mut linker: Linker<Ctx> = Linker::new(engine);
+    webrtc_host::add_to_linker(&mut linker)?;
+    add_mailbox_to_linker(&mut linker)?;
+    let instance = Conformance::instantiate_async(&mut store, component, &linker).await?;
+    let descriptors = instance
+        .conformance_suite_runner()
+        .call_list_tests(&mut store)
+        .await?;
+    Ok(descriptors.into_iter().map(|d| d.id).collect())
 }

@@ -70,6 +70,9 @@ pub enum PeerKind {
     Wasmtime,
     /// The composed wasip3 conformance component under `wasmtime run`.
     Wasip3Guest,
+    /// The non-wasm reference peer: a native binary driving Google's
+    /// libwebrtc (via LiveKit's Rust bindings) directly.
+    Reference,
 }
 
 impl PeerKind {
@@ -78,6 +81,7 @@ impl PeerKind {
         match self {
             PeerKind::Wasmtime => "wasmtime",
             PeerKind::Wasip3Guest => "wasip3-guest",
+            PeerKind::Reference => "reference",
         }
     }
 }
@@ -112,18 +116,24 @@ pub enum PeerCommand {
         wasmtime_bin: PathBuf,
         component: PathBuf,
     },
+    /// `conformance-reference-peer …` — libwebrtc gathers candidates from the
+    /// host's own interfaces, so the placement's bind address is not passed
+    /// (each lab host has exactly one routable address).
+    Reference { peer_bin: PathBuf },
 }
 
 impl PeerCommand {
     /// Resolve `kind`'s binaries and components to absolute paths. `guest` and
     /// `peer_bin` serve the `wasmtime` kind; `wasmtime_bin` (a path or a bare
-    /// name looked up on `PATH`) and `component` serve the `wasip3-guest` kind.
+    /// name looked up on `PATH`) and `component` serve the `wasip3-guest`
+    /// kind; `reference_peer` serves the `reference` kind.
     pub fn resolve(
         kind: PeerKind,
         peer_bin: &Path,
         guest: &Path,
         wasmtime_bin: &str,
         component: &Path,
+        reference_peer: &Path,
     ) -> Result<Self> {
         Ok(match kind {
             PeerKind::Wasmtime => PeerCommand::Wasmtime {
@@ -133,6 +143,9 @@ impl PeerCommand {
             PeerKind::Wasip3Guest => PeerCommand::Wasip3Guest {
                 wasmtime_bin: resolve_bin(wasmtime_bin)?,
                 component: absolute(component)?,
+            },
+            PeerKind::Reference => PeerCommand::Reference {
+                peer_bin: absolute(reference_peer)?,
             },
         })
     }
@@ -199,27 +212,41 @@ impl PeerCommand {
                          is supported for this peer kind"
                     );
                 }
-                // Mirror the loopback wasip3 adapter's `wasmtime run`
-                // invocation, plus the provider's bind-address environment
-                // variable pointing it at this peer's address.
-                let mut args = vec![
-                    wasmtime_bin.to_string_lossy().into_owned(),
-                    "run".to_string(),
-                    "-W".to_string(),
-                    "component-model-async=y".to_string(),
-                    "-S".to_string(),
-                    "cli".to_string(),
-                    "-S".to_string(),
-                    "p3".to_string(),
-                    "-S".to_string(),
-                    "http".to_string(),
-                    "-S".to_string(),
-                    "inherit-network".to_string(),
+                // The shared composed-component `wasmtime run` prefix, plus
+                // the provider's bind-address environment variable pointing
+                // it at this peer's address.
+                let mut args = vec![wasmtime_bin.to_string_lossy().into_owned()];
+                args.extend(
+                    crate::COMPOSED_WASMTIME_RUN_FLAGS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                args.extend([
                     "--env".to_string(),
                     format!("WEBRTC_UDP_BIND_ADDR={}", run.bind_addr),
                     component.to_string_lossy().into_owned(),
-                ];
+                ]);
                 args.extend(shared_peer_args);
+                args
+            }
+            PeerCommand::Reference { peer_bin } => {
+                let mut args = vec![peer_bin.to_string_lossy().into_owned()];
+                args.extend(shared_peer_args);
+                if let Some(ice) = run.ice {
+                    if let Some(url) = &ice.server_url {
+                        args.extend([
+                            "--ice-server-url".to_string(),
+                            url.clone(),
+                            "--ice-username".to_string(),
+                            ice.username.clone(),
+                            "--ice-credential".to_string(),
+                            ice.credential.clone(),
+                        ]);
+                    }
+                    if ice.relay_only {
+                        args.push("--relay-only".to_string());
+                    }
+                }
                 args
             }
         })
@@ -301,5 +328,26 @@ mod tests {
         let argv = command.argv(&run(Some(&PeerIce::default()))).unwrap();
         assert!(argv.contains(&"--env".to_string()));
         assert!(argv.contains(&"WEBRTC_UDP_BIND_ADDR=10.79.1.2".to_string()));
+    }
+
+    #[test]
+    fn reference_argv_omits_bind_addr_and_maps_ice() {
+        let command = PeerCommand::Reference {
+            peer_bin: PathBuf::from("/bin/conformance-reference-peer"),
+        };
+        let argv = command.argv(&run(None)).unwrap();
+        assert_eq!(argv[0], "/bin/conformance-reference-peer");
+        assert!(!argv.contains(&"--bind-addr".to_string()));
+        assert!(!argv.contains(&"--ice-server-url".to_string()));
+
+        let ice = PeerIce {
+            server_url: Some("turn:10.79.3.2:3478?transport=udp".to_string()),
+            username: "conf".to_string(),
+            credential: "conf".to_string(),
+            relay_only: true,
+        };
+        let argv = command.argv(&run(Some(&ice))).unwrap();
+        assert!(argv.contains(&"--ice-server-url".to_string()));
+        assert!(argv.contains(&"--relay-only".to_string()));
     }
 }

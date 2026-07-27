@@ -17,7 +17,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use conformance_adapter_common::{run_peer_command, TestOutcome};
 
 /// A runner for one wasip3-guest peer: the composed component plus the
@@ -35,10 +35,9 @@ impl Wasip3Peer {
     /// signaling server at `server`, parsing the driver's single-line JSON
     /// `test-result` from stdout.
     ///
-    /// The flags mirror `just test-webrtc-composed` plus `-S http` for the
-    /// in-guest mailbox client: the component-model async ABI, the WASIp3 host
-    /// APIs, and network access for the provider's `wasi:sockets` UDP and the
-    /// mailbox's outgoing HTTP.
+    /// The component runs under the shared
+    /// [`conformance_adapter_common::COMPOSED_WASMTIME_RUN_FLAGS`], with the
+    /// conformance inbound-buffer bound applied through the environment.
     #[allow(clippy::too_many_arguments)]
     pub async fn run(
         &self,
@@ -60,18 +59,7 @@ impl Wasip3Peer {
             command.env("WASMTIME_LOG", "wasmtime_wasi_http=warn");
         }
         command
-            .arg("run")
-            .args(["-W", "component-model-async=y"])
-            .args([
-                "-S",
-                "cli",
-                "-S",
-                "p3",
-                "-S",
-                "http",
-                "-S",
-                "inherit-network",
-            ])
+            .args(conformance_adapter_common::COMPOSED_WASMTIME_RUN_FLAGS)
             .args([
                 "--env",
                 &format!(
@@ -88,5 +76,42 @@ impl Wasip3Peer {
             .args(["--message-count", &count.to_string()])
             .args(["--message-size", &size.to_string()]);
         run_peer_command(command, &format!("wasip3-guest peer {test_id}/{role}")).await
+    }
+
+    /// Run the composed component once with `--list-tests` and return the
+    /// guest's corpus ids, so the orchestrator can verify its registered test
+    /// list against the guest's list-tests export before running the corpus.
+    pub async fn list_tests(&self) -> Result<Vec<String>> {
+        let mut command = tokio::process::Command::new(&self.wasmtime_bin);
+        command
+            .arg("run")
+            .args(["-W", "component-model-async=y"])
+            .args([
+                "-S",
+                "cli",
+                "-S",
+                "p3",
+                "-S",
+                "http",
+                "-S",
+                "inherit-network",
+            ])
+            .arg(&self.component)
+            .arg("--list-tests")
+            .stdin(std::process::Stdio::null());
+        let output = command.output().await.context("running --list-tests")?;
+        anyhow::ensure!(
+            output.status.success(),
+            "--list-tests exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let line = stdout
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        serde_json::from_str(line.trim()).context("parsing --list-tests output")
     }
 }

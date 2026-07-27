@@ -15,7 +15,7 @@
 //! makes the peer's host candidate reachable across a real (non-loopback)
 //! network path, as the Shadow lab exercises.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::net::{IpAddr, Ipv4Addr};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -23,13 +23,15 @@ use std::time::{Duration, Instant};
 use futures::channel::mpsc;
 
 use crate::peer::SansIoPeer;
-use crate::runtime::{InboundMessage, Runtime, Shared};
+use crate::runtime::{InboundMessage, Runtime, Shared, CHANNEL_CLOSE_FLUSH_BOUND};
 
 use crate::exports::lann::webrtc_datachannels::connections::{
     Guest, GuestDataChannel, GuestDataChannelOptions, GuestPeerConnection,
+    GuestPeerConnectionConfig,
 };
 use crate::lann::webrtc_datachannels::types::{
-    Error, IceCandidate, Message, MessageKind, SendViaStreamError, SessionDescription,
+    ConfigError, ConnectionState, DataChannelState, Error, IceCandidate, IceServer,
+    IceTransportPolicy, Message, MessageKind, SendViaStreamError, SessionDescription,
     StreamMessage,
 };
 
@@ -42,8 +44,8 @@ const LOOPBACK: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
 const BIND_ADDR_ENV: &str = "WEBRTC_UDP_BIND_ADDR";
 
 /// The bind address chosen through [`BIND_ADDR_ENV`]. A set-but-unparsable
-/// value is an error (surfaced through the dead-peer path) rather than a
-/// silent fallback to loopback.
+/// value is an error (the connection is constructed dead, so methods fail
+/// `closed`) rather than a silent fallback to loopback.
 fn bind_ip() -> anyhow::Result<IpAddr> {
     match std::env::var(BIND_ADDR_ENV) {
         Ok(value) if !value.is_empty() => value
@@ -63,6 +65,7 @@ pub struct Component;
 
 impl Guest for Component {
     type DataChannelOptions = DataChannelOptions;
+    type PeerConnectionConfig = PeerConnectionConfig;
     type DataChannel = DataChannel;
     type PeerConnection = PeerConnection;
 }
@@ -126,14 +129,60 @@ impl GuestDataChannelOptions for DataChannelOptions {
     }
 }
 
+// --- peer-connection-config ---------------------------------------------------
+
+/// The exported `peer-connection-config` builder.
+///
+/// The sans-I/O stack has no STUN/TURN client, so `set-ice-servers` (and the
+/// `relay` policy, which requires TURN) fail `not-supported` — per the WIT
+/// contract this surfaces at the setter, so a config this provider accepted
+/// is always honored by the connection built with it.
+pub struct PeerConnectionConfig {
+    policy: Cell<IceTransportPolicy>,
+}
+
+impl GuestPeerConnectionConfig for PeerConnectionConfig {
+    fn new() -> Self {
+        Self {
+            policy: Cell::new(IceTransportPolicy::All),
+        }
+    }
+
+    fn ice_servers(&self) -> Vec<IceServer> {
+        // `set-ice-servers` never succeeds here, so the stored list is empty.
+        Vec::new()
+    }
+
+    fn set_ice_servers(&self, _servers: Vec<IceServer>) -> Result<(), ConfigError> {
+        Err(ConfigError::NotSupported)
+    }
+
+    fn ice_transport_policy(&self) -> IceTransportPolicy {
+        self.policy.get()
+    }
+
+    fn set_ice_transport_policy(&self, policy: IceTransportPolicy) -> Result<(), ConfigError> {
+        match policy {
+            IceTransportPolicy::All => {
+                self.policy.set(policy);
+                Ok(())
+            }
+            // Relaying requires TURN support.
+            IceTransportPolicy::Relay => Err(ConfigError::NotSupported),
+        }
+    }
+}
+
 // --- data-channel -----------------------------------------------------------
 
 /// A handle onto a channel tracked by a peer connection's shared state.
 pub struct DataChannel {
     shared: Rc<RefCell<Shared>>,
-    waker: mpsc::UnboundedSender<()>,
+    nudge: mpsc::UnboundedSender<()>,
     id: rtc::data_channel::RTCDataChannelId,
     label: String,
+    /// Take-once claim for `state-changes` (the WIT contract).
+    state_taken: Cell<bool>,
 }
 
 /// The channel's state as observed through the shared state: usable, still
@@ -162,6 +211,40 @@ fn channel_state(s: &mut Shared, id: rtc::data_channel::RTCDataChannelId) -> Cha
 }
 
 impl DataChannel {
+    /// Close the channel: mark it closed at once (in-flight and later
+    /// operations observe `error.closed`; the unread inbound backlog is
+    /// discarded per the WIT contract), then hand the transport-level close to
+    /// the core and nudge the pump so the closing handshake flushes.
+    fn close_impl(&self) {
+        {
+            let mut s = self.shared.borrow_mut();
+            match s.channel_mut(self.id) {
+                Some(channel) => {
+                    if channel.closed {
+                        return;
+                    }
+                    channel.closed = true;
+                    channel.inbox.clear();
+                    channel.inbox_bytes = 0;
+                    // The rtc-level close is deferred to the pump so pending
+                    // sends flush first (see `Channel::local_close_pending`).
+                    channel.local_close_pending = true;
+                    channel.close_flush_deadline = Some(Instant::now() + CHANNEL_CLOSE_FLUSH_BOUND);
+                }
+                // Not yet tracked (still opening): record the close so the
+                // open event drains into an already-closed channel.
+                None => {
+                    if s.pending_closes.contains(&self.id) {
+                        return;
+                    }
+                    s.pending_closes.push(self.id);
+                }
+            }
+            s.watch.notify();
+        }
+        let _ = self.nudge.unbounded_send(());
+    }
+
     /// Wait until the channel is open (or learn it closed), then run `op` on the
     /// shared state.
     async fn when_open<T>(
@@ -199,7 +282,7 @@ impl GuestDataChannel for DataChannel {
             result.map_err(|e| Error::Other(e.to_string()))
         })
         .await?;
-        let _ = self.waker.unbounded_send(());
+        let _ = self.nudge.unbounded_send(());
         Ok(())
     }
 
@@ -211,6 +294,7 @@ impl GuestDataChannel for DataChannel {
                 let mut s = self.shared.borrow_mut();
                 seen = s.watch.version();
                 let dead = s.closed || s.failed;
+                let pending_claim = s.pending_stream_claims.contains(&self.id);
                 match s.channel_mut(self.id) {
                     Some(channel) => {
                         // `receive-via-stream` has claimed the inbound
@@ -233,6 +317,9 @@ impl GuestDataChannel for DataChannel {
                             return Err(Error::Closed);
                         }
                     }
+                    // `receive-via-stream` claimed the channel while it was
+                    // still opening.
+                    None if pending_claim => return Err(Error::ReceivingViaStream),
                     // Not yet tracked: still opening unless the connection died.
                     None if dead => return Err(Error::Closed),
                     None => {}
@@ -266,7 +353,7 @@ impl GuestDataChannel for DataChannel {
                 if let Err(error) = result {
                     return Err(SendViaStreamError { error, sent });
                 }
-                let _ = self.waker.unbounded_send(());
+                let _ = self.nudge.unbounded_send(());
                 sent += 1;
             }
             if matches!(
@@ -279,24 +366,47 @@ impl GuestDataChannel for DataChannel {
         Ok(())
     }
 
+    fn close(&self) {
+        self.close_impl();
+    }
+
+    fn state_changes(&self) -> wit_bindgen::StreamReader<DataChannelState> {
+        let (tx, rx) = crate::wit_stream::new();
+        // Take-once per the WIT contract.
+        if self.state_taken.replace(true) {
+            drop(tx);
+            return rx;
+        }
+        wit_bindgen::spawn_local(pump_channel_states(self.shared.clone(), self.id, tx));
+        rx
+    }
+
     fn receive_via_stream(&self) -> Result<wit_bindgen::StreamReader<StreamMessage>, Error> {
         {
             let mut s = self.shared.borrow_mut();
             // Once-only: the first call claims the channel's inbound messages.
-            if let Some(channel) = s.channel_mut(self.id) {
-                if channel.stream_claimed {
-                    return Err(Error::ReceivingViaStream);
+            // A channel the pump has not yet tracked (state `Opening`) records
+            // the claim in `pending_stream_claims`, applied when its open
+            // event drains.
+            match channel_state(&mut s, self.id) {
+                ChannelState::Closed => return Err(Error::Closed),
+                ChannelState::Open => {
+                    let channel = s.channel_mut(self.id).expect("open channel is tracked");
+                    if channel.stream_claimed {
+                        return Err(Error::ReceivingViaStream);
+                    }
+                    channel.stream_claimed = true;
+                }
+                ChannelState::Opening => {
+                    if s.pending_stream_claims.contains(&self.id) {
+                        return Err(Error::ReceivingViaStream);
+                    }
+                    s.pending_stream_claims.push(self.id);
                 }
             }
-            if matches!(channel_state(&mut s, self.id), ChannelState::Closed) {
-                return Err(Error::Closed);
-            }
-            if let Some(channel) = s.channel_mut(self.id) {
-                channel.stream_claimed = true;
-                // Wake pending `receive`s so they resolve with
-                // `receiving-via-stream`.
-                s.watch.notify();
-            }
+            // Wake pending `receive`s so they resolve with
+            // `receiving-via-stream`.
+            s.watch.notify();
         }
         let shared = self.shared.clone();
         let id = self.id;
@@ -306,27 +416,36 @@ impl GuestDataChannel for DataChannel {
     }
 }
 
+impl Drop for DataChannel {
+    fn drop(&mut self) {
+        // Dropping the resource without calling `close` implies `close`, per
+        // the WIT contract.
+        self.close_impl();
+    }
+}
+
 // --- peer-connection --------------------------------------------------------
 
 /// The exported `peer-connection`: owns a bound socket + sans-I/O core, driven
-/// by a detached pump.
+/// by a detached pump. `None` when construction failed (the bind address was
+/// invalid or the socket could not bind): a dead connection, observed by every
+/// method as already closed.
 pub struct PeerConnection {
-    inner: RefCell<PeerState>,
+    inner: RefCell<Option<PeerState>>,
 }
 
 struct PeerState {
     shared: Rc<RefCell<Shared>>,
-    waker: mpsc::UnboundedSender<()>,
+    nudge: mpsc::UnboundedSender<()>,
     local_candidate: String,
-    /// The id of the channel created locally via `create-data-channel`, if any.
-    local_channel: Option<rtc::data_channel::RTCDataChannelId>,
     /// The local host candidate, delivered once through `local-ice-candidates`.
     candidate_taken: bool,
     /// Whether `incoming-data-channels` has been taken: the stream is
     /// take-once, and channels are never re-delivered on a later stream.
     incoming_taken: bool,
-    /// Which channel ids have already been surfaced via
-    /// `incoming-data-channels`.
+    /// Whether `state-changes` has been taken (take-once, per the WIT).
+    state_taken: bool,
+    /// Whether the pump task has been spawned (see `ensure_pump`).
     started_pump: bool,
     runtime: Option<(Runtime, mpsc::UnboundedReceiver<()>)>,
 }
@@ -342,40 +461,48 @@ impl PeerConnection {
             state.started_pump = true;
         }
     }
+
+    /// The live state, or `error::closed` for a dead connection.
+    fn live(&self) -> Result<std::cell::RefMut<'_, PeerState>, Error> {
+        std::cell::RefMut::filter_map(self.inner.borrow_mut(), |state| state.as_mut())
+            .map_err(|_| Error::Closed)
+    }
 }
 
 impl GuestPeerConnection for PeerConnection {
-    fn new() -> Self {
+    fn new(
+        config: Option<
+            crate::exports::lann::webrtc_datachannels::connections::PeerConnectionConfig,
+        >,
+    ) -> Self {
+        // Every option a supplied config carries was accepted by its setter,
+        // and this provider only ever accepts the defaults (no ICE servers,
+        // the `all` policy — see `PeerConnectionConfig`), so there is nothing
+        // to apply beyond taking ownership.
+        drop(config);
         // Bind on construction so `create-data-channel` and signaling work; the
-        // pump starts lazily on the first async call. If binding fails, defer
-        // the error to the first async method (constructors cannot fail here).
-        let peer = SansIoPeer::answerer();
+        // pump starts lazily on the first async call. If binding fails, the
+        // connection is constructed dead (constructors cannot fail here) and
+        // every method observes it as already closed.
+        let peer = SansIoPeer::new();
         let built = peer.and_then(|peer| Runtime::bind(peer, bind_ip()?));
-        match built {
-            Ok((runtime, wake_rx, candidate)) => PeerConnection {
-                inner: RefCell::new(PeerState {
-                    shared: runtime.shared(),
-                    waker: runtime.waker(),
-                    local_candidate: candidate,
-                    local_channel: None,
-                    candidate_taken: false,
-                    incoming_taken: false,
-                    started_pump: false,
-                    runtime: Some((runtime, wake_rx)),
-                }),
-            },
-            Err(_) => PeerConnection {
-                inner: RefCell::new(PeerState {
-                    shared: Rc::new(RefCell::new(dead_shared())),
-                    waker: mpsc::unbounded().0,
-                    local_candidate: String::new(),
-                    local_channel: None,
-                    candidate_taken: true,
-                    incoming_taken: true,
-                    started_pump: true,
-                    runtime: None,
-                }),
-            },
+        if let Err(err) = &built {
+            // The construction error itself cannot be returned (constructors
+            // are infallible here); make the cause visible before the dead
+            // connection surfaces it as `error.closed`.
+            eprintln!("peer-connection construction failed: {err:#}");
+        }
+        PeerConnection {
+            inner: RefCell::new(built.ok().map(|(runtime, wake_rx, candidate)| PeerState {
+                shared: runtime.shared(),
+                nudge: runtime.pump_nudge(),
+                local_candidate: candidate,
+                candidate_taken: false,
+                incoming_taken: false,
+                state_taken: false,
+                started_pump: false,
+                runtime: Some((runtime, wake_rx)),
+            })),
         }
     }
 
@@ -384,7 +511,7 @@ impl GuestPeerConnection for PeerConnection {
         options: crate::exports::lann::webrtc_datachannels::connections::DataChannelOptions,
     ) -> Result<crate::exports::lann::webrtc_datachannels::connections::DataChannel, Error> {
         let config = options.get::<DataChannelOptions>().snapshot();
-        let mut state = self.inner.borrow_mut();
+        let state = self.live()?;
         let id = {
             let mut s = state.shared.borrow_mut();
             // Per the WIT contract, methods on a closed connection fail
@@ -392,16 +519,21 @@ impl GuestPeerConnection for PeerConnection {
             if s.closed || s.failed {
                 return Err(Error::Closed);
             }
-            s.peer
+            let id = s
+                .peer
                 .create_data_channel(&config.label, config.ordered, config.max_retransmits)
-                .map_err(|e| Error::Other(e.to_string()))?
+                .map_err(|e| Error::Other(e.to_string()))?;
+            // Record the id as locally created so `incoming-data-channels`
+            // never delivers it.
+            s.local_channels.push(id);
+            id
         };
-        state.local_channel = Some(id);
         let dc = DataChannel {
             shared: state.shared.clone(),
-            waker: state.waker.clone(),
+            nudge: state.nudge.clone(),
             id,
             label: config.label,
+            state_taken: Cell::new(false),
         };
         Ok(crate::exports::lann::webrtc_datachannels::connections::DataChannel::new(dc))
     }
@@ -411,25 +543,47 @@ impl GuestPeerConnection for PeerConnection {
     ) -> wit_bindgen::StreamReader<
         crate::exports::lann::webrtc_datachannels::connections::DataChannel,
     > {
-        let mut state = self.inner.borrow_mut();
         let (tx, rx) = crate::wit_stream::new();
-        // Take-once per the WIT contract: a later call returns a stream that
-        // ends immediately, and channels are never re-delivered.
-        if state.incoming_taken {
+        // Take-once per the WIT contract: a later call (or any call on a dead
+        // connection) returns a stream that ends immediately, and channels are
+        // never re-delivered.
+        let mut guard = self.inner.borrow_mut();
+        let Some(state) = guard.as_mut().filter(|state| !state.incoming_taken) else {
+            drop(tx);
+            return rx;
+        };
+        state.incoming_taken = true;
+        let shared = state.shared.clone();
+        let nudge = state.nudge.clone();
+        wit_bindgen::spawn_local(pump_incoming(shared, nudge, tx));
+        rx
+    }
+
+    fn state_changes(&self) -> wit_bindgen::StreamReader<ConnectionState> {
+        let (mut tx, rx) = crate::wit_stream::new();
+        let mut guard = self.inner.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            // A dead connection is terminally over: deliver the terminal state
+            // and end.
+            wit_bindgen::spawn_local(async move {
+                let _ = tx.write_all(vec![ConnectionState::Closed]).await;
+                drop(tx);
+            });
+            return rx;
+        };
+        // Take-once per the WIT contract.
+        if state.state_taken {
             drop(tx);
             return rx;
         }
-        state.incoming_taken = true;
-        let shared = state.shared.clone();
-        let waker = state.waker.clone();
-        let local_channel = state.local_channel;
-        wit_bindgen::spawn_local(pump_incoming(shared, waker, local_channel, tx));
+        state.state_taken = true;
+        wit_bindgen::spawn_local(pump_connection_states(state.shared.clone(), tx));
         rx
     }
 
     async fn create_offer(&self) -> Result<SessionDescription, Error> {
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let state = self.inner.borrow();
+        let mut state = self.live()?;
+        PeerConnection::ensure_pump(&mut state);
         let mut s = state.shared.borrow_mut();
         if s.closed || s.failed {
             return Err(Error::Closed);
@@ -438,8 +592,6 @@ impl GuestPeerConnection for PeerConnection {
             .peer
             .create_offer()
             .map_err(|e| Error::Other(e.to_string()))?;
-        drop(s);
-        drop(state);
         Ok(SessionDescription {
             kind: crate::lann::webrtc_datachannels::types::SdpType::Offer,
             sdp,
@@ -447,8 +599,8 @@ impl GuestPeerConnection for PeerConnection {
     }
 
     async fn create_answer(&self) -> Result<SessionDescription, Error> {
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let state = self.inner.borrow();
+        let mut state = self.live()?;
+        PeerConnection::ensure_pump(&mut state);
         let mut s = state.shared.borrow_mut();
         if s.closed || s.failed {
             return Err(Error::Closed);
@@ -466,10 +618,10 @@ impl GuestPeerConnection for PeerConnection {
     async fn set_local_description(&self, _description: SessionDescription) -> Result<(), Error> {
         // `create-offer` / `create-answer` already apply the local description
         // (the sans-I/O core produces and sets it in one step), so this is a
-        // no-op kept for API symmetry — but the post-close contract still
-        // applies.
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let state = self.inner.borrow();
+        // no-op that exists for API symmetry — but the post-close contract
+        // still applies.
+        let mut state = self.live()?;
+        PeerConnection::ensure_pump(&mut state);
         let s = state.shared.borrow();
         if s.closed || s.failed {
             return Err(Error::Closed);
@@ -478,8 +630,8 @@ impl GuestPeerConnection for PeerConnection {
     }
 
     async fn set_remote_description(&self, description: SessionDescription) -> Result<(), Error> {
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let state = self.inner.borrow();
+        let mut state = self.live()?;
+        PeerConnection::ensure_pump(&mut state);
         let mut s = state.shared.borrow_mut();
         if s.closed || s.failed {
             return Err(Error::Closed);
@@ -497,22 +649,25 @@ impl GuestPeerConnection for PeerConnection {
             }
         };
         result.map_err(|e| Error::InvalidSignaling(e.to_string()))?;
-        let _ = state.waker.unbounded_send(());
+        drop(s);
+        let _ = state.nudge.unbounded_send(());
         Ok(())
     }
 
     fn local_ice_candidates(&self) -> wit_bindgen::StreamReader<IceCandidate> {
-        let mut state = self.inner.borrow_mut();
         let (mut tx, rx) = crate::wit_stream::new();
-        let candidate = if state.candidate_taken {
-            None
-        } else {
-            state.candidate_taken = true;
-            Some(IceCandidate {
-                candidate: state.local_candidate.clone(),
-                sdp_mid: None,
-                sdp_mline_index: None,
-            })
+        let mut guard = self.inner.borrow_mut();
+        let candidate = match guard.as_mut().filter(|state| !state.candidate_taken) {
+            Some(state) => {
+                state.candidate_taken = true;
+                Some(IceCandidate {
+                    candidate: state.local_candidate.clone(),
+                    sdp_mid: None,
+                    sdp_mline_index: None,
+                })
+            }
+            // Already taken, or a dead connection: the stream ends immediately.
+            None => None,
         };
         wit_bindgen::spawn_local(async move {
             if let Some(candidate) = candidate {
@@ -524,8 +679,8 @@ impl GuestPeerConnection for PeerConnection {
     }
 
     async fn add_ice_candidate(&self, candidate: IceCandidate) -> Result<(), Error> {
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let state = self.inner.borrow();
+        let mut state = self.live()?;
+        PeerConnection::ensure_pump(&mut state);
         let mut s = state.shared.borrow_mut();
         if s.closed || s.failed {
             return Err(Error::Closed);
@@ -533,13 +688,17 @@ impl GuestPeerConnection for PeerConnection {
         s.peer
             .add_remote_candidate(candidate.candidate)
             .map_err(|e| Error::InvalidSignaling(e.to_string()))?;
-        let _ = state.waker.unbounded_send(());
+        drop(s);
+        let _ = state.nudge.unbounded_send(());
         Ok(())
     }
 
     async fn wait_connected(&self) -> Result<(), Error> {
-        PeerConnection::ensure_pump(&mut self.inner.borrow_mut());
-        let shared = self.inner.borrow().shared.clone();
+        let shared = {
+            let mut state = self.live()?;
+            PeerConnection::ensure_pump(&mut state);
+            state.shared.clone()
+        };
         let watch = shared.borrow().watch.clone();
         let deadline = Instant::now() + CONNECT_TIMEOUT;
         loop {
@@ -568,9 +727,11 @@ impl GuestPeerConnection for PeerConnection {
     }
 
     fn close(&self) {
-        let state = self.inner.borrow();
-        state.shared.borrow_mut().begin_close();
-        let _ = state.waker.unbounded_send(());
+        // Closing a dead connection is a no-op (it is already terminally over).
+        if let Some(state) = self.inner.borrow().as_ref() {
+            state.shared.borrow_mut().begin_close();
+            let _ = state.nudge.unbounded_send(());
+        }
     }
 }
 
@@ -578,8 +739,7 @@ impl GuestPeerConnection for PeerConnection {
 /// side did not create locally, until the connection closes.
 async fn pump_incoming(
     shared: Rc<RefCell<Shared>>,
-    _waker: mpsc::UnboundedSender<()>,
-    local_channel: Option<rtc::data_channel::RTCDataChannelId>,
+    nudge: mpsc::UnboundedSender<()>,
     mut tx: wit_bindgen::StreamWriter<
         crate::exports::lann::webrtc_datachannels::connections::DataChannel,
     >,
@@ -595,7 +755,7 @@ async fn pump_incoming(
                 let id = s.channels[cursor].id;
                 let label = s.channels[cursor].label.clone();
                 cursor += 1;
-                if Some(id) != local_channel {
+                if !s.local_channels.contains(&id) {
                     found = Some((id, label));
                     break;
                 }
@@ -610,9 +770,10 @@ async fn pump_incoming(
         if let Some((id, label)) = next {
             let dc = DataChannel {
                 shared: shared.clone(),
-                waker: mpsc::unbounded().0,
+                nudge: nudge.clone(),
                 id,
                 label,
+                state_taken: Cell::new(false),
             };
             let handle =
                 crate::exports::lann::webrtc_datachannels::connections::DataChannel::new(dc);
@@ -622,6 +783,91 @@ async fn pump_incoming(
         } else {
             watch.changed(seen).await;
         }
+    }
+    drop(tx);
+}
+
+/// The connection's current lifecycle state as observed through the shared
+/// state. `closed` wins over `failed` (a local `close` after a failure is
+/// still a close); transients narrower than `connected` are not derived, so
+/// this watch reports `new` until the connection connects (skipping states is
+/// within the `state-changes` contract).
+fn connection_state(s: &Shared) -> ConnectionState {
+    if s.closed {
+        ConnectionState::Closed
+    } else if s.failed {
+        ConnectionState::Failed
+    } else if s.connected {
+        ConnectionState::Connected
+    } else {
+        ConnectionState::New
+    }
+}
+
+/// Feed `peer-connection.state-changes`: a coalescing watch over the shared
+/// state, yielding the current state on demand and ending after a terminal
+/// state.
+async fn pump_connection_states(
+    shared: Rc<RefCell<Shared>>,
+    mut tx: wit_bindgen::StreamWriter<ConnectionState>,
+) {
+    let watch = shared.borrow().watch.clone();
+    let mut delivered = None;
+    loop {
+        let (state, seen) = {
+            let s = shared.borrow();
+            (connection_state(&s), s.watch.version())
+        };
+        if delivered != Some(state) {
+            if !tx.write_all(vec![state]).await.is_empty() {
+                break;
+            }
+            delivered = Some(state);
+        }
+        if matches!(state, ConnectionState::Failed | ConnectionState::Closed) {
+            break;
+        }
+        watch.changed(seen).await;
+    }
+    drop(tx);
+}
+
+/// Feed `data-channel.state-changes`: a coalescing watch over the channel's
+/// observed state, ending after `closed`.
+async fn pump_channel_states(
+    shared: Rc<RefCell<Shared>>,
+    id: rtc::data_channel::RTCDataChannelId,
+    mut tx: wit_bindgen::StreamWriter<DataChannelState>,
+) {
+    let watch = shared.borrow().watch.clone();
+    let mut delivered = None;
+    loop {
+        let (state, seen) = {
+            let mut s = shared.borrow_mut();
+            let flushing = s
+                .channel_mut(id)
+                .is_some_and(|c| c.closed && c.local_close_pending);
+            let state = match channel_state(&mut s, id) {
+                ChannelState::Opening => DataChannelState::Connecting,
+                ChannelState::Open => DataChannelState::Open,
+                // A local close still flushing its pending sends reports
+                // `closing`; `closed` follows once the pump performs the
+                // rtc-level close.
+                ChannelState::Closed if flushing => DataChannelState::Closing,
+                ChannelState::Closed => DataChannelState::Closed,
+            };
+            (state, s.watch.version())
+        };
+        if delivered != Some(state) {
+            if !tx.write_all(vec![state]).await.is_empty() {
+                break;
+            }
+            delivered = Some(state);
+        }
+        if matches!(state, DataChannelState::Closed) {
+            break;
+        }
+        watch.changed(seen).await;
     }
     drop(tx);
 }
@@ -708,21 +954,4 @@ async fn pump_receive(
         drop(data_tx);
     }
     drop(tx);
-}
-
-/// A closed placeholder used when a peer connection failed to resolve its
-/// bind address or bind at construction; every method observes it as already
-/// closed.
-fn dead_shared() -> Shared {
-    Shared {
-        peer: SansIoPeer::answerer().expect("answerer construction is infallible"),
-        channels: Vec::new(),
-        connected: false,
-        failed: true,
-        closed: true,
-        close_requested: false,
-        shutdown_complete: true,
-        drain_deadline: None,
-        watch: Rc::new(crate::runtime::StateWatch::default()),
-    }
 }

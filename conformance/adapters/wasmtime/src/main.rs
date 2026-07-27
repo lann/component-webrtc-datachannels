@@ -29,7 +29,7 @@ use wasmtime::Engine;
 
 use conformance_adapter_common::{
     fold_two, params_for, plan_for, run_corpus, write_report, AdapterReport, Plan, RawResult,
-    TestOutcome, TESTS,
+    TestOutcome, LOOPBACK_TEST_TIMEOUT, TESTS,
 };
 use conformance_adapter_wasmtime::{build_engine, make_config, run_instance, Role};
 
@@ -62,11 +62,8 @@ async fn run_two_peer(
     Ok(fold_two(offerer?, answerer?))
 }
 
-/// The hang guard for one test. Generous: the whole attempt is on the clock
-/// under 4-wide CI contention, while the host's shorter `wait-connected`
-/// timeout fires first, so a genuine connection failure still surfaces as a
-/// WIT outcome rather than tripping this bound.
-const TEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// The hang guard for one test (see [`LOOPBACK_TEST_TIMEOUT`]).
+const TEST_TIMEOUT: Duration = LOOPBACK_TEST_TIMEOUT;
 
 /// Run one test to a raw result (single attempt; no retries).
 async fn run_test(
@@ -94,15 +91,6 @@ async fn run_test(
                     component,
                     test_id,
                     make_config(Role::Both, base_url, &room, count, size),
-                )
-                .await
-            }
-            Plan::Skip => {
-                run_instance(
-                    engine,
-                    component,
-                    test_id,
-                    make_config(Role::Offerer, base_url, &room, count, size),
                 )
                 .await
             }
@@ -142,8 +130,9 @@ struct Cli {
 
     /// How many tests to run concurrently. Each test's peers use their own
     /// signaling room and ephemeral ports, so tests are independent; the
-    /// default keeps the loopback handshakes lightly loaded.
-    #[arg(long, default_value_t = 4)]
+    /// default scales with the cores available to this process (see
+    /// `conformance_adapter_common::default_jobs`).
+    #[arg(long, default_value_t = conformance_adapter_common::default_jobs())]
     jobs: usize,
 }
 
@@ -169,11 +158,16 @@ async fn main() -> Result<()> {
     let server = conformance_adapter_common::start_signaling_server().await?;
     let base_url = server.base_url();
 
+    // Verify the registered corpus matches the guest's list-tests export
+    // before running anything, so a drifted mirror fails fast and loudly.
+    let guest_tests = conformance_adapter_wasmtime::list_guest_tests(&engine, &component).await?;
+    conformance_adapter_common::verify_corpus(&guest_tests, TESTS)?;
+
     let room_seq = AtomicU64::new(0);
     let results = run_corpus(TESTS, &cli.only, cli.jobs, |test_id| {
         run_test(&engine, &component, &base_url, test_id, &room_seq)
     })
-    .await;
+    .await?;
 
     server.shutdown().await;
 

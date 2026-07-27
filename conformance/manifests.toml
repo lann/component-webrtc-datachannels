@@ -36,10 +36,10 @@
 # The native Wasmtime host over webrtc-rs (adapter: conformance/adapters/wasmtime).
 [target.wasmtime]
 
-# The browser-first host transpiled by jco, run under Node with `@roamhq/wrtc`
+# The browser-first host transpiled by jco, run under Node with `node-datachannel`
 # (adapter: conformance/adapters/jco, `run-node.mjs`). Implements the full
 # `connections` surface and drives real signaling over the suite mailbox.
-# `@roamhq/wrtc` delivers zero-length messages, so `zero-length-message` passes
+# `node-datachannel` delivers zero-length messages, so `zero-length-message` passes
 # and is deliberately NOT an expected-fail.
 [target.jco-node]
 
@@ -65,21 +65,56 @@
 #   the loopback scenario needs; the Shadow lab points each peer at its own
 #   simulated non-loopback address through that variable.
 #
-# `zero-length-message` used to be an expected-fail here (the `rtc` receive path
-# kept the one-zero-byte SCTP placeholder payload for the BinaryEmpty/StringEmpty
-# PPIDs), but upstream `rtc` now maps those PPIDs back to an empty message
-# (webrtc-rs/rtc#131, released in `rtc` 0.20.0-rc.4; the workspace pin includes it),
-# so this target passes it and it is deliberately NOT an expected-fail.
+# `zero-length-message` is deliberately NOT an expected-fail here: `rtc` maps
+# the BinaryEmpty/StringEmpty PPIDs to an empty message as of 0.20.0-rc.4
+# (webrtc-rs/rtc#131; the workspace pin includes it), so this target passes
+# it. Do not mark it expected-fail against the pinned `rtc`.
 [target.wasip3-guest]
 
+# The non-wasm reference peer (adapter: conformance/adapters/reference): a
+# native binary driving Google's libwebrtc (via LiveKit's Rust bindings)
+# directly — no wasm component, no WIT bindings. It is the suite's wire-level
+# anchor: the reference pairs below prove each target against the
+# ecosystem-defining WebRTC stack rather than against another instance of the
+# shared guest. Its own row is produced by the reference self-pair (loopback,
+# via conformance-interop) and the Shadow lab (reference-shadow.json).
+[target.reference]
+
 # The interop pairs run the two-peer behavioral subset over one shared mailbox
-# and a real cross-runtime WebRTC data channel, so a green row proves the two
-# runtimes interoperate rather than merely each passing against itself. Each
-# pair id is `<offerer>-x-<answerer>`; the orchestrator is the
-# `conformance-interop` binary in conformance/adapters/wasmtime.
+# and a real cross-runtime WebRTC data channel. Each pair id is
+# `<offerer>-x-<answerer>`; the orchestrator is the `conformance-interop`
+# binary in conformance/adapters/wasmtime.
+#
+# The bulk of interop coverage anchors every target against the reference peer
+# in both orders: a red cell implicates the target, not the pair. The
+# jco-browser reference pairs run only `interop-handshake` (each test boots
+# its own headless Chromium), so their other two-peer cells render `missing`.
+[target.wasmtime-x-reference]
+[target.reference-x-wasmtime]
+[target.jco-node-x-reference]
+[target.reference-x-jco-node]
+[target.jco-browser-x-reference]
+[target.reference-x-jco-browser]
+[target.wasip3-guest-x-reference]
+
+# The sans-I/O `rtc` stack's data-channel close sends nothing on the wire (its
+# handler-level `close()` is a stub, so no SCTP stream reset is emitted; see
+# TODO item E15). A wasip3 offerer's `channel-close-flush` close is therefore
+# never observable by the libwebrtc answerer, which waits past the attempt
+# guard (the flush half works: every payload arrives). The rtc<->rtc and
+# rtc<->webrtc-rs pairs pass only because those answerers detect the
+# offerer's process exit as a connection death within the guard.
+[[target.wasip3-guest-x-reference.expected-fail]]
+test = "channel-close-flush"
+reason = "rtc emits no SCTP stream reset on data-channel close, so the libwebrtc answerer never observes the close"
+tracking = "TODO.md E15"
+
+[target.reference-x-wasip3-guest]
+
+# Direct implementation-vs-implementation pairs: wasmtime <-> wasip3-guest
+# (webrtc-rs and the sans-I/O `rtc` stack meeting each other) and wasmtime <->
+# jco-node (the wasm guest crossing the host-language boundary).
 [target.wasmtime-x-jco-node]
 [target.jco-node-x-wasmtime]
-[target.wasmtime-x-jco-browser]
-[target.jco-browser-x-wasmtime]
 [target.wasmtime-x-wasip3-guest]
 [target.wasip3-guest-x-wasmtime]
