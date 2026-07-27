@@ -340,15 +340,26 @@ async fn wait_connected(wiring: &mut Wiring) -> Result<()> {
     }
 }
 
-/// Wait until a locally created channel reports open, consuming (and
-/// buffering back) nothing: open is observed via the channel's state.
-async fn wait_open(channel: &DataChannel) -> Result<()> {
+/// Wait until a channel reports open, consuming (and buffering back)
+/// nothing: open is observed via the channel's state.
+///
+/// A remote-announced channel that already reads `closing`/`closed` was
+/// necessarily open first (announcement implies the open transition), and its
+/// messages are already queued in the wiring — so for `remote` channels that
+/// state counts as opened rather than an error. A close-after-send peer can
+/// land the entire open→send→close sequence inside one poll interval. A
+/// locally created channel has no such guarantee: closed-before-open there is
+/// a failed open.
+async fn wait_open(channel: &DataChannel, remote: bool) -> Result<()> {
     // Poll the state: the open transition may have raced callback
     // registration, and state reads are cheap and race-free.
     for _ in 0..1200 {
         match channel.state() {
             DataChannelState::Open => return Ok(()),
             DataChannelState::Closing | DataChannelState::Closed => {
+                if remote {
+                    return Ok(());
+                }
                 anyhow::bail!("channel closed before open")
             }
             DataChannelState::Connecting => {
@@ -400,7 +411,7 @@ async fn handshake(
     };
 
     wait_connected(wiring).await?;
-    wait_open(&channel).await?;
+    wait_open(&channel, cli.role != "offerer").await?;
     Ok((channel, inbound))
 }
 
@@ -561,10 +572,13 @@ async fn exchange(
                 }
             } else {
                 // Every payload must arrive despite the peer's immediate
-                // close, after which the close itself is observed.
+                // close, after which the close itself is observed. A failure
+                // names how many messages had already arrived.
                 let mut received = Vec::with_capacity(count as usize);
                 for _ in 0..count {
-                    let (_binary, data) = receive(inbound).await?;
+                    let (_binary, data) = receive(inbound).await.map_err(|e| {
+                        anyhow!("{e} (after {} of {count} messages)", received.len())
+                    })?;
                     received.push(data);
                 }
                 verify_all(&received, count, false)?;

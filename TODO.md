@@ -61,13 +61,17 @@ concrete extension of the existing machinery:
 
 ### E6. Unwind the `rtc` git pin once upstream ships a release
 
-The `rtc` dependency is pinned to an upstream `master` commit (`Cargo.toml`
-`[patch.crates-io]`) because the srflx source-address fix
+The `rtc` dependency is pinned to a fork commit (`Cargo.toml`
+`[patch.crates-io]`, `lann/rtc`) carrying two fixes not yet in any published
+release: the srflx source-address fix
 ([`webrtc-rs/rtc#136`](https://github.com/webrtc-rs/rtc/pull/136), merged
 upstream; the netns lab's `stun-srflx` scenario passes with zero dropped
-srflx-sourced transmits with it, vs ~100 drops without) is not yet in any
-published release. Drop the patch and return to a plain crates.io version
-once a release including it ships.
+srflx-sourced transmits with it, vs ~100 drops without) and the
+receive-side stream-reset data-loss fix
+([`lann/rtc#1`](https://github.com/lann/rtc/pull/1), see E18 — an incoming
+stream reset discarded received-but-undelivered messages). Drop the patch
+and return to a plain crates.io version once a release including both
+ships.
 
 ### E12. node-webrtc receive-side reordering: file the write-ups upstream
 
@@ -183,26 +187,46 @@ copy onto the pinned version via npm `overrides` — keep those blocks until
 driver-loop errors, so `patch-driver-loop-errors.mjs` remains warranted, as
 does the upstream report of the swallowing.
 
-### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
+### E18. `channel-close-flush` data loss on reference-peer pairs: diagnosed, one receiver-side bug remains
 
-`channel-close-flush` fails on roughly a third of `reference-x-wasmtime`
-and `reference-x-jco-node` interop runs with `answerer: receive: closed`:
-the answerer observes the channel closed before it has received every
-payload the reference offerer sent immediately before closing. Messages
-that were handed to `send` are never delivered — this is data loss, not a
-test artifact. It reproduces with two unrelated answerer stacks
-(webrtc-rs via the wasmtime host, and `node-datachannel` via jco-node),
-so the common factor is the libwebrtc reference offerer (or the
-offerer-side close path in `conformance/adapters/reference`); note the
-W3C spec leaves it to the transport layer whether buffered messages are
-sent or discarded on close, and libwebrtc may be discarding. Undiagnosed
-beyond that. This is pre-existing on `main` (the pair's code is identical
-there; CI has simply been passing by chance) and is distinct from E16
-(answerer-side TSFN loss in `node-datachannel`) — though it may account
-for some failures previously attributed to E16. Diagnose (packet capture
-or libwebrtc logging on the reference peer would settle which side drops
-them) and fix or work around; do not paper over it with a manifest
-expected-fail, since the test passes most runs.
+`channel-close-flush` failed intermittently (roughly a third of runs,
+locally and in CI) on interop pairs involving the libwebrtc reference
+peer. Diagnosis: the reference peer was blameless — its immediate
+close-after-send (spec-legal; libwebrtc flushes queued data before the
+SCTP stream reset, per RFC 8831 §6.7) coalesces the tail DATA chunks and
+the reset RECONFIG into one network burst, and three distinct
+*receiver-side* bugs mishandled that burst:
+
+1. **`rtc-sctp` discarded received-but-undelivered messages on an incoming
+   stream reset** (`reference-x-wasmtime`, `answerer: receive: closed`):
+   `reset_streams_if_any` → `unregister_stream` removed the stream and its
+   reassembly queue with reassembled-but-unread messages still inside,
+   before the driver polled the pending `Readable` events. Fixed by
+   [`lann/rtc#1`](https://github.com/lann/rtc/pull/1) (defer teardown
+   until the consumer drains the queue), carried in this repo's `rtc` pin
+   (see E6); upstream to `webrtc-rs/rtc`.
+2. **The reference peer's `wait_open` treated an already-closing incoming
+   channel as an error** (`wasmtime-x-reference`, `answerer: channel
+   closed before open`): a remote-announced channel that reads
+   `closing`/`closed` was necessarily open first, and its messages are
+   already queued — the whole open→send→close sequence can land inside one
+   25ms poll interval. Fixed in `conformance/adapters/reference`.
+3. **The `webrtc` 0.20 driver delivers a data-channel close ahead of
+   already-received messages** (still failing, both `after 0 of 4` and
+   `after 3 of 4` shapes): the driver loop runs `poll_events()` before
+   `poll_reads()` each iteration, and the core surfaces stream-close via
+   the event queue but messages via the read queue — so a close arriving
+   in the same input batch as data overtakes it into the per-channel event
+   stream. A naive swap is unsafe (a message could race ahead of its
+   channel's `OnOpen`, whose handling creates the event channel); the fix
+   is to drain the pending read-queue messages for a channel before
+   forwarding its close. Fix upstream in `webrtc-rs/webrtc`
+   (`src/peer_connection/driver.rs`).
+
+`reference-x-jco-node` failures with the same trigger are E16 (the
+`node-datachannel` TSFN close/message race), not a fourth bug. Do not
+paper over the remaining failure with a manifest expected-fail: it is
+data loss, and the test passes most runs.
 
 ## F. Conformance suite
 
