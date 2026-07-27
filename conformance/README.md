@@ -44,13 +44,6 @@ discarded without API cost.
   corpus orchestration lives in `driver.js`. Classified against the `jco-node`,
   `jco-browser`, and the four jco pair entries in `manifests.toml`.
 
-  The transpile step post-processes the generated module with
-  `patch-generated.mjs`, a self-deactivating workaround for a jco codegen bug
-  (a borrow-cleanup shape mismatch in stream-carrying imports on
-  host-implemented resources; observed in jco 1.25.2) that otherwise crashes
-  the streaming data-channel tests. Delete the script once jco generates
-  consistent borrow-cleanup forms.
-
   jco's async ABI always uses JSPI (`WebAssembly.Suspending`), so the Node-driven
   targets (`jco-node` and the jco-node half of the interop pair) require **Node
   24+** run with `--experimental-wasm-jspi`; the `jco-browser` target runs the
