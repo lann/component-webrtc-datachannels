@@ -393,7 +393,7 @@ its table a target may declare:
   A mandatory `reason` explains why.
 - `[[target.<id>.expected-fail]]` entries referencing **test ids** — a known
   divergence that keeps the run green while staying visible. A mandatory
-  `tracking` reference (e.g. a `TODO.md` item) records the follow-up. An
+  `tracking` reference (e.g. a GitHub issue URL) records the follow-up. An
   expected-fail that **passes** becomes `unexpected-pass` and **fails** the
   run, forcing the manifest to be cleaned up.
 
@@ -450,7 +450,7 @@ and reclassifies.
 - When a target genuinely cannot support a feature, add a manifest
   `unsupported` entry with a reason instead of weakening the test.
 - When a test fails due to a known divergence, add an `expected-fail` entry
-  with a tracking reference (e.g. a `TODO.md` item) instead of skipping or
+  with a tracking reference (e.g. a GitHub issue URL) instead of skipping or
   deleting the test. An expected-fail that starts passing fails the run until
   the manifest is cleaned up, so manifests stay honest.
 - Grow the corpus by adding `[[test]]` entries to `tests.toml`; keep tags

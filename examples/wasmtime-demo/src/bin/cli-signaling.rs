@@ -90,7 +90,7 @@ async fn main() -> Result<()> {
     // queue, so a message the guest handed to the transport just before
     // returning (its peer may still be waiting on it) gets a bounded window
     // to reach the wire. The flush-aware teardown this papers over is
-    // tracked as TODO item F5.
+    // tracked as https://github.com/lann/component-webrtc-datachannels/issues/126.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
     match result {
