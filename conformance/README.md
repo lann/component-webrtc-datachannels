@@ -39,13 +39,6 @@ discarded without API cost.
   corpus orchestration lives in `driver.js`. Classified against the `jco-node`
   and `jco-browser` entries in `manifests.toml`.
 
-  The package pins `@bytecodealliance/jco-transpile` to 0.5.0 through an npm
-  `overrides` entry (jco 1.25.2's own range stops at 0.4.x):
-  js-component-bindgen 2.1.0 fixed a borrow-cleanup codegen bug in
-  stream-carrying imports on host-implemented resources that otherwise
-  crashes the streaming data-channel tests. Drop the override once a jco
-  release depends on jco-transpile >= 0.5.0 itself.
-
   jco's async ABI always uses JSPI (`WebAssembly.Suspending`), so the Node-driven
   targets (`jco-node` and the jco-node half of the interop pair) require **Node
   24+** run with `--experimental-wasm-jspi`; the `jco-browser` target runs the

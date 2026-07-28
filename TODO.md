@@ -141,48 +141,6 @@ jco-node loopback row, and interop pairs with a jco-node answerer). Drop
 the manifest entry when a fixed release ships (the expected-fail's
 unexpected-pass tripwire enforces this).
 
-### E17. jco async runtime: stale subtask events crash the guest, and the driver loop swallows the crash
-
-Report two intertwined jco (1.25.2, `-I async`/JSPI) bugs upstream at
-[bytecodealliance/jco](https://github.com/bytecodealliance/jco), with the
-evidence gathered here:
-
-- **Stale subtask event delivery.** Under the conformance corpus (many
-  concurrent async host imports — `futures::join!` of `send`/`receive` —
-  across sequential in-process tests), the generated runtime occasionally
-  delivers a `SUBTASK`/`RETURNED` event whose waitable index the guest has
-  already released. The guest's `wit-bindgen` callback dispatch then traps
-  — `RuntimeError: table index is out of bounds` in the `receive` waker
-  closure (the observed events were identical across distinct tests:
-  `{eventCode: 1, index: 3, result: 2}`), or aborts in `__rdl_dealloc` /
-  stream drop glue from the same stale-handle corruption. The generated
-  `AsyncSubtask.setOnProgressFn` handler unconditionally overwrites the
-  waitable's pending event on both start and resolve, which is the leading
-  suspect.
-- **Silent driver-loop error swallowing.** `_driverLoop`'s outer catch
-  only `_debugLog`s the error and exits, so the trapped guest task is
-  abandoned: the export's promise never settles and the failure surfaces
-  as an opaque timeout. `conformance/adapters/jco/patch-driver-loop-errors.mjs`
-  (run by the adapter's `transpile` script) rewrites the catch to
-  `console.error` as a local stopgap; drop it when upstream surfaces these
-  errors itself.
-
-In the corpus these appear as random per-run subsets of two-peer tests
-failing with bare `attempt timed-out` (3–6 per full run, any `--jobs`
-level, each passing in isolation); native (`node-datachannel`) and
-`webrtc.js` traces show send/dispatch completing cleanly, placing the
-fault in the generated async runtime.
-
-Upstream's `@bytecodealliance/jco-transpile` 0.5.1 ships its own equivalent
-of the eager-return fix (validated against this corpus: repeated full runs
-went from 3–6 stale-subtask-event failures to fully green), so `jco-impl` and
-`conformance/adapters/jco` pin it directly. The `jco` CLI's own dependency
-range (`^0.4.2`) excludes 0.5.x, so both packages force the CLI's transitive
-copy onto the pinned version via npm `overrides` — keep those blocks until
-`jco` itself depends on a fixed `jco-transpile`. 0.5.1 still swallows
-driver-loop errors, so `patch-driver-loop-errors.mjs` remains warranted, as
-does the upstream report of the swallowing.
-
 ### E18. Undiagnosed data loss: messages sent before close by the libwebrtc reference offerer sometimes never arrive
 
 `channel-close-flush` fails on roughly a third of `reference-x-wasmtime`

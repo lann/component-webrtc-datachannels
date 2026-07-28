@@ -12,14 +12,10 @@
     "start-remote": "node --experimental-wasm-jspi src/run-remote.mjs"
   },
   "devDependencies": {
-    "@bytecodealliance/jco": "1.25.2",
+    "@bytecodealliance/jco": "^1.26.1",
     "playwright-core": "^1.61.1"
   },
   "dependencies": {
-    "node-datachannel": "^0.32.3",
-    "@bytecodealliance/jco-transpile": "0.5.1"
-  },
-  "overrides": {
-    "@bytecodealliance/jco-transpile": "$@bytecodealliance/jco-transpile"
+    "node-datachannel": "^0.32.3"
   }
 }
