@@ -64,7 +64,7 @@ pub struct ExpectedFail {
     /// Why it fails (required). Part of the manifest schema for human review.
     #[allow(dead_code)]
     pub reason: String,
-    /// Tracking reference (e.g. a TODO.md item); required to stay honest.
+    /// Tracking reference (e.g. a GitHub issue URL); required to stay honest.
     pub tracking: String,
     /// Environments this entry applies to. Absent ⇒ every environment.
     /// Must be non-empty when present.

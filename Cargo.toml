@@ -50,9 +50,10 @@ rtc = "0.20.0-rc.4"
 # that is not yet in any published release: connectivity checks from a
 # server-reflexive candidate are sent from its base rather than the NAT-mapped
 # address, so drivers that demultiplex outbound transmits by local address no
-# longer drop them (TODO item E4's netns-lab finding). Using `[patch]` rather
+# longer drop them (the netns lab's `stun-srflx` finding). Using `[patch]` rather
 # than a direct git dependency is what lets the fix reach `webrtc`'s own copy
 # of `rtc`. Drop the patch and return to a plain crates.io version once a
-# release including the fix ships (see TODO item E6).
+# release including the fix ships (see
+# https://github.com/lann/component-webrtc-datachannels/issues/120).
 [patch.crates-io]
 rtc = { git = "https://github.com/webrtc-rs/rtc.git", rev = "a10cd2c18f7c4e646e83f6f00b792ef38ac3cdb2" }

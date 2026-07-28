@@ -205,7 +205,7 @@ mod tests {
             [[target.wasmtime.expected-fail]]
             test = "error-invalid-signaling"
             reason = "collapses to error.other"
-            tracking = "TODO.md item 5"
+            tracking = "example/repo#5"
             "#,
         )
         .unwrap()
@@ -376,7 +376,7 @@ mod tests {
             [[target.wasmtime.expected-fail]]
             test = "error-invalid-signaling"
             reason = "relay path collapses the error"
-            tracking = "TODO.md item 9"
+            tracking = "example/repo#9"
             environments = ["turn-relay"]
             "#,
         )

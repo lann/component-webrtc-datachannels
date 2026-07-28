@@ -69,5 +69,6 @@ component that imports `wasi:sockets`/`wasi:clocks` and exports
 upstream [`webrtc-rs/rtc`](https://github.com/webrtc-rs/rtc) `master` commit:
 the srflx source-address fix
 ([`webrtc-rs/rtc#136`](https://github.com/webrtc-rs/rtc/pull/136)) is merged
-upstream but not yet in any published release (TODO item E6 tracks unwinding
-the pin).
+upstream but not yet in any published release
+([#120](https://github.com/lann/component-webrtc-datachannels/issues/120)
+tracks unwinding the pin).
