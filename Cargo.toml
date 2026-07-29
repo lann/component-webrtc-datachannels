@@ -46,14 +46,23 @@ rtc = "0.20.0-rc.4"
 # Redirect every `rtc` resolution — the direct dependency of `wasip3-impl` and,
 # crucially, the *transitive* dependency of the async `webrtc` 0.20 crate the
 # Wasmtime host is built on — to upstream `rtc` master. The pinned commit
-# includes the srflx source-address fix (webrtc-rs/rtc#136, merged upstream)
-# that is not yet in any published release: connectivity checks from a
-# server-reflexive candidate are sent from its base rather than the NAT-mapped
-# address, so drivers that demultiplex outbound transmits by local address no
-# longer drop them (the netns lab's `stun-srflx` finding). Using `[patch]` rather
-# than a direct git dependency is what lets the fix reach `webrtc`'s own copy
-# of `rtc`. Drop the patch and return to a plain crates.io version once a
-# release including the fix ships (see
+# carries three fixes that are in no published release:
+#
+#   * the srflx source-address fix (webrtc-rs/rtc#136): connectivity checks from
+#     a server-reflexive candidate are sent from its base rather than the
+#     NAT-mapped address, so drivers that demultiplex outbound transmits by
+#     local address no longer drop them (the netns lab's `stun-srflx` finding);
+#   * `RTCDataChannel::send` rejecting sends the write path cannot carry out
+#     (webrtc-rs/rtc#138): a send on a `connecting` or closed channel returned
+#     `Ok(())` while the message was discarded on the write pass, and charged
+#     `outstanding_bytes` that nothing would ever release — the counter the
+#     in-guest close drain polls to know a channel has flushed;
+#   * `RTCDataChannelInit::ordered` defaulting to `true` as documented
+#     (webrtc-rs/rtc#140).
+#
+# Using `[patch]` rather than a direct git dependency is what lets the fixes
+# reach `webrtc`'s own copy of `rtc`. Drop the patch and return to a plain
+# crates.io version once a release including them ships (see
 # https://github.com/lann/component-webrtc-datachannels/issues/120).
 [patch.crates-io]
-rtc = { git = "https://github.com/webrtc-rs/rtc.git", rev = "a10cd2c18f7c4e646e83f6f00b792ef38ac3cdb2" }
+rtc = { git = "https://github.com/webrtc-rs/rtc.git", rev = "a1566b794d174b4d643c16267cdbe106c35a3e18" }
