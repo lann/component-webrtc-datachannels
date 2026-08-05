@@ -26,7 +26,9 @@ wit_bindgen::generate!({
 });
 
 use exports::demo::webrtc_echo::demo::{DemoConfig, DemoStats, Guest};
-use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
+use polymorph::webrtc_datachannels::connections::{
+    DataChannel, DataChannelOptions, PeerConnection,
+};
 use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message};
 
 struct Component;

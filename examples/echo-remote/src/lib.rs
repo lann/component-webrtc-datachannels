@@ -24,8 +24,12 @@ wit_bindgen::generate!({
 
 use demo::webrtc_echo::rendezvous::{Role, Session};
 use exports::demo::webrtc_echo::remote::{DemoStats, Guest, RemoteConfig};
-use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
-use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
+use polymorph::webrtc_datachannels::connections::{
+    DataChannel, DataChannelOptions, PeerConnection,
+};
+use polymorph::webrtc_datachannels::types::{
+    Error, IceCandidate, Message, SdpType, SessionDescription,
+};
 use serde::{Deserialize, Serialize};
 
 struct Component;

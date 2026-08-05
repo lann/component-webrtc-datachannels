@@ -24,8 +24,12 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
-use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
+use polymorph::webrtc_datachannels::connections::{
+    DataChannel, DataChannelOptions, PeerConnection,
+};
+use polymorph::webrtc_datachannels::types::{
+    Error, IceCandidate, Message, SdpType, SessionDescription,
+};
 
 /// The label used for the negotiated data channel. Both peers observe it.
 const CHANNEL_LABEL: &str = "manual-signaling";

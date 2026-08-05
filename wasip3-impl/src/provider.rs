@@ -509,7 +509,8 @@ impl GuestPeerConnection for PeerConnection {
     fn create_data_channel(
         &self,
         options: crate::exports::polymorph::webrtc_datachannels::connections::DataChannelOptions,
-    ) -> Result<crate::exports::polymorph::webrtc_datachannels::connections::DataChannel, Error> {
+    ) -> Result<crate::exports::polymorph::webrtc_datachannels::connections::DataChannel, Error>
+    {
         let config = options.get::<DataChannelOptions>().snapshot();
         let state = self.live()?;
         let id = {
