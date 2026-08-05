@@ -1,7 +1,7 @@
 //! The `webrtc-rs`-backed [`DataChannel`] host resource and helpers.
 //!
 //! [`DataChannel`] is the concrete host type mapped onto the
-//! `lann:webrtc-datachannels/connections.data-channel` resource. It wraps an
+//! `polymorph:webrtc-datachannels/connections.data-channel` resource. It wraps an
 //! open `webrtc-rs` data channel and its inbound-message stream.
 //!
 //! A channel's transport is **deferred**: the `peer-connection` resource's

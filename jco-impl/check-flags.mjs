@@ -14,7 +14,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HOST_DIR = dirname(fileURLToPath(import.meta.url));
-// Both packages (lann:webrtc-datachannels via the deps symlink, plus
+// Both packages (polymorph:webrtc-datachannels via the deps symlink, plus
 // demo:webrtc-echo) resolve from the echo-demo WIT directory.
 const WIT_DIR = join(HOST_DIR, "..", "examples", "echo-demo", "wit");
 
@@ -63,7 +63,7 @@ function diff(kind, script, expected, actual) {
 }
 
 const wit = loadWit();
-const connections = asyncSpecs(wit, "lann:webrtc-datachannels@0.1.0", "connections");
+const connections = asyncSpecs(wit, "polymorph:webrtc-datachannels@0.1.0", "connections");
 const rendezvous = asyncSpecs(wit, "demo:webrtc-echo@0.1.0", "rendezvous");
 const demoRun = asyncSpecs(wit, "demo:webrtc-echo@0.1.0", "demo");
 const remoteRun = asyncSpecs(wit, "demo:webrtc-echo@0.1.0", "remote");

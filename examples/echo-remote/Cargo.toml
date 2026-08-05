@@ -3,7 +3,7 @@ name = "echo-remote"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "One peer of a two-process WebRTC echo run: a component that connects to a genuinely separate peer instance through demo:webrtc-echo/rendezvous signaling and the standard lann:webrtc-datachannels/connections interface."
+description = "One peer of a two-process WebRTC echo run: a component that connects to a genuinely separate peer instance through demo:webrtc-echo/rendezvous signaling and the standard polymorph:webrtc-datachannels/connections interface."
 
 [lib]
 crate-type = ["cdylib"]

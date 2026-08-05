@@ -4,7 +4,7 @@ Guidance for automated agents (and humans) working in this repository.
 
 ## What this repository is
 
-`lann:webrtc-datachannels`: a WIT interface plus multiple implementations that
+`polymorph:webrtc-datachannels`: a WIT interface plus multiple implementations that
 run the *same* guest component over a real WebRTC data channel: two hosts
 (Wasmtime and jco) and one in-guest component (`wasip3-impl`). It is
 intentionally small — prefer clarity and correctness over features, and keep the
@@ -41,7 +41,7 @@ starter's examples first.
 ## Repository layout
 
 ```
-wit/                                   # lann:webrtc-datachannels package
+wit/                                   # polymorph:webrtc-datachannels package
   webrtc.wit                           #   types (structural), connections (resources)
 wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   modeled after wasmtime_wasi_http::p3;
@@ -51,22 +51,22 @@ jco-impl/                              # browser-first host (Node + jco + node-d
 wasip3-impl/                           # wasm COMPONENT on `rtc` 0.20: runs the
                                        #   sans-I/O stack in-guest (SansIoPeer core
                                        #   + a wasi:sockets/clocks runtime driver)
-                                       #   and EXPORTS lann:webrtc-datachannels/
+                                       #   and EXPORTS polymorph:webrtc-datachannels/
                                        #   connections; composable via `wac plug`;
                                        #   crate: wasip3-webrtc-datachannels
 examples/                              # guest components + the demo hosts
   echo-demo/                           # example guest component (Rust)
     wit/                               #   demo-only WIT for this component
       webrtc-echo-demo.wit             #     demo:webrtc-echo (rendezvous, demo)
-      deps/lann-webrtc-datachannels -> ../../../../wit   # symlink to the root package
+      deps/polymorph-webrtc-datachannels -> ../../../../wit   # symlink to the root package
   cli-signaling/                       # manual-signaling CLI guest component (Rust):
     wit/                               #   drives connections.peer-connection with
       world.wit                        #     guest-side vanilla (non-trickle) ICE
-      deps/lann-webrtc-datachannels -> ../../../../wit   # symlink to the root package
+      deps/polymorph-webrtc-datachannels -> ../../../../wit   # symlink to the root package
   webrtc-consumer/                     # minimal consumer that IMPORTS connections;
                                        #   composed (`wac plug`) with wasip3-impl for
                                        #   the in-guest round-trip integration test
-    wit/deps/lann-webrtc-datachannels -> ../../../../wit  # symlink to the root package
+    wit/deps/polymorph-webrtc-datachannels -> ../../../../wit  # symlink to the root package
   wasmtime-demo/                       # native host (Wasmtime + webrtc-rs): thin demo
                                        #   binaries over wasmtime-impl's add_to_linker
                                        #   + the end-to-end cli-signaling integration
@@ -92,17 +92,17 @@ scripts/setup.sh                       # one-shot dependency setup (see below)
 
 ### WIT is organized by ownership — one copy of the shared package
 
-The **`lann:webrtc-datachannels`** package is defined exactly once, at the root
+The **`polymorph:webrtc-datachannels`** package is defined exactly once, at the root
 [`wit/`](wit). Each demo component owns its **demo-only** WIT under its own
 `examples/<name>/wit/` and pulls the package in through a
-`wit/deps/lann-webrtc-datachannels` **symlink** back to the root, so there is a
+`wit/deps/polymorph-webrtc-datachannels` **symlink** back to the root, so there is a
 single copy of the shared surface to edit. Do **not** copy the root package into
 a component or replace those `deps` symlinks with real directories.
 
 The WIT is split into two packages, keeping the shared and demo-only surfaces
 separate:
 
-- **`lann:webrtc-datachannels`** (`wit/webrtc.wit`) — the shared interfaces,
+- **`polymorph:webrtc-datachannels`** (`wit/webrtc.wit`) — the shared interfaces,
   split by ownership: `types` holds every structural (non-resource) type, while
   `connections` holds the stateful resources — the `data-channel-options`
   configuration builder, the `data-channel` transport, and the
@@ -118,7 +118,7 @@ separate:
     interface; the vanilla (non-trickle) ICE handling is guest-side.
 
 Cross-package `use` must include the version, e.g.
-`use lann:webrtc-datachannels/types@0.1.0.{error}`.
+`use polymorph:webrtc-datachannels/types@0.1.0.{error}`.
 
 Terminology: the standardized connection surface is **`peer-connection`** — do
 not describe it as a "signaling" interface or design target in docs or prose.
@@ -134,7 +134,7 @@ updating the consumers that name them as strings:
 - the host bindings in
   `wasmtime-impl/src/bindings.rs` (whose
   `wit/world.wit` also pulls in the root package through a
-  `deps/lann-webrtc-datachannels` symlink),
+  `deps/polymorph-webrtc-datachannels` symlink),
 - the Wasmtime host bindings in `examples/wasmtime-demo/src/main.rs`,
 - the conformance guest, adapters, and jco transpile flags under
   `conformance/`, and
@@ -375,7 +375,7 @@ dependency is pinned once at the workspace level in the root `Cargo.toml`.
 
 [`wasip3-impl/`](wasip3-impl) is that component: a `cdylib` built for
 `wasm32-wasip2` that imports only `wasi:sockets`/`wasi:clocks` and **exports**
-`lann:webrtc-datachannels/connections`. It has one core and one driver:
+`polymorph:webrtc-datachannels/connections`. It has one core and one driver:
 
 - `SansIoPeer` (`src/peer.rs`) is the runtime-agnostic core — it wraps an `rtc`
   `RTCPeerConnection` and exposes signaling primitives plus the six sans-I/O

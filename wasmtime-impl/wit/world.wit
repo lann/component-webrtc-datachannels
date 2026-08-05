@@ -1,13 +1,13 @@
-// The `imports` world enumerates the `lann:webrtc-datachannels` interfaces this
+// The `imports` world enumerates the `polymorph:webrtc-datachannels` interfaces this
 // crate implements on the host side, so `bindgen!` can generate the
 // corresponding `Host` traits and per-interface `add_to_linker` helpers.
 package wasmtime:webrtc-datachannels-host;
 
-/// The set of `lann:webrtc-datachannels` imports satisfied by this crate.
+/// The set of `polymorph:webrtc-datachannels` imports satisfied by this crate.
 ///
 /// The crate implements the whole `connections` interface: the
 /// `data-channel-options` builder, the `data-channel` transport, and the
 /// `peer-connection` resource.
 world imports {
-    import lann:webrtc-datachannels/connections@0.1.0;
+    import polymorph:webrtc-datachannels/connections@0.1.0;
 }

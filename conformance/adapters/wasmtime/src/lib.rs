@@ -30,13 +30,13 @@ pub mod bindings {
             default: async,
         },
         with: {
-            "lann:webrtc-datachannels/connections.data-channel-options":
+            "polymorph:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
-            "lann:webrtc-datachannels/connections.peer-connection-config":
+            "polymorph:webrtc-datachannels/connections.peer-connection-config":
                 wasmtime_webrtc_datachannels::PeerConnectionConfig,
-            "lann:webrtc-datachannels/connections.data-channel":
+            "polymorph:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
-            "lann:webrtc-datachannels/connections.peer-connection":
+            "polymorph:webrtc-datachannels/connections.peer-connection":
                 wasmtime_webrtc_datachannels::PeerConnection,
             "conformance:signaling/mailbox.session": crate::MailboxSession,
         },
@@ -46,7 +46,7 @@ pub mod bindings {
 use bindings::conformance::signaling::mailbox::{self, Role as MailboxRole};
 use bindings::exports::conformance::suite::runner::TestResult;
 pub use bindings::exports::conformance::suite::runner::{Role, TestConfig};
-use bindings::lann::webrtc_datachannels::types::Error;
+use bindings::polymorph::webrtc_datachannels::types::Error;
 pub use bindings::Conformance;
 use conformance_adapter_common::TestOutcome;
 pub use wasmtime_webrtc_datachannels::{WebrtcIceConfig, WebrtcIceServer};

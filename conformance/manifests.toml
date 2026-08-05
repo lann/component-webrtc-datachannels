@@ -99,7 +99,7 @@
 
 # The sans-I/O `rtc` stack's data-channel close sends nothing on the wire (its
 # handler-level `close()` is a stub, so no SCTP stream reset is emitted; see
-# https://github.com/lann/component-webrtc-datachannels/issues/123). A wasip3
+# https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/123). A wasip3
 # offerer's `channel-close-flush` close is therefore
 # never observable by the libwebrtc answerer, which waits past the attempt
 # guard (the flush half works: every payload arrives). The rtc<->rtc and
@@ -108,7 +108,7 @@
 [[target.wasip3-guest-x-reference.expected-fail]]
 test = "channel-close-flush"
 reason = "rtc emits no SCTP stream reset on data-channel close, so the libwebrtc answerer never observes the close"
-tracking = "https://github.com/lann/component-webrtc-datachannels/issues/123"
+tracking = "https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/123"
 
 [target.reference-x-wasip3-guest]
 

@@ -1,6 +1,6 @@
 // The `webrtc-consumer` world.
 //
-// A minimal consumer of `lann:webrtc-datachannels/connections`: it imports the
+// A minimal consumer of `polymorph:webrtc-datachannels/connections`: it imports the
 // guest-driven `peer-connection` surface and, composed with a provider
 // component that exports `connections`, exercises a full in-guest WebRTC
 // round trip.
@@ -11,5 +11,5 @@
 package demo:webrtc-consumer;
 
 world consumer {
-    import lann:webrtc-datachannels/connections@0.1.0;
+    import polymorph:webrtc-datachannels/connections@0.1.0;
 }

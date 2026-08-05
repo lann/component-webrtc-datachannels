@@ -1,6 +1,6 @@
 //! `wasip3-webrtc-datachannels`: a wasm **component** that runs the sans-I/O
 //! `rtc` WebRTC stack *in-guest* and exports the shared
-//! `lann:webrtc-datachannels` `connections` resources.
+//! `polymorph:webrtc-datachannels` `connections` resources.
 //!
 //! This is the third implementation alongside the `wasmtime-impl` (webrtc-rs)
 //! and `jco-impl` (browser) hosts. Unlike those two — which run the fully async

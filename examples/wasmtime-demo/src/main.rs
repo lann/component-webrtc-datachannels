@@ -1,4 +1,4 @@
-//! Wasmtime host for `lann:webrtc-datachannels`, backed by the
+//! Wasmtime host for `polymorph:webrtc-datachannels`, backed by the
 //! pure-Rust `webrtc-rs` stack.
 //!
 //! It is the non-browser counterpart to the Node host: it loads the same
@@ -25,13 +25,13 @@ mod bindings {
             default: async,
         },
         with: {
-            "lann:webrtc-datachannels/connections.data-channel-options":
+            "polymorph:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
-            "lann:webrtc-datachannels/connections.peer-connection-config":
+            "polymorph:webrtc-datachannels/connections.peer-connection-config":
                 wasmtime_webrtc_datachannels::PeerConnectionConfig,
-            "lann:webrtc-datachannels/connections.data-channel":
+            "polymorph:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
-            "lann:webrtc-datachannels/connections.peer-connection":
+            "polymorph:webrtc-datachannels/connections.peer-connection":
                 wasmtime_webrtc_datachannels::PeerConnection,
         },
     });
@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     let engine = engine()?;
     let component = Component::from_file(&engine, &path)?;
     let mut linker: Linker<Ctx> = Linker::new(&engine);
-    // Shared `lann:webrtc-datachannels` imports — the component's only ones.
+    // Shared `polymorph:webrtc-datachannels` imports — the component's only ones.
     webrtc_host::add_to_linker(&mut linker)?;
 
     let mut store = Store::new(

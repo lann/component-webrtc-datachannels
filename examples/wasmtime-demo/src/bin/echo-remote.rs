@@ -42,13 +42,13 @@ mod bindings {
             default: async,
         },
         with: {
-            "lann:webrtc-datachannels/connections.data-channel-options":
+            "polymorph:webrtc-datachannels/connections.data-channel-options":
                 wasmtime_webrtc_datachannels::DataChannelOptions,
-            "lann:webrtc-datachannels/connections.peer-connection-config":
+            "polymorph:webrtc-datachannels/connections.peer-connection-config":
                 wasmtime_webrtc_datachannels::PeerConnectionConfig,
-            "lann:webrtc-datachannels/connections.data-channel":
+            "polymorph:webrtc-datachannels/connections.data-channel":
                 wasmtime_webrtc_datachannels::DataChannel,
-            "lann:webrtc-datachannels/connections.peer-connection":
+            "polymorph:webrtc-datachannels/connections.peer-connection":
                 wasmtime_webrtc_datachannels::PeerConnection,
             "demo:webrtc-echo/rendezvous.session": crate::RendezvousSession,
         },
@@ -57,7 +57,7 @@ mod bindings {
 
 use bindings::demo::webrtc_echo::rendezvous::{self, Role as RendezvousRole};
 use bindings::exports::demo::webrtc_echo::remote::RemoteConfig;
-use bindings::lann::webrtc_datachannels::types::Error;
+use bindings::polymorph::webrtc_datachannels::types::Error;
 
 struct Ctx {
     webrtc: WasiWebrtcCtx,
@@ -297,7 +297,7 @@ async fn main() -> Result<()> {
     let engine = engine()?;
     let component = Component::from_file(&engine, &cli.component)?;
     let mut linker: Linker<Ctx> = Linker::new(&engine);
-    // Shared `lann:webrtc-datachannels` imports.
+    // Shared `polymorph:webrtc-datachannels` imports.
     webrtc_host::add_to_linker(&mut linker)?;
     // The demo rendezvous mailbox, implemented natively above.
     rendezvous::add_to_linker::<Ctx, Ctx>(&mut linker, |c| c)?;

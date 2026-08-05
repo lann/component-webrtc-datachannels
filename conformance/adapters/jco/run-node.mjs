@@ -145,7 +145,7 @@ async function main() {
   const newInstance = () =>
     instantiate((name) => modules.get(name), {
       "conformance:signaling/mailbox": { Session },
-      "lann:webrtc-datachannels/connections": connections,
+      "polymorph:webrtc-datachannels/connections": connections,
     });
 
   // Single-instance interop mode: one guest instance, one test/role/room against

@@ -63,6 +63,6 @@ rtc = "0.20.0-rc.4"
 # Using `[patch]` rather than a direct git dependency is what lets the fixes
 # reach `webrtc`'s own copy of `rtc`. Drop the patch and return to a plain
 # crates.io version once a release including them ships (see
-# https://github.com/lann/component-webrtc-datachannels/issues/120).
+# https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/120).
 [patch.crates-io]
 rtc = { git = "https://github.com/webrtc-rs/rtc.git", rev = "a1566b794d174b4d643c16267cdbe106c35a3e18" }

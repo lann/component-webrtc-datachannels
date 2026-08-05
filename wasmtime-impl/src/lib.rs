@@ -1,9 +1,9 @@
-//! Wasmtime host implementation of the `lann:webrtc-datachannels`
+//! Wasmtime host implementation of the `polymorph:webrtc-datachannels`
 //! interfaces, backed by the pure-Rust
 //! [`webrtc-rs`](https://github.com/webrtc-rs/webrtc) stack.
 //!
 //! This crate factors the host-agnostic part of the Wasmtime WebRTC host out of
-//! the demo binaries so any host can satisfy the `lann:webrtc-datachannels`
+//! the demo binaries so any host can satisfy the `polymorph:webrtc-datachannels`
 //! imports with one call to [`add_to_linker`]. It is a wasip3 (component-model
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host embeds
 //! a [`WasiWebrtcCtx`] in its store state, implements [`WasiWebrtcView`] to
@@ -16,11 +16,11 @@
 //!
 //! ```text
 //! with: {
-//!     "lann:webrtc-datachannels/connections.data-channel-options":
+//!     "polymorph:webrtc-datachannels/connections.data-channel-options":
 //!         wasmtime_webrtc_datachannels::DataChannelOptions,
-//!     "lann:webrtc-datachannels/connections.data-channel":
+//!     "polymorph:webrtc-datachannels/connections.data-channel":
 //!         wasmtime_webrtc_datachannels::DataChannel,
-//!     "lann:webrtc-datachannels/connections.peer-connection":
+//!     "polymorph:webrtc-datachannels/connections.peer-connection":
 //!         wasmtime_webrtc_datachannels::PeerConnection,
 //! },
 //! ```
@@ -232,13 +232,13 @@ pub struct WasiWebrtcCtxView<'a> {
 /// A trait that provides access to the [`WasiWebrtcCtx`] host state.
 ///
 /// Implement this for your store's data type so [`add_to_linker`] can wire the
-/// `lann:webrtc-datachannels` imports onto your linker.
+/// `polymorph:webrtc-datachannels` imports onto your linker.
 pub trait WasiWebrtcView: Send {
     /// Return a [`WasiWebrtcCtxView`] from a mutable reference to `self`.
     fn webrtc(&mut self) -> WasiWebrtcCtxView<'_>;
 }
 
-/// The type for which this crate implements the `lann:webrtc-datachannels`
+/// The type for which this crate implements the `polymorph:webrtc-datachannels`
 /// interfaces. Used as the [`HasData`] marker for the generated bindings.
 pub struct WasiWebrtc;
 
@@ -291,7 +291,7 @@ pub struct PeerConnectionConfig {
     pub relay_only: bool,
 }
 
-/// Add the `lann:webrtc-datachannels` interfaces implemented by this crate
+/// Add the `polymorph:webrtc-datachannels` interfaces implemented by this crate
 /// (`types` and `connections`) to the provided [`Linker`].
 ///
 /// The store's data type `T` must implement [`WasiWebrtcView`]. The engine's

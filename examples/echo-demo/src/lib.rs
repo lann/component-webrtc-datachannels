@@ -2,7 +2,7 @@
 //! channel one message at a time.
 //!
 //! The component is host-agnostic and drives the standard
-//! `lann:webrtc-datachannels/connections` interface end to end: it stands up
+//! `polymorph:webrtc-datachannels/connections` interface end to end: it stands up
 //! **two** peer connections inside the component (an offerer and an answerer),
 //! exchanges their SDP offer/answer and trickled ICE candidates directly, and
 //! then:
@@ -26,8 +26,8 @@ wit_bindgen::generate!({
 });
 
 use exports::demo::webrtc_echo::demo::{DemoConfig, DemoStats, Guest};
-use lann::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
-use lann::webrtc_datachannels::types::{Error, IceCandidate, Message};
+use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
+use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message};
 
 struct Component;
 

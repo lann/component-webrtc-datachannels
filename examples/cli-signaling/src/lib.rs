@@ -1,7 +1,7 @@
 //! `cli-signaling`: a manual-signaling WebRTC demo driven entirely over
 //! `wasi:cli@0.3` stdio.
 //!
-//! The component drives the standard `lann:webrtc-datachannels/connections`
+//! The component drives the standard `polymorph:webrtc-datachannels/connections`
 //! `peer-connection` with guest-side *vanilla* (non-trickle) ICE: it drains
 //! `local-ice-candidates` to its end (the end-of-gathering signal) and embeds
 //! the candidates into the SDP, so a whole connection needs just two messages:
@@ -24,8 +24,8 @@ wit_bindgen::generate!({
     generate_all,
 });
 
-use lann::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
-use lann::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
+use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
+use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
 
 /// The label used for the negotiated data channel. Both peers observe it.
 const CHANNEL_LABEL: &str = "manual-signaling";

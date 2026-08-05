@@ -1,4 +1,4 @@
-//! `webrtc-consumer`: a minimal consumer of the `lann:webrtc-datachannels`
+//! `webrtc-consumer`: a minimal consumer of the `polymorph:webrtc-datachannels`
 //! `connections` interface, used to exercise (and integration-test) the
 //! `wasip3-impl` provider component after composition with `wac plug`.
 //!
@@ -25,10 +25,10 @@ mod bindings {
     });
 }
 
-use bindings::lann::webrtc_datachannels::connections::{
+use bindings::polymorph::webrtc_datachannels::connections::{
     DataChannel, DataChannelOptions, PeerConnection,
 };
-use bindings::lann::webrtc_datachannels::types::{Error, IceCandidate, Message};
+use bindings::polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message};
 
 /// The label of the negotiated data channel. Both peers observe it.
 const CHANNEL_LABEL: &str = "webrtc-consumer-demo";

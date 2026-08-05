@@ -3,7 +3,7 @@ name = "wasmtime-webrtc-datachannels"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Wasmtime host implementation of the lann:webrtc-datachannels interfaces, backed by webrtc-rs."
+description = "Wasmtime host implementation of the polymorph:webrtc-datachannels interfaces, backed by webrtc-rs."
 
 [dependencies]
 # Wasmtime with component-model async (streams/futures) support. The

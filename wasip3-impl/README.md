@@ -1,7 +1,7 @@
 # wasip3-impl (`wasip3-webrtc-datachannels`)
 
 A **wasm component** that runs the sans-I/O `rtc` WebRTC stack *in-guest* and
-**exports** the shared `lann:webrtc-datachannels` `connections` resources. It
+**exports** the shared `polymorph:webrtc-datachannels` `connections` resources. It
 imports only WASIp3 capabilities — `wasi:sockets` UDP and `wasi:clocks` timers —
 so it can be composed (`wac plug`) with any consumer component that imports
 `connections`.
@@ -61,7 +61,7 @@ just examples::build-wasip3-provider
 
 produces `target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm`, a
 component that imports `wasi:sockets`/`wasi:clocks` and exports
-`lann:webrtc-datachannels/connections`.
+`polymorph:webrtc-datachannels/connections`.
 
 ## Dependency pin
 
@@ -70,5 +70,5 @@ upstream [`webrtc-rs/rtc`](https://github.com/webrtc-rs/rtc) `master` commit:
 the srflx source-address fix
 ([`webrtc-rs/rtc#136`](https://github.com/webrtc-rs/rtc/pull/136)) is merged
 upstream but not yet in any published release
-([#120](https://github.com/lann/component-webrtc-datachannels/issues/120)
+([#120](https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/120)
 tracks unwinding the pin).

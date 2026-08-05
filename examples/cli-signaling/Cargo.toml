@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 # prompt the user for the offer/answer blobs.
 wasip3 = { version = "0.7", features = ["async-spawn"] }
 # `wit-bindgen` generates the guest bindings for the imported
-# `lann:webrtc-datachannels/manual-signaling` interface.
+# `polymorph:webrtc-datachannels/manual-signaling` interface.
 # Pinned to the wit-bindgen version the `wasip3` crate uses: this crate shares
 # wit-bindgen runtime types with wasip3, and mixing two runtime versions in one
 # component is unsupported. Upgrade together with the wasip3 dependency.

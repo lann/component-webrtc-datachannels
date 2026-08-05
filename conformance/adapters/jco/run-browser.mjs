@@ -261,7 +261,7 @@ async function runInPage({ base, only, jobs }) {
   const newInstance = () =>
     instantiate((name) => modules.get(name), {
       "conformance:signaling/mailbox": { Session },
-      "lann:webrtc-datachannels/connections": connections,
+      "polymorph:webrtc-datachannels/connections": connections,
     });
 
   return runCorpus({
@@ -307,7 +307,7 @@ async function runInteropInPage({ base, testId, config }) {
 
   const instance = await instantiate((name) => modules.get(name), {
     "conformance:signaling/mailbox": { Session },
-    "lann:webrtc-datachannels/connections": connections,
+    "polymorph:webrtc-datachannels/connections": connections,
   });
   console.log(`[phase] ${testId}: guest instantiated; running test`);
   const result = await instance.runner.runTest(testId, config);

@@ -9,7 +9,7 @@
 // `connections`: the consumer's imports are satisfied by this component's
 // exports, producing a single self-contained component the WebRTC stack of
 // which runs entirely in wasm.
-package lann:webrtc-datachannels-component;
+package polymorph:webrtc-datachannels-component;
 
 /// The composable WebRTC data-channel provider.
 ///
@@ -21,5 +21,5 @@ world provider {
     import wasi:sockets/types@0.3.0;
     import wasi:clocks/monotonic-clock@0.3.0;
 
-    export lann:webrtc-datachannels/connections@0.1.0;
+    export polymorph:webrtc-datachannels/connections@0.1.0;
 }

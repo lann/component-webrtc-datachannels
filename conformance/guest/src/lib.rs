@@ -2,7 +2,7 @@
 //!
 //! One wasm binary, run unchanged against every conformance target. It exports
 //! the `conformance:suite/runner` control surface the adapters drive and imports
-//! the shared `lann:webrtc-datachannels/connections` surface under test plus the
+//! the shared `polymorph:webrtc-datachannels/connections` surface under test plus the
 //! suite-owned `conformance:signaling/mailbox` it signals through.
 //!
 //! `list-tests` mirrors `conformance/tests.toml`. `run-test` runs one test to a
@@ -27,10 +27,10 @@ use bindings::conformance::signaling::mailbox::{Role as MailboxRole, Session};
 use bindings::exports::conformance::suite::runner::{
     Guest, Role, TestConfig, TestDescriptor, TestResult,
 };
-use bindings::lann::webrtc_datachannels::connections::{
+use bindings::polymorph::webrtc_datachannels::connections::{
     DataChannel, DataChannelOptions, PeerConnection, PeerConnectionConfig,
 };
-use bindings::lann::webrtc_datachannels::types::{
+use bindings::polymorph::webrtc_datachannels::types::{
     ConfigError, ConnectionState, DataChannelState, Error, IceCandidate, IceServer,
     IceTransportPolicy, Message, MessageKind, SdpType, SessionDescription, StreamMessage,
 };

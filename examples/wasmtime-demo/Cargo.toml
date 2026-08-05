@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-# The `lann:webrtc-datachannels` host implementation (data channels
+# The `polymorph:webrtc-datachannels` host implementation (data channels
 # and the stream/pipe plumbing) lives in this crate. Both binaries obtain their
 # `types`/`data-channels` imports from its `add_to_linker`.
 wasmtime-webrtc-datachannels = { path = "../../wasmtime-impl" }

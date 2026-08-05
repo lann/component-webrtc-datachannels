@@ -3,7 +3,7 @@ name = "wasip3-webrtc-datachannels"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "A wasm component that runs the sans-I/O `rtc` WebRTC stack in-guest over WASIp3 `wasi:sockets`, exporting the `lann:webrtc-datachannels` `connections` resources so it can be composed (`wac plug`) with consumer components."
+description = "A wasm component that runs the sans-I/O `rtc` WebRTC stack in-guest over WASIp3 `wasi:sockets`, exporting the `polymorph:webrtc-datachannels` `connections` resources so it can be composed (`wac plug`) with consumer components."
 
 [lib]
 # A component: the sans-I/O WebRTC stack runs in-guest and the `connections`

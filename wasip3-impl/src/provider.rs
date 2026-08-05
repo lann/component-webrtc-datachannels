@@ -1,4 +1,4 @@
-//! The exported `lann:webrtc-datachannels/connections` resources, implemented on
+//! The exported `polymorph:webrtc-datachannels/connections` resources, implemented on
 //! top of the in-guest [`crate::runtime`] driver.
 //!
 //! - [`DataChannelOptions`] is a plain configuration builder.
@@ -25,11 +25,11 @@ use futures::channel::mpsc;
 use crate::peer::SansIoPeer;
 use crate::runtime::{InboundMessage, Runtime, Shared, CHANNEL_CLOSE_FLUSH_BOUND};
 
-use crate::exports::lann::webrtc_datachannels::connections::{
+use crate::exports::polymorph::webrtc_datachannels::connections::{
     Guest, GuestDataChannel, GuestDataChannelOptions, GuestPeerConnection,
     GuestPeerConnectionConfig,
 };
-use crate::lann::webrtc_datachannels::types::{
+use crate::polymorph::webrtc_datachannels::types::{
     ConfigError, ConnectionState, DataChannelState, Error, IceCandidate, IceServer,
     IceTransportPolicy, Message, MessageKind, SendViaStreamError, SessionDescription,
     StreamMessage,
@@ -472,7 +472,7 @@ impl PeerConnection {
 impl GuestPeerConnection for PeerConnection {
     fn new(
         config: Option<
-            crate::exports::lann::webrtc_datachannels::connections::PeerConnectionConfig,
+            crate::exports::polymorph::webrtc_datachannels::connections::PeerConnectionConfig,
         >,
     ) -> Self {
         // Every option a supplied config carries was accepted by its setter,
@@ -508,8 +508,8 @@ impl GuestPeerConnection for PeerConnection {
 
     fn create_data_channel(
         &self,
-        options: crate::exports::lann::webrtc_datachannels::connections::DataChannelOptions,
-    ) -> Result<crate::exports::lann::webrtc_datachannels::connections::DataChannel, Error> {
+        options: crate::exports::polymorph::webrtc_datachannels::connections::DataChannelOptions,
+    ) -> Result<crate::exports::polymorph::webrtc_datachannels::connections::DataChannel, Error> {
         let config = options.get::<DataChannelOptions>().snapshot();
         let state = self.live()?;
         let id = {
@@ -535,13 +535,13 @@ impl GuestPeerConnection for PeerConnection {
             label: config.label,
             state_taken: Cell::new(false),
         };
-        Ok(crate::exports::lann::webrtc_datachannels::connections::DataChannel::new(dc))
+        Ok(crate::exports::polymorph::webrtc_datachannels::connections::DataChannel::new(dc))
     }
 
     fn incoming_data_channels(
         &self,
     ) -> wit_bindgen::StreamReader<
-        crate::exports::lann::webrtc_datachannels::connections::DataChannel,
+        crate::exports::polymorph::webrtc_datachannels::connections::DataChannel,
     > {
         let (tx, rx) = crate::wit_stream::new();
         // Take-once per the WIT contract: a later call (or any call on a dead
@@ -593,7 +593,7 @@ impl GuestPeerConnection for PeerConnection {
             .create_offer()
             .map_err(|e| Error::Other(e.to_string()))?;
         Ok(SessionDescription {
-            kind: crate::lann::webrtc_datachannels::types::SdpType::Offer,
+            kind: crate::polymorph::webrtc_datachannels::types::SdpType::Offer,
             sdp,
         })
     }
@@ -610,7 +610,7 @@ impl GuestPeerConnection for PeerConnection {
             .create_answer()
             .map_err(|e| Error::Other(e.to_string()))?;
         Ok(SessionDescription {
-            kind: crate::lann::webrtc_datachannels::types::SdpType::Answer,
+            kind: crate::polymorph::webrtc_datachannels::types::SdpType::Answer,
             sdp,
         })
     }
@@ -637,14 +637,14 @@ impl GuestPeerConnection for PeerConnection {
             return Err(Error::Closed);
         }
         let result = match description.kind {
-            crate::lann::webrtc_datachannels::types::SdpType::Offer => {
+            crate::polymorph::webrtc_datachannels::types::SdpType::Offer => {
                 s.peer.set_remote_offer(description.sdp)
             }
-            crate::lann::webrtc_datachannels::types::SdpType::Answer
-            | crate::lann::webrtc_datachannels::types::SdpType::Pranswer => {
+            crate::polymorph::webrtc_datachannels::types::SdpType::Answer
+            | crate::polymorph::webrtc_datachannels::types::SdpType::Pranswer => {
                 s.peer.set_remote_answer(description.sdp)
             }
-            crate::lann::webrtc_datachannels::types::SdpType::Rollback => {
+            crate::polymorph::webrtc_datachannels::types::SdpType::Rollback => {
                 return Err(Error::InvalidSignaling("rollback is not supported".into()))
             }
         };
@@ -741,7 +741,7 @@ async fn pump_incoming(
     shared: Rc<RefCell<Shared>>,
     nudge: mpsc::UnboundedSender<()>,
     mut tx: wit_bindgen::StreamWriter<
-        crate::exports::lann::webrtc_datachannels::connections::DataChannel,
+        crate::exports::polymorph::webrtc_datachannels::connections::DataChannel,
     >,
 ) {
     let watch = shared.borrow().watch.clone();
@@ -776,7 +776,7 @@ async fn pump_incoming(
                 state_taken: Cell::new(false),
             };
             let handle =
-                crate::exports::lann::webrtc_datachannels::connections::DataChannel::new(dc);
+                crate::exports::polymorph::webrtc_datachannels::connections::DataChannel::new(dc);
             if !tx.write_all(vec![handle]).await.is_empty() {
                 break;
             }

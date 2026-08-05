@@ -11,14 +11,14 @@ package demo:webrtc-echo@0.1.0;
 /// between them.
 ///
 /// The transport is deliberately unstandardized — it lives in the demo package,
-/// not in `lann:webrtc-datachannels`. Implementations relay blobs to and from
+/// not in `polymorph:webrtc-datachannels`. Implementations relay blobs to and from
 /// an existing HTTP signaling server (the guest itself does not need to speak
 /// HTTP); the interface can be satisfied by a host natively or by a component
 /// composed under the guest. The blob payloads are opaque here; the guest
 /// chooses the encoding (for example, JSON carrying `session-description` /
 /// `ice-candidate` values).
 interface rendezvous {
-    use lann:webrtc-datachannels/types@0.1.0.{error};
+    use polymorph:webrtc-datachannels/types@0.1.0.{error};
 
     /// Which half of the exchange this peer is driving. The offerer creates the
     /// SDP offer; the answerer waits for it and replies with an answer.
@@ -59,7 +59,7 @@ interface rendezvous {
 
 /// The exported demo entry point.
 interface demo {
-    use lann:webrtc-datachannels/types@0.1.0.{error};
+    use polymorph:webrtc-datachannels/types@0.1.0.{error};
 
     /// Parameters for a single demo run.
     record demo-config {
@@ -90,7 +90,7 @@ interface demo {
 /// instances — typically separate OS processes, potentially separate machines
 /// — form one real WebRTC connection.
 interface remote {
-    use lann:webrtc-datachannels/types@0.1.0.{error};
+    use polymorph:webrtc-datachannels/types@0.1.0.{error};
     use rendezvous.{role};
     use demo.{demo-stats};
 
@@ -119,9 +119,9 @@ interface remote {
 /// The world implemented by the example component. The component stands up
 /// both peers itself through the standard `connections` interface (an offerer
 /// and an in-component echo answerer), so a host provides nothing beyond
-/// `lann:webrtc-datachannels`.
+/// `polymorph:webrtc-datachannels`.
 world webrtc-echo-demo {
-    import lann:webrtc-datachannels/connections@0.1.0;
+    import polymorph:webrtc-datachannels/connections@0.1.0;
     export demo;
 }
 
@@ -129,7 +129,7 @@ world webrtc-echo-demo {
 /// two-process echo run, signaling through `rendezvous` and connecting
 /// through the standard `connections` interface.
 world webrtc-echo-remote {
-    import lann:webrtc-datachannels/connections@0.1.0;
+    import polymorph:webrtc-datachannels/connections@0.1.0;
     import rendezvous;
     export remote;
 }

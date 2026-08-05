@@ -1,4 +1,4 @@
-// Host implementation of the `lann:webrtc-datachannels/connections` imports
+// Host implementation of the `polymorph:webrtc-datachannels/connections` imports
 // for the demo component.
 //
 // This is the "browser-first" host: it is written against the standard W3C

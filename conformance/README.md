@@ -1,6 +1,6 @@
 # Conformance test suite
 
-A conformance suite for the `lann:webrtc-datachannels` implementations. It runs
+A conformance suite for the `polymorph:webrtc-datachannels` implementations. It runs
 the **same wasm conformance guest component** against each target and asserts
 **WIT-observable interoperable behavior only** — never SDP contents, candidate
 ordering, timing, or exact error strings. The suite makes the project's promise

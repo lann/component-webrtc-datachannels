@@ -141,7 +141,7 @@ test-echo-remote-composed: compose-echo-remote build-signalingd
     wait $ANSWERER
 
 # Build the wasip3 provider component (the whole WebRTC stack runs in-guest;
-# it exports `lann:webrtc-datachannels/connections`) into
+# it exports `polymorph:webrtc-datachannels/connections`) into
 # target/wasm32-wasip2/release/wasip3_webrtc_datachannels.wasm.
 [doc("Build the wasip3 provider component (exports connections)")]
 build-wasip3-provider:

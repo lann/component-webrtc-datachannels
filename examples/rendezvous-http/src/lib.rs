@@ -29,7 +29,7 @@ mod bindings {
 use bindings::exports::demo::webrtc_echo::rendezvous::{
     Guest, GuestSession, Role, Session as SessionResource,
 };
-use bindings::lann::webrtc_datachannels::types::Error;
+use bindings::polymorph::webrtc_datachannels::types::Error;
 
 struct Component;
 

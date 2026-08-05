@@ -70,7 +70,7 @@ interface runner {
 /// `connections` surface it exercises and the suite-owned `mailbox` it signals
 /// through, and exports the `runner` control surface the adapters drive.
 world conformance {
-    import lann:webrtc-datachannels/connections@0.1.0;
+    import polymorph:webrtc-datachannels/connections@0.1.0;
     import conformance:signaling/mailbox@0.1.0;
     export runner;
 }

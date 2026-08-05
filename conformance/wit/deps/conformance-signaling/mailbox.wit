@@ -17,7 +17,7 @@ package conformance:signaling@0.1.0;
 /// from `conformance-signalingd` over HTTP; the guest itself never speaks the
 /// wire protocol.
 interface mailbox {
-    use lann:webrtc-datachannels/types@0.1.0.{error};
+    use polymorph:webrtc-datachannels/types@0.1.0.{error};
 
     /// Which half of the exchange this peer drives. The `offerer` publishes to
     /// the `offerer` mailbox and consumes the `answerer` mailbox; the

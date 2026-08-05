@@ -3,7 +3,7 @@ name = "conformance-guest"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Shared conformance guest component: exports conformance:suite/runner and drives lann:webrtc-datachannels/connections through the conformance:signaling/mailbox, one wasm binary run against every target."
+description = "Shared conformance guest component: exports conformance:suite/runner and drives polymorph:webrtc-datachannels/connections through the conformance:signaling/mailbox, one wasm binary run against every target."
 
 [lib]
 crate-type = ["cdylib"]

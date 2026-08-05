@@ -20,13 +20,13 @@
 #
 # Environment overrides:
 #   SHADOW_RELEASE_REPO   owner/name to download from (default: this repo via
-#                         GITHUB_REPOSITORY, else lann/component-webrtc-datachannels)
+#                         GITHUB_REPOSITORY, else polymorph-components/polymorph-webrtc-datachannels)
 #   SHADOW_RELEASE_TAG    release tag to download (default: shadow-dev)
 
 set -euo pipefail
 
 PREFIX="${1:-${HOME}/.local}"
-REPO="${SHADOW_RELEASE_REPO:-${GITHUB_REPOSITORY:-lann/component-webrtc-datachannels}}"
+REPO="${SHADOW_RELEASE_REPO:-${GITHUB_REPOSITORY:-polymorph-components/polymorph-webrtc-datachannels}}"
 TAG="${SHADOW_RELEASE_TAG:-shadow-dev}"
 ASSET="shadow-linux-x86_64.tar.gz"
 

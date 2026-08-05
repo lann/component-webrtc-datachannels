@@ -6,7 +6,7 @@
 //! genuinely separate component instances — separate OS processes, potentially
 //! separate machines — exchange their SDP offer/answer and trickled ICE
 //! candidates through an HTTP signaling server and form one real WebRTC
-//! connection over the standard `lann:webrtc-datachannels/connections`
+//! connection over the standard `polymorph:webrtc-datachannels/connections`
 //! interface.
 //!
 //! The offerer creates the `echo` channel, sends `message-count` deterministic
@@ -24,8 +24,8 @@ wit_bindgen::generate!({
 
 use demo::webrtc_echo::rendezvous::{Role, Session};
 use exports::demo::webrtc_echo::remote::{DemoStats, Guest, RemoteConfig};
-use lann::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
-use lann::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
+use polymorph::webrtc_datachannels::connections::{DataChannel, DataChannelOptions, PeerConnection};
+use polymorph::webrtc_datachannels::types::{Error, IceCandidate, Message, SdpType, SessionDescription};
 use serde::{Deserialize, Serialize};
 
 struct Component;

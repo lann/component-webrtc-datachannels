@@ -1,4 +1,4 @@
-//! Raw `bindgen!` output for the `lann:webrtc-datachannels` package.
+//! Raw `bindgen!` output for the `polymorph:webrtc-datachannels` package.
 //!
 //! The crate implements the `types` interface and, in the `connections`
 //! interface, the `data-channel-options` and `peer-connection-config`
@@ -22,53 +22,53 @@ mod generated {
             // `data-channel.label` is a synchronous function in the WIT and is
             // imported as such by guests, so it must be bound synchronously
             // (still `trappable`, but not `async`).
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.label": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel.label": trappable,
             // `data-channel.close` is synchronous in the WIT (it initiates the
             // closing procedure and returns) and needs no store access.
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.close": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel.close": trappable,
             // `data-channel.receive-via-stream` is synchronous in the WIT: it
             // hands back the inbound stream without awaiting, so it is bound
             // synchronously. It still needs `store` to allocate the returned
             // `stream<stream-message>` on the guest's behalf. The
             // `state-changes` streams (on both resources) are bound the same
             // way for the same reason.
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.receive-via-stream": store | trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel.state-changes": store | trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel.receive-via-stream": store | trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel.state-changes": store | trappable,
             // The `peer-connection` resource's synchronous functions are bound
             // synchronously. The `constructor`, `create-data-channel`, and
             // `close` need no store access; the stream-returning functions need
             // `store` to allocate the returned stream (and, for
             // `incoming-data-channels`, to push data-channel resources).
-            "lann:webrtc-datachannels/connections@0.1.0.[constructor]peer-connection": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.create-data-channel": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.incoming-data-channels": store | trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.local-ice-candidates": store | trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.state-changes": store | trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection.close": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[constructor]peer-connection": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection.create-data-channel": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection.incoming-data-channels": store | trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection.local-ice-candidates": store | trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection.state-changes": store | trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection.close": trappable,
             // `data-channel-options` and `peer-connection-config` are plain
             // configuration builders: their constructors and every
             // getter/setter are synchronous WIT functions, so they are bound
             // synchronously (no `async`, no `store`).
-            "lann:webrtc-datachannels/connections@0.1.0.[constructor]data-channel-options": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.label": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-label": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.ordered": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-ordered": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.max-retransmits": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-max-retransmits": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[constructor]peer-connection-config": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-servers": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-servers": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-transport-policy": trappable,
-            "lann:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-transport-policy": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[constructor]data-channel-options": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.label": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-label": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.ordered": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-ordered": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.max-retransmits": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]data-channel-options.set-max-retransmits": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[constructor]peer-connection-config": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-servers": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-servers": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.ice-transport-policy": trappable,
+            "polymorph:webrtc-datachannels/connections@0.1.0.[method]peer-connection-config.set-ice-transport-policy": trappable,
         },
         with: {
-            "lann:webrtc-datachannels/connections.data-channel-options": crate::DataChannelOptions,
-            "lann:webrtc-datachannels/connections.peer-connection-config": crate::PeerConnectionConfig,
-            "lann:webrtc-datachannels/connections.data-channel": crate::DataChannel,
-            "lann:webrtc-datachannels/connections.peer-connection": crate::PeerConnection,
+            "polymorph:webrtc-datachannels/connections.data-channel-options": crate::DataChannelOptions,
+            "polymorph:webrtc-datachannels/connections.peer-connection-config": crate::PeerConnectionConfig,
+            "polymorph:webrtc-datachannels/connections.data-channel": crate::DataChannel,
+            "polymorph:webrtc-datachannels/connections.peer-connection": crate::PeerConnection,
         },
     });
 }
 
-pub use self::generated::lann::*;
+pub use self::generated::polymorph::*;
