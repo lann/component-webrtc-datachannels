@@ -8,7 +8,7 @@
 //! setup they share.
 
 use wasmtime::{Config, Engine, Result};
-use wasmtime_webrtc_datachannels::WasiWebrtcCtx;
+use wasmtime_webrtc_datachannels::WebrtcCtx;
 
 /// Build the Wasmtime engine every demo binary uses: the component model with
 /// component-model async enabled (the `send`/`receive` methods use the async
@@ -27,8 +27,8 @@ pub fn engine() -> Result<Engine> {
 /// variable overrides the inbound buffer bound. These env-driven tweaks are
 /// host glue: the host crate itself reads no environment, so a malformed
 /// value fails loud here.
-pub fn webrtc_ctx() -> WasiWebrtcCtx {
-    let mut ctx = WasiWebrtcCtx::new();
+pub fn webrtc_ctx() -> WebrtcCtx {
+    let mut ctx = WebrtcCtx::new();
     if std::env::var_os("WEBRTC_INCLUDE_LOOPBACK").is_some() {
         ctx.set_setting_engine_hook(|engine| {
             engine.set_include_loopback_candidate(true);

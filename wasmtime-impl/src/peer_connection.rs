@@ -52,7 +52,7 @@ use crate::error::{WebrtcError, WebrtcResult};
 use crate::{DataChannel, SettingEngineHook};
 
 /// How long [`PeerConnection::wait_connected`] waits before reporting a
-/// timeout, unless overridden through `WasiWebrtcCtx::set_connect_timeout`.
+/// timeout, unless overridden through `WebrtcCtx::set_connect_timeout`.
 pub(crate) const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// How long [`PeerConnection::close`] keeps the underlying connection alive
@@ -223,7 +223,7 @@ impl PeerConnection {
     /// servers, relay-only policy) is applied when it is built.
     /// `connect_timeout` bounds `wait-connected` and
     /// `max_inbound_buffer_bytes` bounds each channel's inbound buffering
-    /// (both configured through `WasiWebrtcCtx`). Requires a
+    /// (both configured through `WebrtcCtx`). Requires a
     /// running Tokio runtime; without one every subsequent operation fails.
     pub fn new_with(
         hook: Option<SettingEngineHook>,

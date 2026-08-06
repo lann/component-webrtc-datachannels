@@ -9,9 +9,7 @@
 
 use wasmtime::component::{Accessor, Component, HasData, Linker, ResourceTable};
 use wasmtime::{Result, Store};
-use wasmtime_webrtc_datachannels::{
-    self as webrtc_host, WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView,
-};
+use wasmtime_webrtc_datachannels::{self as webrtc_host, WebrtcCtx, WebrtcCtxView, WebrtcView};
 use wasmtime_webrtc_host::{engine, webrtc_ctx};
 
 mod bindings {
@@ -38,7 +36,7 @@ mod bindings {
 }
 
 struct Ctx {
-    webrtc: WasiWebrtcCtx,
+    webrtc: WebrtcCtx,
     table: ResourceTable,
 }
 
@@ -46,9 +44,9 @@ impl HasData for Ctx {
     type Data<'a> = &'a mut Self;
 }
 
-impl WasiWebrtcView for Ctx {
-    fn webrtc(&mut self) -> WasiWebrtcCtxView<'_> {
-        WasiWebrtcCtxView {
+impl WebrtcView for Ctx {
+    fn webrtc(&mut self) -> WebrtcCtxView<'_> {
+        WebrtcCtxView {
             ctx: &mut self.webrtc,
             table: &mut self.table,
         }

@@ -45,7 +45,7 @@ wit/                                   # polymorph:webrtc-datachannels package
   webrtc.wit                           #   types (structural), connections (resources)
 wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   modeled after wasmtime_wasi_http::p3;
-                                       #   add_to_linker + WasiWebrtcView (types + connections.data-channel-options/data-channel);
+                                       #   add_to_linker + WebrtcView (types + connections.data-channel-options/data-channel);
                                        #   crate name: wasmtime-webrtc-datachannels
 jco-impl/                              # browser-first host (Node + jco + node-datachannel)
 wasip3-impl/                           # wasm COMPONENT on `rtc` 0.20: runs the
@@ -330,7 +330,7 @@ documented at its use site):
 | Variable | Read by | Effect |
 | --- | --- | --- |
 | `WEBRTC_UDP_BIND_ADDR` | `wasip3-impl` provider | IP address the in-guest `peer-connection` binds its UDP socket to (and derives its host candidate from); default IPv4 loopback. An unparsable value constructs dead connections (methods fail `closed`; the cause is printed to stderr). |
-| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations, but only the `wasip3-impl` guest reads it directly (the env var is its only channel); the host libraries read no ambient state — the Wasmtime hosts (demo binaries, conformance adapter) wire the variable through `WasiWebrtcCtx`, and the jco Node demo runners wire it through `webrtc.js`'s exported `setMaxInboundBufferBytes` hook (browser embedders call the hook directly; there is no `globalThis` channel) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. |
+| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations, but only the `wasip3-impl` guest reads it directly (the env var is its only channel); the host libraries read no ambient state — the Wasmtime hosts (demo binaries, conformance adapter) wire the variable through `WebrtcCtx`, and the jco Node demo runners wire it through `webrtc.js`'s exported `setMaxInboundBufferBytes` hook (browser embedders call the hook directly; there is no `globalThis` channel) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. |
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
 | `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `rtc-ct-driver` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated wasmtime-kind peers. |
 | `RTC_CT_ROLE`, `RTC_CT_SIGNALING_URL`, `RTC_CT_RUN_ID` | the conformance suites (via the store environment) | The pair-instance channel: which half this instance drives, the mailbox base URL, and the room-derivation seed. Set by `rtc-ct-driver` on the children it spawns; never set by hand. |
@@ -339,7 +339,7 @@ documented at its use site):
 
 Every env var is an undeclared API each deployer must discover, and this
 table is its only registry — so add no new implementation-level env var
-without first considering the proper channel: `WasiWebrtcCtx` on the Wasmtime
+without first considering the proper channel: `WebrtcCtx` on the Wasmtime
 host, an exported configure hook for the jco module (`jco --map` gives no
 instantiation-time config channel), or the WIT surface itself (as
 `peer-connection-config` demonstrates for in-guest configuration).
