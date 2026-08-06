@@ -17,7 +17,7 @@ wasmtime = { version = "47", features = ["component-model", "component-model-asy
 # that with an in-binary shim (conformance/adapters/wasmtime/src/bin/peer/
 # shadow_shim.rs); if Shadow adds support for these syscalls the shim can be
 # retired.
-webrtc = "0.20.0-rc.4"
+webrtc = "0.20.0"
 futures = "0.3"
 anyhow = "1"
 bytes = "1"

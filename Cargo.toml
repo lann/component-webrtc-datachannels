@@ -32,11 +32,13 @@ default-members = [
 resolver = "2"
 
 # Pin the sans-I/O WebRTC stack once, here, so every member (and any future wasm
-# build) resolves the same source. 0.20.0-rc.4 is the first published release
-# carrying the empty-message receive fix (webrtc-rs/rtc#131), so the hosts can
-# receive zero-length messages.
+# build) resolves the same source. 0.20.0 is the first stable release carrying
+# the empty-message receive fix (webrtc-rs/rtc#131), the srflx source-address
+# fix (#136), `RTCDataChannel::send` rejecting sends the write path cannot
+# carry out (#138), and `RTCDataChannelInit::ordered` defaulting to `true` as
+# documented (#140).
 [workspace.dependencies]
-rtc = "0.20.0-rc.4"
+rtc = "0.20.0"
 # The component-test harness, rev-pinned (no registry release yet).
 # One rev everywhere: these three entries and the CLI install
 # (conformance/driver-ct/justfile reads the rev back out of Cargo.lock).
@@ -46,27 +48,3 @@ component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-
 component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
 component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
 component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
-
-# Redirect every `rtc` resolution — the direct dependency of `wasip3-impl` and,
-# crucially, the *transitive* dependency of the async `webrtc` 0.20 crate the
-# Wasmtime host is built on — to upstream `rtc` master. The pinned commit
-# carries three fixes that are in no published release:
-#
-#   * the srflx source-address fix (webrtc-rs/rtc#136): connectivity checks from
-#     a server-reflexive candidate are sent from its base rather than the
-#     NAT-mapped address, so drivers that demultiplex outbound transmits by
-#     local address no longer drop them (the netns lab's `stun-srflx` finding);
-#   * `RTCDataChannel::send` rejecting sends the write path cannot carry out
-#     (webrtc-rs/rtc#138): a send on a `connecting` or closed channel returned
-#     `Ok(())` while the message was discarded on the write pass, and charged
-#     `outstanding_bytes` that nothing would ever release — the counter the
-#     in-guest close drain polls to know a channel has flushed;
-#   * `RTCDataChannelInit::ordered` defaulting to `true` as documented
-#     (webrtc-rs/rtc#140).
-#
-# Using `[patch]` rather than a direct git dependency is what lets the fixes
-# reach `webrtc`'s own copy of `rtc`. Drop the patch and return to a plain
-# crates.io version once a release including them ships (see
-# https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/120).
-[patch.crates-io]
-rtc = { git = "https://github.com/webrtc-rs/rtc.git", rev = "a1566b794d174b4d643c16267cdbe106c35a3e18" }
