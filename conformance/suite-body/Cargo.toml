@@ -1,0 +1,21 @@
+[package]
+name = "conformance-suite-body"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The conformance case bodies and SUT bindings shared by the two suite components (conformance-guest-ct, conformance-guest-pair-ct): the incumbent guest's assertions re-plumbed for the polymorph:test harness (config via the store environment, rooms derived per case)."
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+# The sut-imports world's bindings (imports `connections` + `mailbox`;
+# no exports — the suite crates' component-test SDK owns those): `async`
+# pulls in the component-model stream/future runtime.
+wit-bindgen = { version = "0.59", features = ["async", "async-spawn"] }
+# Concurrent send/receive within a single cooperative task (no OS threads).
+futures = { version = "0.3", default-features = false, features = ["async-await"] }
+# The opaque signaling blob encoding the guest owns (JSON session-description /
+# ice-candidate values with an explicit end-of-candidates marker).
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

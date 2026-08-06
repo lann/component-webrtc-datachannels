@@ -135,7 +135,7 @@ if [ "${SKIP_NETNS_LAB:-0}" = "1" ]; then
   log "Skipping conformance netns-lab dependencies (SKIP_NETNS_LAB=1)"
 else
   # The conformance netns lab (`just conformance::netns`, provisioned in Rust by
-  # the conformance-netns executor in conformance/adapters/common;
+  # the netns-lab executor in conformance/driver-ct;
   # README.md) provisions a routed network-namespace topology with `ip`
   # (iproute2) and `nft` (nftables) and relays through coturn's `turnserver`.
   # These come from the distro package manager; install them on Debian/Ubuntu
@@ -156,7 +156,7 @@ else
   fi
 fi
 
-# The conformance reference peer (conformance/adapters/reference) builds
+# The conformance reference peer (conformance/reference) builds
 # LiveKit's `webrtc-sys`, whose build script locates the glib headers through
 # pkg-config on Linux. Install them on Debian/Ubuntu when apt-get is available
 # (harmless no-op elsewhere — provide them yourself).
@@ -174,8 +174,8 @@ if [ "${SKIP_NODE:-0}" = "1" ]; then
 else
   log "Installing Node host dependencies (jco-impl)"
   (cd "${REPO_ROOT}/jco-impl" && npm install)
-  log "Installing conformance jco adapter dependencies (conformance/adapters/jco)"
-  (cd "${REPO_ROOT}/conformance/adapters/jco" && npm install)
+  log "Installing conformance jco leg dependencies (conformance/driver-ct/jco)"
+  (cd "${REPO_ROOT}/conformance/driver-ct/jco" && npm install)
 fi
 
 # In GitHub Actions, $GITHUB_PATH is a file; appending a path to it makes that

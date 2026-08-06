@@ -1,0 +1,27 @@
+[package]
+name = "conformance-ct-driver"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "rtc-ct-driver: the polymorph:test legs of the conformance harness. One binary: child modes run one suite instance's stream (a role, a selection, a linker profile); orchestrator modes provision the signaling server, spawn role-paired child streams (or per-case reference-peer processes), fold the two sides per case, and emit one results JSONL stream per target."
+
+[[bin]]
+name = "rtc-ct-driver"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+libc = "0.2"
+rtc = { workspace = true }
+component-test-runner = { workspace = true }
+component-test-formats = { workspace = true }
+component-test-results = { workspace = true }
+conformance-signalingd = { path = "../signaling/server" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "process"] }
+reqwest = { version = "0.12", default-features = false }
+wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "cranelift", "runtime"] }
+wasmtime-wasi = { version = "47", features = ["p3"] }
+wasmtime-wasi-http = { version = "47", features = ["p3"] }
+wasmtime-webrtc-datachannels = { path = "../../wasmtime-impl" }

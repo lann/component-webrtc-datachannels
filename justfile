@@ -1,6 +1,6 @@
 # The repo-wide checks live here; everything scoped to a subtree lives in that
 # subtree's justfile module:
-#   just conformance             — the full loopback conformance suite
+#   just conformance             — the full loopback + interop conformance suite
 #   just conformance::<recipe>   — individual targets, labs, builders
 #   just examples::<recipe>      — demo components, hosts, and compositions
 # Run `just --list` (or `just --list <module>`) to see every recipe.
@@ -32,7 +32,6 @@ clippy:
     cargo clippy --target wasm32-unknown-unknown \
         -p echo-demo \
         -p echo-remote \
-        -p conformance-guest \
         -- -D warnings
     cargo clippy --target wasm32-wasip2 \
         -p cli-signaling \
@@ -41,7 +40,9 @@ clippy:
         -p wasip3-webrtc-datachannels \
         -p webrtc-consumer \
         -p conformance-wasip3-mailbox \
-        -p conformance-wasip3-driver \
+        -p conformance-suite-body \
+        -p conformance-guest-ct \
+        -p conformance-guest-pair-ct \
         -- -D warnings
 
 # Validate WIT packages.

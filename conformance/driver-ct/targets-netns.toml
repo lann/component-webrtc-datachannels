@@ -1,0 +1,11 @@
+# Target capability manifests for the netns-lab matrix: the pair-only
+# suite over real routed candidate paths built from network namespaces
+# (root-only, workstation-only; the CI analogue is the Shadow lab). One
+# row per ICE scenario: direct LAN, STUN server-reflexive (full-cone
+# NAT), TURN relay-only, and symmetric NAT (ICE falls back to relay).
+version = "0.1"
+
+[targets.wasmtime-lan]
+[targets.wasmtime-stun-srflx]
+[targets.wasmtime-turn-relay]
+[targets.wasmtime-nat-symmetric]

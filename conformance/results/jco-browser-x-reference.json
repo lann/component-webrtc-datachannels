@@ -1,0 +1,10 @@
+{
+  "target": "jco-browser-x-reference",
+  "environment": "loopback",
+  "results": [
+    {
+      "test_id": "interop-handshake",
+      "status": "pass"
+    }
+  ]
+}

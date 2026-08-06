@@ -1,0 +1,37 @@
+# Target capability manifests for the loopback conformance matrix: the
+# full suite (solo/* + pair/*), one row per implementation, every case
+# expected on every row.
+#
+# No [features] tables: every declared target serves the whole surface.
+# When a capability gap appears, declare the feature here, tag the
+# affected cases, and add a `!feature` decline probe (the lockfile lint
+# enforces the pair).
+#
+# Expected-fail schema, when needed:
+#   [[targets.<t>.expected-fail]]
+#   case = "<case name>"          # a lockfile case name
+#   reason = "<why>"              # mandatory
+#   tracking = "<issue url>"      # mandatory; an expected-fail that
+#                                 # PASSES fails the aggregate, forcing
+#                                 # this file to be cleaned up.
+
+# The native Wasmtime host over webrtc-rs, driven by rtc-ct-driver
+# (solo stream + role-paired child streams, folded).
+version = "0.1"
+
+[targets.wasmtime]
+
+# The whole WebRTC stack in wasm: the suite composed via `wac plug`
+# with the wasip3-impl provider (sans-I/O `rtc` over WASIp3
+# `wasi:sockets`) and the in-guest `wasi:http` mailbox client, run by
+# the same driver with the composed linker profile.
+[targets.composed]
+
+# The browser-first host (jco-impl/webrtc.js, node-datachannel-backed)
+# under Node 24+ with JSPI; the fetch mailbox.
+[targets.jco-node]
+
+# The same host module and the same transpiled suite inside a real
+# headless Chromium (Chrome 137+ ships JSPI); the mailbox reaches the
+# driver's signaling server through the leg's same-origin proxy.
+[targets.jco-browser]
