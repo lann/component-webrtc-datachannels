@@ -11,17 +11,17 @@ description = "Wasmtime host implementation of the polymorph:webrtc-datachannels
 # API used here.
 wasmtime = { version = "47", features = ["component-model", "component-model-async", "async", "runtime"] }
 # `webrtc-rs`: a pure-Rust WebRTC stack. Provides the RTCPeerConnection /
-# RTCDataChannel implementation that backs the host's data channels. rc.4's
+# RTCDataChannel implementation that backs the host's data channels. Pinned at
+# the workspace level (root Cargo.toml) alongside its sans-I/O `rtc` core.
 # quinn-udp GSO/GRO batching (webrtc-rs/webrtc#820) requires syscalls the
 # Shadow simulator does not implement; the conformance Shadow lab bridges
-# that with an in-binary shim (conformance/adapters/wasmtime/src/bin/peer/
-# shadow_shim.rs); if Shadow adds support for these syscalls the shim can be
-# retired.
-webrtc = "0.20.0"
+# that with an in-binary shim (conformance/driver-ct/src/shadow_shim.rs); if
+# Shadow adds support for these syscalls the shim can be retired.
+webrtc.workspace = true
 futures = "0.3"
 anyhow = "1"
 bytes = "1"
-# The `webrtc` 0.20 `PeerConnectionEventHandler` trait is defined with
+# The `webrtc` 0.21 `PeerConnectionEventHandler` trait is defined with
 # `#[async_trait]`, so implementing it requires the same attribute macro.
 async-trait = "0.1"
 # `webrtc-rs` peer connections require a Tokio runtime; the host spawns their

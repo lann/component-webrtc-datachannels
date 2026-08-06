@@ -11,7 +11,7 @@ description = "A wasm component that runs the sans-I/O `rtc` WebRTC stack in-gue
 crate-type = ["cdylib"]
 
 [dependencies]
-# The sans-I/O WebRTC stack. Pinned, via the workspace, to `rtc` 0.20 so it
+# The sans-I/O WebRTC stack. Pinned, via the workspace, to `rtc` 0.21 so it
 # compiles for `wasm32-wasip2`.
 rtc.workspace = true
 anyhow = "1"

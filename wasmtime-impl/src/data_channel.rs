@@ -10,7 +10,7 @@
 //! (remote-opened channels are wired the same way). The async methods await
 //! [`DataChannel::wired`] before touching the transport.
 //!
-//! The `webrtc` 0.20 data channel has no `on_open`/`on_message` callbacks;
+//! The `webrtc` 0.21 data channel has no `on_open`/`on_message` callbacks;
 //! instead each channel is driven by a per-channel **pump** task that loops on
 //! [`webrtc::data_channel::DataChannel::poll`] and turns its
 //! [`DataChannelEvent`]s into an open signal plus a stream of
@@ -163,7 +163,7 @@ pub(crate) type WiredFuture = Shared<Pin<Box<dyn Future<Output = WebrtcResult<Wi
 /// The receiving half of a connection-close signal, shared by every data
 /// channel a `peer-connection` resource owns.
 ///
-/// The `webrtc` 0.20 wrapper neither errors sends nor emits a channel
+/// The `webrtc` 0.21 wrapper neither errors sends nor emits a channel
 /// `OnClose` after `PeerConnection::close`, so the host propagates the close
 /// itself: the peer connection fires its [`CloseTrigger`] (on a local `close`
 /// or on reaching the `failed`/`closed` state) and every channel operation
@@ -233,7 +233,7 @@ pub(crate) struct ChannelPump {
     pub(crate) closed: Shared<oneshot::Receiver<()>>,
 }
 
-/// Spawn the per-channel pump task that drives a `webrtc` 0.20 data channel.
+/// Spawn the per-channel pump task that drives a `webrtc` 0.21 data channel.
 ///
 /// The task loops on [`webrtc::data_channel::DataChannel::poll`] and translates
 /// its [`DataChannelEvent`]s: `OnOpen` fires the open signal, each `OnMessage`
@@ -364,7 +364,7 @@ pub struct DataChannel {
     stream_started: Shared<oneshot::Receiver<()>>,
     /// Fired once the owning `peer-connection` resource closes. Send/receive
     /// observe it so operations on a closed connection fail with
-    /// `error.closed` even though the `webrtc` 0.20 wrapper reports nothing
+    /// `error.closed` even though the `webrtc` 0.21 wrapper reports nothing
     /// to the channels itself.
     conn_closed: CloseSignal,
     /// Fired by a local `close()` (or the resource dropping): operations fail

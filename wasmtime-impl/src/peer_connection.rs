@@ -519,7 +519,7 @@ impl PeerConnection {
     /// otherwise be lost before it reaches the wire.
     pub fn close(&self) {
         // Fire the close signal first so pending channel operations resolve
-        // with `error.closed` (the `webrtc` 0.20 wrapper reports nothing to the
+        // with `error.closed` (the `webrtc` 0.21 wrapper reports nothing to the
         // channels itself), then tear down the connection after the drain.
         // `close` wins over a later `failed` callback: the phase watch treats
         // `closed` as terminal.
@@ -545,7 +545,7 @@ impl PeerConnection {
 /// Build the [`PeerConnectionEventHandler`](webrtc::peer_connection::PeerConnectionEventHandler)
 /// that feeds the guest-facing streams and connection-state signalling.
 ///
-/// The `webrtc` 0.20 builder takes one handler at build time, so all callbacks
+/// The `webrtc` 0.21 builder takes one handler at build time, so all callbacks
 /// are assembled here into a single [`CallbackHandler`]:
 ///
 /// - each locally gathered ICE candidate is trickled onto `cand_tx`, and the
@@ -682,7 +682,7 @@ fn close_peer_connections(connections: Vec<Arc<dyn WebrtcPeerConnection>>) {
 /// controlling the UDP bind addresses, STUN/TURN servers, and ICE transport
 /// policy, giving the caller a chance to customize the `webrtc-rs`
 /// [`SettingEngine`] first and supplying the event `handler` that receives its
-/// callbacks (the `webrtc` 0.20 builder takes a single
+/// callbacks (the `webrtc` 0.21 builder takes a single
 /// [`PeerConnectionEventHandler`] at build time). A default config binds IPv4
 /// loopback; the conformance netns lab (see `conformance/README.md`) overrides
 /// it per scenario to exercise host, server-reflexive, and relay candidate
@@ -736,7 +736,7 @@ async fn new_peer_connection_with(
 
 /// A [`PeerConnectionEventHandler`] built from optional callback senders.
 ///
-/// The `webrtc` 0.20 builder takes one handler at build time; this type
+/// The `webrtc` 0.21 builder takes one handler at build time; this type
 /// assembles a handler from just the callbacks the connection needs without a
 /// bespoke trait impl per call site.
 #[allow(clippy::type_complexity)]

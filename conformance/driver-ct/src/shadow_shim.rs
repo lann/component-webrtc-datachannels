@@ -1,5 +1,5 @@
 //! In-binary overrides of the libc syscall wrappers whose Shadow-simulator
-//! behavior breaks the `webrtc` 0.20 driver's quinn-udp UDP layer. Symbols
+//! behavior breaks the `webrtc` 0.21 driver's quinn-udp UDP layer. Symbols
 //! defined in the executable win dynamic-symbol resolution over every
 //! preloaded library — including Shadow's `preload-libc` — so overriding here
 //! works identically inside and outside Shadow.

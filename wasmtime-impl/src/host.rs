@@ -469,7 +469,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
             ))
         })?;
 
-        // The channel (or its owning connection) closed: the `webrtc` 0.20
+        // The channel (or its owning connection) closed: the `webrtc` 0.21
         // wrapper would silently queue the message, so surface `closed` here.
         if local_closed.is_closed() || conn_closed.is_closed() {
             return Ok(Err(Error::Closed));
@@ -481,7 +481,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         };
 
         // Race the send against the channel or its connection closing,
-        // mirroring `receive`: the `webrtc` 0.20 wrapper neither errors sends
+        // mirroring `receive`: the `webrtc` 0.21 wrapper neither errors sends
         // nor wakes `wired` after `PeerConnection::close`, so without the race
         // a send on a never-opened channel could pend forever and a send
         // landing just after close could report success for a silently
@@ -534,7 +534,7 @@ impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
         // against `receive-via-stream` being called and against the channel or
         // its owning connection closing: a pending receiver is woken and fails
         // with `receiving-via-stream` the moment the stream is claimed, or
-        // with `closed` on a close (the `webrtc` 0.20 wrapper emits
+        // with `closed` on a close (the `webrtc` 0.21 wrapper emits
         // no channel close of its own). Biased order: an already-available
         // message wins over the signals.
         let mut receive = std::pin::pin!(async move {
