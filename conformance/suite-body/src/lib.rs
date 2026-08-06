@@ -358,12 +358,18 @@ async fn exchange(id: &str, count: u32, size: u32, dc: &DataChannel) -> Result<(
             }
         }
         "zero-length-message" => {
+            // One round trip per kind, sequentially: the case asserts
+            // zero-length delivery of each kind, and `ordering` owns
+            // cross-message ordering — adjacent sends of different
+            // kinds can swap on hosts that marshal them through
+            // separate delivery queues (#124), which is that bug's
+            // surface, not this case's.
             send(dc, Message::Binary(Vec::new())).await?;
-            send(dc, Message::String(String::new())).await?;
             match receive(dc).await? {
                 Message::Binary(bytes) if bytes.is_empty() => {}
                 _ => return Err("expected empty binary message".to_string()),
             }
+            send(dc, Message::String(String::new())).await?;
             match receive(dc).await? {
                 Message::String(text) if text.is_empty() => Ok(()),
                 _ => Err("expected empty text message".to_string()),
