@@ -1,0 +1,13 @@
+[package]
+name = "conformance-guest-pair-ct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The pair-only sibling of conformance-guest-ct: the two-peer subset as its own polymorph:test suite artifact, with its own lockfile — the corpus the interop directions and the network labs run (their targets never execute solo/* cases)."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+component-test-sdk = { workspace = true }
+conformance-suite-body = { path = "../suite-body" }

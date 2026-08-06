@@ -8,9 +8,7 @@ node_modules/
 build/
 jco-impl/generated/
 jco-impl/generated-remote/
-conformance/adapters/jco/generated/
-conformance/matrix.md
-conformance/nat-matrix.md
-conformance/shadow-matrix.md
-conformance/results/
+conformance/driver-ct/jco/generated/
+conformance/driver-ct/jco/generated-pair/
+conformance/driver-ct/results/
 /target-linux/

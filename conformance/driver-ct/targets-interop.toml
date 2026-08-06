@@ -1,0 +1,41 @@
+# Target capability manifests for the interop conformance matrix: the
+# pair-only suite (conformance-guest-pair-ct), one row per
+# `<offerer>-x-<answerer>` direction. The bulk of coverage anchors
+# every implementation against the non-wasm reference peer (Google's
+# libwebrtc via LiveKit's Rust bindings) in both orders — a red cell
+# implicates the implementation, not the pair — plus the reference
+# self-pair (the `reference` row) and the direct implementation pairs.
+
+version = "0.1"
+
+[targets.wasmtime-x-reference]
+[targets.reference-x-wasmtime]
+[targets.jco-node-x-reference]
+[targets.reference-x-jco-node]
+[targets.jco-browser-x-reference]
+[targets.reference-x-jco-browser]
+
+[targets.wasip3-guest-x-reference]
+
+# The sans-I/O `rtc` stack's data-channel close sends nothing on the
+# wire (its handler-level `close()` is a stub, so no SCTP stream reset
+# is emitted). A wasip3 offerer's `channel-close-flush` close is
+# therefore never observable by the libwebrtc answerer, which waits out
+# the case bound (the flush half works: every payload arrives). The
+# rtc<->rtc and rtc<->webrtc-rs pairs pass only because those answerers
+# detect the offerer's teardown as a connection death within the bound.
+[[targets.wasip3-guest-x-reference.expected-fail]]
+case = "pair/channel-close-flush"
+reason = "rtc emits no SCTP stream reset on data-channel close, so the libwebrtc answerer never observes the close"
+tracking = "https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/123"
+
+[targets.reference-x-wasip3-guest]
+
+# The reference self-pair: libwebrtc on both sides, the suite's
+# wire-level anchor row.
+[targets.reference]
+
+[targets.wasmtime-x-jco-node]
+[targets.jco-node-x-wasmtime]
+[targets.wasmtime-x-wasip3-guest]
+[targets.wasip3-guest-x-wasmtime]

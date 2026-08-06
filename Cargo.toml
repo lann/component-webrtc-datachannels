@@ -9,15 +9,13 @@ members = [
     "examples/echo-remote/driver",
     "examples/rendezvous-http",
     "examples/webrtc-consumer",
-    "conformance/runner",
     "conformance/signaling/server",
-    "conformance/guest",
-    "conformance/adapters/common",
-    "conformance/adapters/reference",
-    "conformance/adapters/wasmtime",
-    "conformance/adapters/wasip3",
-    "conformance/adapters/wasip3/mailbox",
-    "conformance/adapters/wasip3/driver",
+    "conformance/suite-body",
+    "conformance/guest-ct",
+    "conformance/guest-pair-ct",
+    "conformance/driver-ct",
+    "conformance/reference",
+    "conformance/wasip3-mailbox",
 ]
 # The crates cargo operates on when invoked without a package selection: the
 # native (host-target) crates. The rest are wasm-only components that must be
@@ -27,12 +25,9 @@ members = [
 default-members = [
     "wasmtime-impl",
     "examples/wasmtime-demo",
-    "conformance/runner",
     "conformance/signaling/server",
-    "conformance/adapters/common",
-    "conformance/adapters/reference",
-    "conformance/adapters/wasmtime",
-    "conformance/adapters/wasip3",
+    "conformance/driver-ct",
+    "conformance/reference",
 ]
 resolver = "2"
 
@@ -42,6 +37,15 @@ resolver = "2"
 # receive zero-length messages.
 [workspace.dependencies]
 rtc = "0.20.0-rc.4"
+# The component-test harness, rev-pinned (no registry release yet).
+# One rev everywhere: these three entries and the CLI install
+# (conformance/driver-ct/justfile reads the rev back out of Cargo.lock).
+# Bump all together, then `cargo update component-test-sdk
+# component-test-runner component-test-formats`.
+component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
+component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
+component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
+component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
 
 # Redirect every `rtc` resolution — the direct dependency of `wasip3-impl` and,
 # crucially, the *transitive* dependency of the async `webrtc` 0.20 crate the

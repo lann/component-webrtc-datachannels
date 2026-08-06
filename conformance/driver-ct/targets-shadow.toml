@@ -1,0 +1,11 @@
+# Target capability manifests for the Shadow-lab matrix: the pair-only
+# suite inside the Shadow discrete-event network simulator (two peers on
+# separate simulated hosts over a routed, non-loopback path;
+# deterministic, no root — the CI lab). One row per placement.
+version = "0.1"
+
+[targets.wasmtime-shadow]
+[targets.wasip3-guest-shadow]
+[targets.reference-shadow]
+[targets.wasmtime-x-wasip3-guest-shadow]
+[targets.wasip3-guest-x-wasmtime-shadow]

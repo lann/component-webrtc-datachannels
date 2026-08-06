@@ -1,0 +1,16 @@
+[package]
+name = "conformance-guest-ct"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The conformance suite on the polymorph:test SDK: a #[suite] component importing polymorph:webrtc-datachannels/connections and the suite mailbox, run by conformance/driver-ct. solo/* cases run one instance; pair/* cases run as two role-paired instances of this same binary."
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The component-test guest SDK owns the tests-contract export and the
+# inventory section (rev-pinned git dep; see [workspace.dependencies]).
+component-test-sdk = { workspace = true }
+# The case bodies and SUT bindings, shared with conformance-guest-pair-ct.
+conformance-suite-body = { path = "../suite-body" }

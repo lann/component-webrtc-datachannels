@@ -71,22 +71,25 @@ examples/                              # guest components + the demo hosts
                                        #   binaries over wasmtime-impl's add_to_linker
                                        #   + the end-to-end cli-signaling integration
                                        #   test (tests/cli_signaling.rs)
-conformance/                           # cross-implementation conformance suite
-  guest/                               #   the shared conformance guest component
-  adapters/                            #   per-target drivers: wasmtime, jco (Node +
-                                       #     browser), wasip3 (composed in-guest stack),
-                                       #     reference/ (the non-wasm reference peer:
-                                       #     Google's libwebrtc via LiveKit's Rust
-                                       #     bindings), plus the interop-pair binary;
-                                       #     common/ = the shared native building blocks
-                                       #     (conformance-adapter-common), the netns-lab
-                                       #     topology/provisioning (netns/nftables/coturn
-                                       #     in Rust), and the target-neutral netns-lab and
-                                       #     Shadow-lab executors
-  runner/                              #   classifies results against manifests and
-                                       #     renders conformance/matrix.md
+conformance/                           # cross-implementation conformance suite, on the
+                                       #   polymorph:test harness (rev-pinned git deps in
+                                       #   the root Cargo.toml; see conformance/README.md)
+  suite-body/                          #   the case bodies + SUT bindings (shared)
+  guest-ct/                            #   the full suite component (solo/* + pair/*)
+                                       #     + its committed tests.lock
+  guest-pair-ct/                       #   the pair-only sibling suite (interop + labs)
+                                       #     + its committed tests.lock
+  driver-ct/                           #   rtc-ct-driver (child exec mode + loopback/
+                                       #     interop/shadow/netns orchestrators, the
+                                       #     pair fold, the ported netns topology and
+                                       #     Shadow syscall shim), the jco children
+                                       #     (jco/), targets*.toml manifests, and the
+                                       #     committed matrix.md + matrix-interop.md
+  reference/                           #   the non-wasm reference peer (libwebrtc via
+                                       #     LiveKit's Rust bindings)
+  wasip3-mailbox/                      #   in-guest wasi:http mailbox client (composed
+                                       #     artifacts)
   signaling/                           #   conformance-signalingd HTTP mailbox server
-  manifests.toml, tests.toml           #   per-target expectations + the test corpus
 scripts/setup.sh                       # one-shot dependency setup (see below)
 ```
 
@@ -136,7 +139,7 @@ updating the consumers that name them as strings:
   `wit/world.wit` also pulls in the root package through a
   `deps/polymorph-webrtc-datachannels` symlink),
 - the Wasmtime host bindings in `examples/wasmtime-demo/src/main.rs`,
-- the conformance guest, adapters, and jco transpile flags under
+- the conformance suite bodies, driver, and jco transpile flags under
   `conformance/`, and
 - the `jco transpile` `--async-exports` / `--async-imports` / `--map` flags in
   `jco-impl/package.json`.
@@ -164,7 +167,7 @@ It adds the `wasm32-unknown-unknown` and `wasm32-wasip2` Rust targets; installs
 `wasm-tools`, `just`, `cargo-nextest`, `wac`, and `wasmtime` (each skipped if
 already on `PATH`; versions pinned via `*_VERSION` variables); installs the
 netns-lab tools (iproute2, nftables, coturn; skip with `SKIP_NETNS_LAB=1`); and runs
-`npm install` in `jco-impl` and `conformance/adapters/jco`. Set `SKIP_NODE=1` to
+`npm install` in `jco-impl` and `conformance/driver-ct/jco`. Set `SKIP_NODE=1` to
 skip the Node dependencies when you only need the Rust/Wasmtime path. It does
 **not** install the Shadow network simulator (see below). CI is kept in sync by
 calling this same script rather than duplicating the install steps.
@@ -205,20 +208,21 @@ just examples::test-webrtc-composed
 # host processes exchanging copy/paste SDP blobs over a real connection):
 just test
 
-# Cross-implementation conformance suite (loopback): builds the shared
-# conformance guest, runs every enabled adapter (wasmtime, jco-node,
-# jco-browser, wasip3-guest) plus the interop pairs (every target against the
-# non-wasm reference peer in both orders, the reference self-pair, and the
-# direct implementation pairs), and renders
-# conformance/matrix.md. Needs Node 24+ and a Chrome 137+ binary:
+# Cross-implementation conformance suite: builds the two suite
+# components, runs every loopback target (wasmtime, composed, jco-node,
+# jco-browser) and every interop direction (every implementation against
+# the non-wasm reference peer in both orders, the reference self-pair,
+# and the direct implementation pairs), aggregates against the committed
+# lockfiles + manifests, and diffs the committed matrices. Needs Node
+# 24+ and a Chrome 137+ binary:
 just conformance
 
 # Conformance netns lab (real non-loopback candidate paths via network
 # namespaces; needs sudo and coturn — see the recipe comments):
 just conformance::netns lan
 
-# Conformance Shadow lab (the two-peer corpus for the wasmtime,
-# wasip3-guest, and reference targets plus the wasmtime<->wasip3-guest
+# Conformance Shadow lab (the pair corpus for the wasmtime,
+# wasip3-guest, and reference rows plus the wasmtime<->wasip3-guest
 # interop pair in both orders, over a non-loopback path inside the
 # Shadow discrete-event network simulator — deterministic, no root or
 # network namespaces). Needs `shadow` on PATH (install with
@@ -259,7 +263,7 @@ in doubt about whether a recipe's scope is touched, run it.
 | `just examples::test-echo-remote-composed` | the `echo-remote` guest, `rendezvous-http`, the `wasip3-impl` provider, or the `rendezvous`/`remote` WIT (composes the fully in-guest peer and connects two `wasmtime run` processes over a signaling server). |
 | `just examples::transpile` | anything affecting the component's interfaces, or the `jco transpile` flags / `--map` targets in `jco-impl`. |
 | `just examples::test-browser` | the browser host (`jco-impl`, e.g. `webrtc.js`) or the component it runs. |
-| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the conformance guest, adapters, or manifests (CI runs it in `.github/workflows/conformance.yml`). |
+| `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the suite bodies, the driver, or the manifests (CI runs it in `.github/workflows/conformance.yml`). Intentional case changes also need `just conformance::lock-update`; intentional behavior changes, `just conformance::matrix-update` — commit the diffs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything touching the guest, jco host, or WIT — reproduces the full CI run locally. |
 
@@ -328,11 +332,9 @@ documented at its use site):
 | `WEBRTC_UDP_BIND_ADDR` | `wasip3-impl` provider | IP address the in-guest `peer-connection` binds its UDP socket to (and derives its host candidate from); default IPv4 loopback. An unparsable value constructs dead connections (methods fail `closed`; the cause is printed to stderr). |
 | `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations, but only the `wasip3-impl` guest reads it directly (the env var is its only channel); the host libraries read no ambient state — the Wasmtime hosts (demo binaries, conformance adapter) wire the variable through `WasiWebrtcCtx`, and the jco Node demo runners wire it through `webrtc.js`'s exported `setMaxInboundBufferBytes` hook (browser embedders call the hook directly; there is no `globalThis` channel) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. |
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
-| `CONFORMANCE_WASMTIME` | conformance wasip3 adapter, interop, netns/Shadow executors | Path of the `wasmtime` binary used to run composed components (default: `wasmtime` on `PATH`). |
-| `CONFORMANCE_NODE` | conformance interop binary | Path of the Node binary for jco peers (default: `node`). |
-| `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `conformance-peer` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated peers. |
+| `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `rtc-ct-driver` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated wasmtime-kind peers. |
+| `RTC_CT_ROLE`, `RTC_CT_SIGNALING_URL`, `RTC_CT_RUN_ID` | the conformance suites (via the store environment) | The pair-instance channel: which half this instance drives, the mailbox base URL, and the room-derivation seed. Set by `rtc-ct-driver` on the children it spawns; never set by hand. |
 | `CHROME_PATH` / `CHROME_BIN` / `PUPPETEER_EXECUTABLE_PATH` | the browser test and browser conformance adapter | Chrome/Chromium binary override (first set one wins; else auto-detected). |
-| `WASMTIME_LOG` | conformance wasip3 adapter | Forwarded to the spawned `wasmtime` peers (defaulted to surface `wasmtime-wasi-http` warnings). |
 | `SKIP_NODE`, `SKIP_NETNS_LAB` | `scripts/setup.sh` | Skip the npm installs / the netns-lab tooling install. |
 
 Every env var is an undeclared API each deployer must discover, and this

@@ -1,76 +1,19 @@
-// The `conformance:suite` package: the export shape every conformance guest
-// implements and the `conformance` world every target runs.
+// The `conformance:suite` package: the world the shared conformance
+// suite components are built against under the polymorph:test harness.
 //
-// One shared conformance guest component implements `suite` and is run — the
-// same wasm binary — against each target. `list-tests` mirrors the registry in
-// `conformance/tests.toml`; `run-test` runs one test to a WIT-observable
-// outcome. Assertions target interoperable behavior only — never SDP contents,
-// candidate ordering, timing, or exact error strings.
+// The suite's export surface (the `polymorph:test` tests contract and
+// the inventory section) comes from the component-test guest SDK; this
+// package carries only the import side — the `connections` surface
+// under test and the suite-owned signaling `mailbox`. Assertions target
+// interoperable behavior only — never SDP contents, candidate ordering,
+// timing, or exact error strings.
 package conformance:suite@0.1.0;
 
-/// The conformance guest's exported control surface.
-interface runner {
-    /// One entry of the test corpus, mirroring a `[[test]]` in `tests.toml`.
-    record test-descriptor {
-        /// Stable identifier; matches the registry and the adapter result docs.
-        id: string,
-        /// Grouping labels a per-target manifest can mark `unsupported`.
-        tags: list<string>,
-    }
-
-    /// Which half of the exchange this instance drives for a two-peer test.
-    ///
-    /// A behavioral test runs two guest instances against one signaling room —
-    /// one `offerer` and one `answerer`. Some single-instance tests use `both`.
-    enum role {
-        offerer,
-        answerer,
-        both,
-    }
-
-    /// The knobs the runner passes into a single `run-test` call.
-    record test-config {
-        /// Which side this instance drives.
-        role: role,
-        /// Base URL of the signaling server the runner started, e.g.
-        /// `http://127.0.0.1:PORT`.
-        signaling-server: string,
-        /// The signaling room both peers of this test share. Unique per test
-        /// run so concurrent tests never collide.
-        room: string,
-        /// Number of messages to exchange for count-parameterized tests.
-        message-count: u32,
-        /// Payload size, in bytes, for size-parameterized tests.
-        message-size: u32,
-    }
-
-    /// The WIT-observable outcome of one test.
-    variant test-result {
-        /// The asserted behavior held.
-        pass,
-        /// The asserted behavior did not hold; the string is a human-readable
-        /// detail (never matched on by the runner).
-        fail(string),
-        /// The guest could not run the test on this target (for example the
-        /// target does not implement a required resource); the string is the
-        /// reason. The runner classifies this as `skip`.
-        skipped(string),
-    }
-
-    /// The corpus this guest can run, with each test's id and tags. Mirrors
-    /// `conformance/tests.toml`; the adapters verify their registered test
-    /// lists against this export before every run.
-    list-tests: func() -> list<test-descriptor>;
-
-    /// Run one test by id with `config` and report its WIT-observable outcome.
-    run-test: async func(test-id: string, config: test-config) -> test-result;
-}
-
-/// The world every conformance guest is built against: it imports the shared
-/// `connections` surface it exercises and the suite-owned `mailbox` it signals
-/// through, and exports the `runner` control surface the adapters drive.
-world conformance {
+/// The suite components' world. `solo/*` cases stand up both peers in
+/// one instance; `pair/*` cases run as two role-paired instances whose
+/// role, signaling server, and room seed arrive through the WASI
+/// environment (`RTC_CT_*`), rendezvousing per case over the mailbox.
+world sut-imports {
     import polymorph:webrtc-datachannels/connections@0.1.0;
     import conformance:signaling/mailbox@0.1.0;
-    export runner;
 }

@@ -1,37 +1,27 @@
 name: Conformance
 
-# The conformance suite (see conformance/README.md), structured as
-# build-once/run-many: the `build` job compiles every artifact the suite
-# executes (release adapter binaries, the guest/composed wasm components, the
-# jco transpile output, and the debug signalingd/runner) and hands them to the
-# runner jobs as a tarball artifact, so the Rust dependency tree is compiled —
-# and cached — exactly once per run.
+# The conformance suite on the polymorph:test harness (see
+# conformance/README.md), structured as build-once/run-many: the `build`
+# job compiles every artifact the suite executes (the two suite
+# components and their composed builds, the driver, the reference peer,
+# signalingd, the jco transpile output, and the component-test CLI) and
+# hands them to the runner jobs as a tarball artifact, so the Rust
+# dependency tree is compiled — and cached — exactly once per run.
 #
-# The `matrix` job runs the loopback scenarios across all enabled targets,
-# including the interop matrix, uploading the matrix artifact and
-# failing on any unexpected status. The `shadow-lab` job runs the two-peer
-# corpus for the wasmtime, wasip3-guest, and reference targets — plus the
-# wasmtime <-> wasip3-guest interop pair in both orders — over a routed,
-# non-loopback path inside the Shadow network simulator, which needs no root
-# or network namespaces and is deterministic.
+# The `matrix` job runs the loopback targets (wasmtime, composed,
+# jco-node, jco-browser — the full solo+pair suite each) and the interop
+# directions (every implementation against the libwebrtc reference peer
+# in both orders, the reference self-pair, and the direct implementation
+# pairs — the pair-only suite), aggregates every stream against the
+# committed lockfiles and target manifests, and diffs the committed
+# matrices. The `shadow-lab` job runs the pair corpus over a routed,
+# non-loopback path inside the Shadow network simulator (deterministic,
+# no root) and gates on its aggregate's exit code.
 #
-# The netns lab (`just conformance::netns`, `just conformance::nat`) — the
-# higher-fidelity real-kernel environment with STUN/TURN/NAT candidate paths —
-# is workstation-only and is not exercised in CI; Shadow provides CI's
-# non-loopback coverage.
-#
-# Enabled targets: wasmtime (native webrtc-rs), jco-node (the browser-first
-# host transpiled by jco, under Node 24+ with --experimental-wasm-jspi and
-# node-datachannel), jco-browser (the same host in headless Chromium, which has
-# JSPI natively), wasip3-guest (the conformance guest composed via `wac plug`
-# with the wasip3-impl provider — the sans-I/O rtc stack over WASIp3
-# wasi:sockets — plus an in-guest wasi:http mailbox client and a CLI driver,
-# run under `wasmtime run`), and reference (the non-wasm reference peer: a
-# native binary driving Google's libwebrtc via LiveKit's Rust bindings). The
-# interop matrix
-# anchors every target against the reference peer in both orders (jco-browser
-# at handshake-only smoke scope) and retains the `wasmtime`<->`jco-node` and
-# `wasmtime`<->`wasip3-guest` implementation pairs.
+# The netns lab (`just conformance::netns <scenario>`) — the
+# higher-fidelity real-kernel environment with STUN/TURN/NAT candidate
+# paths — is workstation-only and is not exercised in CI; Shadow
+# provides CI's non-loopback coverage.
 
 on:
   push:
@@ -43,9 +33,9 @@ permissions:
   contents: read
 
 jobs:
-  # Compile everything the runner jobs execute (`just conformance::build-all`)
-  # and upload it as one tarball artifact. This is the only job in this
-  # workflow with a cargo cache.
+  # Compile everything the runner jobs execute and upload it as one
+  # tarball artifact. This is the only job in this workflow with a cargo
+  # cache.
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -56,52 +46,46 @@ jobs:
       - name: Install Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      # The jco transpile of the conformance guest runs here (Node only; no
-      # JSPI or Chrome needed at build time).
+      # The jco transpiles run here (Node only; no JSPI or Chrome needed
+      # at build time).
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: conformance/adapters/jco/package-lock.json
+          cache-dependency-path: conformance/driver-ct/jco/package-lock.json
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: conformance-build
-          # Save only on main: PR jobs restore main's cache (falling back to a
-          # prefix match when the PR changes Cargo.lock) but never save, so PR
-          # branches don't multiply cache entries toward the repository's
-          # 10 GB cap and evict the caches every run depends on.
+          # Save only on main: PR jobs restore main's cache but never
+          # save, so PR branches don't multiply cache entries toward the
+          # repository cap.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install dependencies
         run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
-        # cargo-binstall resolves releases through api.github.com; unauthenticated
-        # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
-        # (intermittent 403s). The token moves it to the per-token limit.
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build conformance artifacts
-        run: just conformance::build-all
+        run: just conformance::build conformance::_ct-tools
 
-      # Tar (rather than upload the paths directly) to preserve the executable
-      # bits, which upload-artifact's zip archive drops.
+      # Tar (rather than upload the paths directly) to preserve the
+      # executable bits, which upload-artifact's zip archive drops.
       - name: Pack artifacts
         run: |
           tar czf /tmp/conformance-build.tar.gz \
-            target/release/conformance-adapter-wasmtime \
-            target/release/conformance-adapter-wasip3 \
-            target/release/conformance-interop \
-            target/release/conformance-peer \
+            target/release/rtc-ct-driver \
             target/release/conformance-reference-peer \
-            target/release/conformance-shadow \
             target/debug/conformance-signalingd \
-            target/debug/conformance-runner \
-            conformance/guest/build/conformance-guest.component.wasm \
-            conformance/adapters/wasip3/build/conformance-wasip3.composed.wasm \
-            conformance/adapters/jco/generated
+            target/ct-tools/bin/component-test \
+            target/wasm32-wasip2/release/conformance_guest_ct.wasm \
+            target/wasm32-wasip2/release/conformance_guest_pair_ct.wasm \
+            target/wasm32-wasip2/release/composed \
+            conformance/driver-ct/jco/generated \
+            conformance/driver-ct/jco/generated-pair
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -110,31 +94,32 @@ jobs:
           path: /tmp/conformance-build.tar.gz
           retention-days: 1
 
-  # Run the loopback suite (all targets + interop pairs) against the prebuilt
-  # artifacts. No Rust compilation happens here, so no cargo cache.
+  # Run the loopback targets and the interop directions against the
+  # prebuilt artifacts, aggregate, and diff the committed matrices. No
+  # Rust compilation happens here, so no cargo cache.
   matrix:
     needs: build
     runs-on: ubuntu-latest
-    # WebRTC handshakes can hang; cap the job so a stuck run fails fast.
-    timeout-minutes: 30
+    # WebRTC handshakes can hang; every case is individually bounded,
+    # so a stuck run fails in minutes — cap the job as the backstop.
+    timeout-minutes: 45
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # The jco-node target and the jco halves of the interop pairs run the
-      # guest under `node --experimental-wasm-jspi`, which needs Node 24+.
-      # (The jco-browser target runs in headless Chrome, which has JSPI
-      # natively.)
+      # The jco-node legs run the suite under `node
+      # --experimental-wasm-jspi`, which needs Node 24+ (the jco-browser
+      # legs run in headless Chrome, which has JSPI natively).
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
-          cache-dependency-path: conformance/adapters/jco/package-lock.json
+          cache-dependency-path: conformance/driver-ct/jco/package-lock.json
 
-      # Runtime dependencies only: the adapters' npm packages (node-datachannel,
-      # playwright-core) and the `wasmtime` CLI the wasip3-guest target runs
-      # under. The netns lab never runs in CI, so its apt packages are skipped.
+      # Runtime dependencies only: the jco legs' npm packages
+      # (node-datachannel, playwright-core). The netns lab never runs in
+      # CI, so its apt packages are skipped.
       - name: Install dependencies
         run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
         env:
@@ -148,45 +133,45 @@ jobs:
       - name: Unpack artifacts
         run: tar xzf conformance-build.tar.gz
 
-      - name: Run conformance suite
-        run: just conformance::run-matrix
+      - name: Run the conformance matrices
+        run: >
+          just conformance::lock-check conformance::run-wasmtime
+          conformance::run-composed conformance::run-jco-node
+          conformance::run-jco-browser conformance::run-interop
+          conformance::aggregate conformance::matrix-check
 
-      - name: Upload conformance matrix
+      - name: Upload conformance results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-matrix
-          path: conformance/matrix.md
+          name: conformance-results
+          path: |
+            conformance/driver-ct/results/*.jsonl
+            conformance/driver-ct/results/matrix.md
+            conformance/driver-ct/results/matrix-interop.md
           if-no-files-found: warn
 
   # Run the Shadow lab against the prebuilt artifacts. Shadow ships no
   # prebuilt binary, so it is built once by the shadow-build workflow and
-  # published to the `shadow-dev` prerelease; this job downloads that binary
-  # instead of rebuilding (see scripts/download-shadow.sh).
+  # published to the `shadow-dev` prerelease; this job downloads that
+  # binary instead of rebuilding (see scripts/download-shadow.sh).
   shadow-lab:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    # Needed to read the `shadow-dev` release asset via `gh release download`.
+    timeout-minutes: 45
     permissions:
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      # Fetch the prebuilt Shadow from the `shadow-dev` prerelease into ~/.local
-      # (bin/shadow + lib/libshadow_*.so) and put ~/.local/bin on PATH for the
-      # steps below. Dispatch .github/workflows/shadow-build.yml if the release
-      # does not exist yet.
       - name: Download Shadow from release
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./scripts/download-shadow.sh
 
-      # Runtime dependencies only (`wasmtime` for the composed wasip3-guest
-      # peer); skip the jco Node hosts' and netns-lab deps. Shadow was
-      # downloaded above; the reference peer arrives prebuilt in the artifact
-      # tarball.
+      # Runtime dependencies only; the peers arrive prebuilt in the
+      # artifact tarball.
       - name: Install dependencies
         run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
         env:
@@ -200,20 +185,15 @@ jobs:
       - name: Unpack artifacts
         run: tar xzf conformance-build.tar.gz
 
-      - name: Run Shadow lab
-        run: just conformance::run-shadow
+      - name: Run the Shadow lab
+        run: just conformance::shadow
 
-      # Classify the Shadow results (<target>-shadow.json for wasmtime,
-      # wasip3-guest, reference, and the wasmtime <-> wasip3-guest interop
-      # pair in both orders) against the manifests and render the
-      # environment-columned matrix; exits nonzero on any failure.
-      - name: Classify Shadow matrix
-        run: just conformance::classify-shadow
-
-      - name: Upload Shadow matrix
+      - name: Upload Shadow results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: conformance-shadow-matrix
-          path: conformance/shadow-matrix.md
+          name: conformance-shadow-results
+          path: |
+            conformance/driver-ct/results/*-shadow.jsonl
+            conformance/driver-ct/results/matrix-shadow.md
           if-no-files-found: warn
