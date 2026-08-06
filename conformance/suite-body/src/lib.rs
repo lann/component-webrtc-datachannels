@@ -462,11 +462,16 @@ async fn send_sequence(dc: &DataChannel, count: u32, size: u32) -> Result<(), St
     Ok(())
 }
 
-/// Receive `count` messages, returning their raw bytes.
+/// Receive `count` messages, returning their raw bytes. A failure names how
+/// many messages had already arrived, so a partial delivery (data loss on the
+/// wire) is distinguishable from a receive path that never yielded at all.
 async fn recv_sequence(dc: &DataChannel, count: u32) -> Result<Vec<Vec<u8>>, String> {
     let mut out = Vec::with_capacity(count as usize);
     for _ in 0..count {
-        match receive(dc).await? {
+        match receive(dc)
+            .await
+            .map_err(|e| format!("{e} (after {} of {count} messages)", out.len()))?
+        {
             Message::Binary(bytes) => out.push(bytes),
             Message::String(text) => out.push(text.into_bytes()),
         }

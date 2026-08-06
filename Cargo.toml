@@ -31,14 +31,25 @@ default-members = [
 ]
 resolver = "2"
 
-# Pin the sans-I/O WebRTC stack once, here, so every member (and any future wasm
-# build) resolves the same source. 0.20.0 is the first stable release carrying
-# the empty-message receive fix (webrtc-rs/rtc#131), the srflx source-address
-# fix (#136), `RTCDataChannel::send` rejecting sends the write path cannot
-# carry out (#138), and `RTCDataChannelInit::ordered` defaulting to `true` as
-# documented (#140).
+# Pin the WebRTC stack once, here, so every member (and any future wasm build)
+# resolves the same source. The pins are one git rev rather than crates.io
+# versions because they carry a fix in no published release: `rtc-sctp`
+# discarded received-but-undelivered messages on an incoming stream reset
+# (https://github.com/lann/rtc/pull/1, rev 89f518ea4bba; the receive-side data
+# loss of
+# https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/125).
+# `webrtc` (the async driver, backing the native wasmtime host) consumes `rtc`
+# (the sans-I/O core, run in-guest by wasip3-impl) as an in-repo submodule
+# path dependency, which no version requirement or `[patch]` can redirect — so
+# both crates resolve from one `lann/webrtc` branch whose only delta from
+# upstream master (version 0.21.0, unreleased) is that submodule pointed at
+# the fixed rev: the direct `rtc` dependency and the host's transitive
+# `rtc-sctp` are then the same package, from the same source. Return to plain
+# crates.io versions once releases including the fix ship
+# (https://github.com/polymorph-components/polymorph-webrtc-datachannels/issues/120).
 [workspace.dependencies]
-rtc = "0.20.0"
+rtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4fe84af0e0bc773956860d2" }
+webrtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4fe84af0e0bc773956860d2" }
 # The component-test harness, rev-pinned (no registry release yet).
 # One rev everywhere: these three entries and the CLI install
 # (conformance/driver-ct/justfile reads the rev back out of Cargo.lock).

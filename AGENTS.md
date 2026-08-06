@@ -48,7 +48,7 @@ wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   add_to_linker + WebrtcView (types + connections.data-channel-options/data-channel);
                                        #   crate name: wasmtime-webrtc-datachannels
 jco-impl/                              # browser-first host (Node + jco + node-datachannel)
-wasip3-impl/                           # wasm COMPONENT on `rtc` 0.20: runs the
+wasip3-impl/                           # wasm COMPONENT on `rtc` 0.21: runs the
                                        #   sans-I/O stack in-guest (SansIoPeer core
                                        #   + a wasi:sockets/clocks runtime driver)
                                        #   and EXPORTS polymorph:webrtc-datachannels/
@@ -371,7 +371,7 @@ exist:
 The two demo hosts run the fully async `webrtc-rs` engine host-side. To move the
 WebRTC stack *into a wasm guest*, the protocol logic must be separated from I/O
 so the guest can drive it over `wasi:sockets` and WASI timers. The sans-I/O
-`rtc` 0.20 stack makes that possible: it compiles for `wasm32-wasip2`
+`rtc` 0.21 stack makes that possible: it compiles for `wasm32-wasip2`
 (`ifaces()` returns `Unsupported` on wasm). The `rtc`
 dependency is pinned once at the workspace level in the root `Cargo.toml`.
 
