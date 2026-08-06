@@ -3,7 +3,7 @@ version = "0.1"
 
 [suite]
 name = "conformance_guest_pair_ct"
-artifact_sha256 = "3c05906cab5521e2d12721cb16b14eb20283fd72d6e4e7748e83b68fbf4c597b"
+artifact_sha256 = "c2348acf9cabf555013dd8cca43c5bc0e74ad80fc373ab9393fa6282698d9f9b"
 
 [[case]]
 name = "pair/binary-message"
