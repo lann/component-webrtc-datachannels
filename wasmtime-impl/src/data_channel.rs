@@ -59,7 +59,7 @@ const CLOSE_FLUSH_BOUND: std::time::Duration = std::time::Duration::from_secs(1)
 /// `receive` fails with `error.receive-buffer-overflow`. The value is the
 /// 8 MiB convention the WIT inbound-buffering contract documents. Embedders
 /// override it per context through
-/// [`WasiWebrtcCtx::set_max_inbound_buffer_bytes`](crate::WasiWebrtcCtx::set_max_inbound_buffer_bytes).
+/// [`WebrtcCtx::set_max_inbound_buffer_bytes`](crate::WebrtcCtx::set_max_inbound_buffer_bytes).
 pub const DEFAULT_MAX_INBOUND_BUFFER_BYTES: usize = 8 * 1024 * 1024;
 
 /// The buffered-byte accounting shared between a channel's pump (which

@@ -6,7 +6,7 @@
 //! the demo binaries so any host can satisfy the `polymorph:webrtc-datachannels`
 //! imports with one call to [`add_to_linker`]. It is a wasip3 (component-model
 //! async) implementation modeled after [`wasmtime_wasi_http::p3`]: a host embeds
-//! a [`WasiWebrtcCtx`] in its store state, implements [`WasiWebrtcView`] to
+//! a [`WebrtcCtx`] in its store state, implements [`WebrtcView`] to
 //! expose it alongside the store's [`ResourceTable`], and calls
 //! [`add_to_linker`] to satisfy the `types` and `connections` imports with a
 //! real WebRTC/SCTP data channel.
@@ -48,7 +48,7 @@ use wasmtime::component::{HasData, Linker, ResourceTable};
 use webrtc::peer_connection::SettingEngine;
 
 /// A hook run against a fresh [`SettingEngine`] before each peer connection is
-/// created. See [`WasiWebrtcCtx::set_setting_engine_hook`].
+/// created. See [`WebrtcCtx::set_setting_engine_hook`].
 pub type SettingEngineHook = Arc<dyn Fn(&mut SettingEngine) + Send + Sync>;
 
 /// A STUN/TURN server a peer connection may gather server-reflexive and relay
@@ -97,7 +97,7 @@ impl WebrtcIceConfig {
 ///
 /// This is intentionally minimal (mirroring `wasmtime_wasi_http`'s
 /// `WasiHttpCtx`); it exists so hosts have a stable place to grow configuration
-/// without changing the [`WasiWebrtcView`] shape.
+/// without changing the [`WebrtcView`] shape.
 ///
 /// The knobs so far: the [`SettingEngine`] hook (see
 /// [`set_setting_engine_hook`](Self::set_setting_engine_hook)), the analogue
@@ -111,14 +111,14 @@ impl WebrtcIceConfig {
 /// by the embedding host, which owns any env-driven configuration.
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct WasiWebrtcCtx {
+pub struct WebrtcCtx {
     setting_engine_hook: Option<SettingEngineHook>,
     ice_config: WebrtcIceConfig,
     connect_timeout: std::time::Duration,
     max_inbound_buffer_bytes: usize,
 }
 
-impl Default for WasiWebrtcCtx {
+impl Default for WebrtcCtx {
     fn default() -> Self {
         Self {
             setting_engine_hook: None,
@@ -129,9 +129,9 @@ impl Default for WasiWebrtcCtx {
     }
 }
 
-impl std::fmt::Debug for WasiWebrtcCtx {
+impl std::fmt::Debug for WebrtcCtx {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WasiWebrtcCtx")
+        f.debug_struct("WebrtcCtx")
             .field(
                 "setting_engine_hook",
                 &self.setting_engine_hook.as_ref().map(|_| "<hook>"),
@@ -141,7 +141,7 @@ impl std::fmt::Debug for WasiWebrtcCtx {
     }
 }
 
-impl WasiWebrtcCtx {
+impl WebrtcCtx {
     /// Create a new, default context.
     pub fn new() -> Self {
         Self::default()
@@ -156,8 +156,8 @@ impl WasiWebrtcCtx {
     /// loopback, so a demo/test host can enable loopback ICE candidates:
     ///
     /// ```
-    /// # use wasmtime_webrtc_datachannels::WasiWebrtcCtx;
-    /// let mut ctx = WasiWebrtcCtx::new();
+    /// # use wasmtime_webrtc_datachannels::WebrtcCtx;
+    /// let mut ctx = WebrtcCtx::new();
     /// ctx.set_setting_engine_hook(|engine| {
     ///     engine.set_include_loopback_candidate(true);
     /// });
@@ -218,32 +218,32 @@ impl WasiWebrtcCtx {
     }
 }
 
-/// A borrowed view into a host's [`WasiWebrtcCtx`] and its [`ResourceTable`].
+/// A borrowed view into a host's [`WebrtcCtx`] and its [`ResourceTable`].
 ///
-/// Returned by [`WasiWebrtcView::webrtc`], this is the [`HasData::Data`] the
+/// Returned by [`WebrtcView::webrtc`], this is the [`HasData::Data`] the
 /// generated host bindings operate on.
-pub struct WasiWebrtcCtxView<'a> {
+pub struct WebrtcCtxView<'a> {
     /// Mutable reference to the WebRTC host context.
-    pub ctx: &'a mut WasiWebrtcCtx,
+    pub ctx: &'a mut WebrtcCtx,
     /// Mutable reference to the table used to manage host resources.
     pub table: &'a mut ResourceTable,
 }
 
-/// A trait that provides access to the [`WasiWebrtcCtx`] host state.
+/// A trait that provides access to the [`WebrtcCtx`] host state.
 ///
 /// Implement this for your store's data type so [`add_to_linker`] can wire the
 /// `polymorph:webrtc-datachannels` imports onto your linker.
-pub trait WasiWebrtcView: Send {
-    /// Return a [`WasiWebrtcCtxView`] from a mutable reference to `self`.
-    fn webrtc(&mut self) -> WasiWebrtcCtxView<'_>;
+pub trait WebrtcView: Send {
+    /// Return a [`WebrtcCtxView`] from a mutable reference to `self`.
+    fn webrtc(&mut self) -> WebrtcCtxView<'_>;
 }
 
 /// The type for which this crate implements the `polymorph:webrtc-datachannels`
 /// interfaces. Used as the [`HasData`] marker for the generated bindings.
-pub struct WasiWebrtc;
+pub struct Webrtc;
 
-impl HasData for WasiWebrtc {
-    type Data<'a> = WasiWebrtcCtxView<'a>;
+impl HasData for Webrtc {
+    type Data<'a> = WebrtcCtxView<'a>;
 }
 
 /// Backing type for the `connections.data-channel-options` resource.
@@ -294,7 +294,7 @@ pub struct PeerConnectionConfig {
 /// Add the `polymorph:webrtc-datachannels` interfaces implemented by this crate
 /// (`types` and `connections`) to the provided [`Linker`].
 ///
-/// The store's data type `T` must implement [`WasiWebrtcView`]. The engine's
+/// The store's data type `T` must implement [`WebrtcView`]. The engine's
 /// [`Config`](wasmtime::Config) must have `wasm_component_model_async` enabled,
 /// since the `send`/`receive` methods use the component-model async ABI.
 ///
@@ -304,17 +304,17 @@ pub struct PeerConnectionConfig {
 /// use wasmtime::component::{Linker, ResourceTable};
 /// use wasmtime::{Engine, Result};
 /// use wasmtime_webrtc_datachannels::{
-///     add_to_linker, WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView,
+///     add_to_linker, WebrtcCtx, WebrtcCtxView, WebrtcView,
 /// };
 ///
 /// struct MyState {
-///     webrtc: WasiWebrtcCtx,
+///     webrtc: WebrtcCtx,
 ///     table: ResourceTable,
 /// }
 ///
-/// impl WasiWebrtcView for MyState {
-///     fn webrtc(&mut self) -> WasiWebrtcCtxView<'_> {
-///         WasiWebrtcCtxView {
+/// impl WebrtcView for MyState {
+///     fn webrtc(&mut self) -> WebrtcCtxView<'_> {
+///         WebrtcCtxView {
 ///             ctx: &mut self.webrtc,
 ///             table: &mut self.table,
 ///         }
@@ -327,9 +327,9 @@ pub struct PeerConnectionConfig {
 /// ```
 pub fn add_to_linker<T>(linker: &mut Linker<T>) -> wasmtime::Result<()>
 where
-    T: WasiWebrtcView + 'static,
+    T: WebrtcView + 'static,
 {
-    bindings::webrtc_datachannels::types::add_to_linker::<_, WasiWebrtc>(linker, T::webrtc)?;
-    bindings::webrtc_datachannels::connections::add_to_linker::<_, WasiWebrtc>(linker, T::webrtc)?;
+    bindings::webrtc_datachannels::types::add_to_linker::<_, Webrtc>(linker, T::webrtc)?;
+    bindings::webrtc_datachannels::connections::add_to_linker::<_, Webrtc>(linker, T::webrtc)?;
     Ok(())
 }

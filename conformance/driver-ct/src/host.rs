@@ -12,9 +12,7 @@ use wasmtime::component::{Accessor, Linker, Resource, ResourceTable};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::p3::{WasiHttpCtxView, WasiHttpView};
 use wasmtime_wasi_http::WasiHttpCtx;
-use wasmtime_webrtc_datachannels::{
-    self as webrtc_host, WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView,
-};
+use wasmtime_webrtc_datachannels::{self as webrtc_host, WebrtcCtx, WebrtcCtxView, WebrtcView};
 
 mod bindings {
     wasmtime::component::bindgen!({
@@ -44,7 +42,7 @@ pub struct Data {
     wasi: WasiCtx,
     table: ResourceTable,
     ct: CtCtx,
-    webrtc: WasiWebrtcCtx,
+    webrtc: WebrtcCtx,
     http: WasiHttpCtx,
 }
 
@@ -63,9 +61,9 @@ impl RunnerView for Data {
     }
 }
 
-impl WasiWebrtcView for Data {
-    fn webrtc(&mut self) -> WasiWebrtcCtxView<'_> {
-        WasiWebrtcCtxView {
+impl WebrtcView for Data {
+    fn webrtc(&mut self) -> WebrtcCtxView<'_> {
+        WebrtcCtxView {
             ctx: &mut self.webrtc,
             table: &mut self.table,
         }
@@ -113,7 +111,7 @@ pub struct IceProfile {
 /// Composed runs get real network access instead: the in-artifact
 /// provider serves `connections` over `wasi:sockets` UDP loopback.
 pub fn make_data(env: &SuiteEnv) -> Data {
-    let mut webrtc = WasiWebrtcCtx::new();
+    let mut webrtc = WebrtcCtx::new();
     match &env.ice {
         None => {
             webrtc.set_setting_engine_hook(|engine| {

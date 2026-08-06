@@ -2,8 +2,8 @@
 //!
 //! Following the split the generated bindings produce (and mirroring
 //! `wasmtime_wasi_http::p3`), the store-free traits are implemented for the
-//! [`WasiWebrtcCtxView`] "data" type, while the traits whose methods need the
-//! async `Accessor` are implemented for the [`WasiWebrtc`] `HasData` marker.
+//! [`WebrtcCtxView`] "data" type, while the traits whose methods need the
+//! async `Accessor` are implemented for the [`Webrtc`] `HasData` marker.
 
 use std::future::Future;
 use std::pin::Pin;
@@ -35,21 +35,21 @@ use crate::error::{WebrtcError, WebrtcResult};
 use crate::peer_connection::{ConnectionPhase, LocalCandidate, SdpKind};
 use crate::state_watch::StateWatch;
 use crate::{
-    DataChannel, DataChannelOptions, PeerConnection, PeerConnectionConfig, WasiWebrtc,
-    WasiWebrtcCtxView, WasiWebrtcView, WebrtcIceServer,
+    DataChannel, DataChannelOptions, PeerConnection, PeerConnectionConfig, Webrtc, WebrtcCtxView,
+    WebrtcIceServer, WebrtcView,
 };
 
 use webrtc::data_channel::DataChannel as WebrtcDataChannel;
 
 // --- types -----------------------------------------------------------------
 
-impl types::Host for WasiWebrtcCtxView<'_> {}
+impl types::Host for WebrtcCtxView<'_> {}
 
 // --- connections -----------------------------------------------------------
 
-impl connections::Host for WasiWebrtcCtxView<'_> {}
+impl connections::Host for WebrtcCtxView<'_> {}
 
-impl HostDataChannelOptions for WasiWebrtcCtxView<'_> {
+impl HostDataChannelOptions for WebrtcCtxView<'_> {
     fn new(&mut self) -> Result<Resource<DataChannelOptions>> {
         Ok(self.table.push(DataChannelOptions::default())?)
     }
@@ -86,7 +86,7 @@ impl HostDataChannelOptions for WasiWebrtcCtxView<'_> {
     }
 }
 
-impl<T: Send> connections::HostDataChannelOptionsWithStore<T> for WasiWebrtc {
+impl<T: Send> connections::HostDataChannelOptionsWithStore<T> for Webrtc {
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<DataChannelOptions>) -> Result<()> {
         accessor.with(|mut access| {
             access.get().table.delete(rep)?;
@@ -443,7 +443,7 @@ where
     }
 }
 
-impl HostDataChannel for WasiWebrtcCtxView<'_> {
+impl HostDataChannel for WebrtcCtxView<'_> {
     fn label(&mut self, self_: Resource<DataChannel>) -> Result<String> {
         Ok(self.table.get(&self_)?.label())
     }
@@ -454,7 +454,7 @@ impl HostDataChannel for WasiWebrtcCtxView<'_> {
     }
 }
 
-impl<T: Send> HostDataChannelWithStore<T> for WasiWebrtc {
+impl<T: Send> HostDataChannelWithStore<T> for Webrtc {
     async fn send(
         accessor: &Accessor<T, Self>,
         self_: Resource<DataChannel>,
@@ -740,7 +740,7 @@ fn to_sdp_kind(kind: SdpType) -> WebrtcResult<SdpKind> {
     }
 }
 
-impl HostPeerConnectionConfig for WasiWebrtcCtxView<'_> {
+impl HostPeerConnectionConfig for WebrtcCtxView<'_> {
     fn new(&mut self) -> Result<Resource<PeerConnectionConfig>> {
         Ok(self.table.push(PeerConnectionConfig::default())?)
     }
@@ -816,7 +816,7 @@ impl HostPeerConnectionConfig for WasiWebrtcCtxView<'_> {
     }
 }
 
-impl<T: Send> connections::HostPeerConnectionConfigWithStore<T> for WasiWebrtc {
+impl<T: Send> connections::HostPeerConnectionConfigWithStore<T> for Webrtc {
     async fn drop(accessor: &Accessor<T, Self>, rep: Resource<PeerConnectionConfig>) -> Result<()> {
         accessor.with(|mut access| {
             access.get().table.delete(rep)?;
@@ -825,7 +825,7 @@ impl<T: Send> connections::HostPeerConnectionConfigWithStore<T> for WasiWebrtc {
     }
 }
 
-impl HostPeerConnection for WasiWebrtcCtxView<'_> {
+impl HostPeerConnection for WebrtcCtxView<'_> {
     fn new(
         &mut self,
         config: Option<Resource<PeerConnectionConfig>>,
@@ -934,7 +934,7 @@ where
     }
 }
 
-impl<T: WasiWebrtcView + 'static> HostPeerConnectionWithStore<T> for WasiWebrtc {
+impl<T: WebrtcView + 'static> HostPeerConnectionWithStore<T> for Webrtc {
     fn incoming_data_channels(
         mut access: Access<'_, T, Self>,
         self_: Resource<PeerConnection>,

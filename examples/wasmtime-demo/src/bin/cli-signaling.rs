@@ -18,12 +18,12 @@ use wasmtime::component::{Component, HasData, Linker, ResourceTable};
 use wasmtime::{Result, Store};
 use wasmtime_wasi::p3::bindings::Command;
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
-use wasmtime_webrtc_datachannels::{WasiWebrtcCtx, WasiWebrtcCtxView, WasiWebrtcView};
+use wasmtime_webrtc_datachannels::{WebrtcCtx, WebrtcCtxView, WebrtcView};
 use wasmtime_webrtc_host::{engine, webrtc_ctx};
 
 struct Ctx {
     wasi: WasiCtx,
-    webrtc: WasiWebrtcCtx,
+    webrtc: WebrtcCtx,
     table: ResourceTable,
 }
 
@@ -40,9 +40,9 @@ impl WasiView for Ctx {
     }
 }
 
-impl WasiWebrtcView for Ctx {
-    fn webrtc(&mut self) -> WasiWebrtcCtxView<'_> {
-        WasiWebrtcCtxView {
+impl WebrtcView for Ctx {
+    fn webrtc(&mut self) -> WebrtcCtxView<'_> {
+        WebrtcCtxView {
             ctx: &mut self.webrtc,
             table: &mut self.table,
         }

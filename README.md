@@ -26,7 +26,7 @@ they behave compatibly.
 | --- | --- |
 | [`wit/`](wit) | The streaming **WIT interface**, the `polymorph:webrtc-datachannels@0.1.0` package. Each demo component keeps its own demo-only WIT and symlinks this package in as a dependency. |
 | [`examples/echo-demo`](examples/echo-demo) | A **Rust example component** exercising a data channel one message at a time. |
-| [`wasmtime-impl`](wasmtime-impl) | The **Wasmtime host crate** (webrtc-rs), modeled after `wasmtime_wasi_http::p3`. Provides `add_to_linker` + `WasiWebrtcView` for the `types` interface and the `data-channel` resource of `connections` (the `peer-connection` resource is unimplemented). Crate name: `wasmtime-webrtc-datachannels`. |
+| [`wasmtime-impl`](wasmtime-impl) | The **Wasmtime host crate** (webrtc-rs), modeled after `wasmtime_wasi_http::p3`. Provides `add_to_linker` + `WebrtcView` for the `types` interface and the `data-channel` resource of `connections` (the `peer-connection` resource is unimplemented). Crate name: `wasmtime-webrtc-datachannels`. |
 | [`jco-impl`](jco-impl) | The **browser-first host** (Node stand-in for the browser, jco + node-datachannel). |
 | [`examples/wasmtime-demo`](examples/wasmtime-demo) | The **native Rust host** (Wasmtime + webrtc-rs): demo binaries built on `wasmtime-impl`. |
 | [`examples/cli-signaling`](examples/cli-signaling) | The **manual-signaling CLI guest component** (Rust), driving `connections.peer-connection` with guest-side vanilla ICE. |
