@@ -573,7 +573,7 @@ dependencies = [
 [[package]]
 name = "component-test-core"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "arcstr",
  "serde",
@@ -582,7 +582,7 @@ dependencies = [
 [[package]]
 name = "component-test-formats"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -597,7 +597,7 @@ dependencies = [
 [[package]]
 name = "component-test-results"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -608,7 +608,7 @@ dependencies = [
 [[package]]
 name = "component-test-runner"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "anyhow",
  "component-test-core",
@@ -624,7 +624,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "component-test-core",
  "component-test-sdk-macro",
@@ -636,7 +636,7 @@ dependencies = [
 [[package]]
 name = "component-test-sdk-macro"
 version = "0.1.0"
-source = "git+https://github.com/polymorph-components/polymorph-test?rev=76c094576076284c1a7d0ea1b7bb724e9e7384a5#76c094576076284c1a7d0ea1b7bb724e9e7384a5"
+source = "git+https://github.com/polymorph-components/polymorph-test?rev=eabd159de34e38a6f2f32204ceb52392555f32d8#eabd159de34e38a6f2f32204ceb52392555f32d8"
 dependencies = [
  "component-test-core",
  "proc-macro2",
@@ -1281,7 +1281,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2583,7 +2583,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2596,7 +2596,7 @@ dependencies = [
  "libc",
  "log",
  "socket2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3162,7 +3162,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3548,7 +3548,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4744,7 +4744,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
