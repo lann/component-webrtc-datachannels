@@ -91,6 +91,7 @@ jobs:
             target/release/conformance-reference-peer \
             target/debug/conformance-signalingd \
             target/ct-tools/bin/component-test \
+            target/ct-tools/.rev \
             target/wasm32-wasip2/release/conformance_guest_ct.wasm \
             target/wasm32-wasip2/release/conformance_guest_pair_ct.wasm \
             target/wasm32-wasip2/release/composed \
