@@ -51,11 +51,13 @@ resolver = "2"
 rtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4fe84af0e0bc773956860d2" }
 webrtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4fe84af0e0bc773956860d2" }
 # The component-test harness, rev-pinned (no registry release yet).
-# One rev everywhere: these three entries and the CLI install
-# (conformance/justfile reads the rev back out of Cargo.lock).
-# Bump all together, then `cargo update component-test-sdk
-# component-test-runner component-test-formats`.
-component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
-component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
-component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
-component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "824d100349dc7804c9bf1723d9b1ba0ed40fa940" }
+# One rev everywhere: these four entries, the jco package.json pin,
+# the actions/*@<rev> refs in conformance.yml, and the CLI install
+# (conformance/justfile reads the rev back out of Cargo.lock). Bump
+# with `component-test pins bump <rev> --cargo-toml Cargo.toml
+# --package-json conformance/driver-ct/jco/package.json --workflow
+# .github/workflows/conformance.yml`, then the follow-ups it prints.
+component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "76c094576076284c1a7d0ea1b7bb724e9e7384a5" }
+component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "76c094576076284c1a7d0ea1b7bb724e9e7384a5" }
+component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "76c094576076284c1a7d0ea1b7bb724e9e7384a5" }
+component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "76c094576076284c1a7d0ea1b7bb724e9e7384a5" }

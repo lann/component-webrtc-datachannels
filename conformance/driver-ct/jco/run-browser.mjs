@@ -40,6 +40,7 @@ const IMPORT_MAP = JSON.stringify({
   imports: {
     "@polymorph/component-test-js/harness": "/ct/harness.mjs",
     "@polymorph/component-test-js/context": "/ct/context.js",
+    "@polymorph/component-test-js/imports": "/ct/imports.mjs",
   },
 });
 
@@ -180,7 +181,7 @@ async function runInPage({ base, name, target, select, env, maxInboundBufferByte
     newInstance,
     coreBytes,
     target,
-    suiteName: name.replaceAll("-", "_"),
+    suiteName: name,
     select,
     emit: (line) => lines.push(line),
     log: (msg) => console.log(msg.trimEnd()),

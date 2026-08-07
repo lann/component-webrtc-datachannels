@@ -155,12 +155,7 @@ fn reference_stream(
             .collect::<Result<Vec<_>>>()
     })?;
     Ok(component_test_results::Document {
-        envelope: component_test_results::Envelope {
-            version: component_test_results::RESULTS_VERSION.to_string(),
-            target: "reference".into(),
-            suite: Default::default(),
-            run: Default::default(),
-        },
+        envelope: component_test_results::Envelope::new("reference", ""),
         results,
         run_errors: Vec::new(),
         unknown_statuses: BTreeMap::new(),
