@@ -18,8 +18,7 @@
 // sequential execution keeps the two sides of a pair run in lockstep
 // (same enumeration order, per-case mailbox rendezvous).
 
-import { envelope, inventoryLookup, runCases } from "@polymorph/component-test-js/harness";
-import { Context } from "@polymorph/component-test-js/context";
+import { inventoryLookup, runSuiteJsonl } from "@polymorph/component-test-js/harness";
 import { bindImports as bindCoreImports } from "@polymorph/component-test-js/imports";
 
 // The single-attempt wall bound per case, matching the wasmtime leg's
@@ -55,27 +54,27 @@ export function bindImports({ connections, mailbox, env, cli, clocks, io }) {
  * (empty = everything); `emit(line)` receives each JSONL line.
  */
 export async function runSuite({ newInstance, coreBytes, target, suiteName, select, emit, log }) {
-  emit(JSON.stringify(envelope(target, suiteName)));
-  const tagsOf = inventoryLookup(coreBytes);
-  const census = await (await newInstance()).tests.all();
-  const selected = select
-    ? census.filter((c) => String(c.name()).startsWith(select))
-    : census;
-  const counts = await runCases({
-    cases: selected,
-    Context,
-    tagsOf,
-    missing: [],
-    emit: (event) => {
-      emit(JSON.stringify(event));
-      log?.(`${event.case} … ${event.status}`);
-    },
+  // The prefix selection (solo/ vs pair/) wraps the tests interface so
+  // the upstream loop's census and per-case fresh instances both see
+  // the same filtered view. The suites export the bare `tests`
+  // spelling; this module also runs in the browser page, where the
+  // node-runner helpers cannot load.
+  const newTests = async () => {
+    const tests = (await newInstance()).tests;
+    if (!select) return tests;
+    return {
+      all: async () =>
+        (await tests.all()).filter((c) => String(c.name()).startsWith(select)),
+    };
+  };
+  const counts = await runSuiteJsonl({
+    newTests,
+    tagsOf: inventoryLookup(coreBytes),
+    target,
+    suiteName,
+    emit,
+    log,
     caseTimeoutMs: CASE_TIMEOUT_MS,
-    freshCases: async () => (await newInstance()).tests.all(),
   });
-  if (counts.total === 0) {
-    throw new Error("suite enumerated zero cases (empty selection is a run error)");
-  }
-  emit(JSON.stringify({ "segment-end": true }));
   return { total: counts.total, failed: counts.failed };
 }

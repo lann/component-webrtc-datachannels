@@ -73,7 +73,7 @@ jobs:
         # Owns the rev derivation, the rev-keyed tools cache, the
         # install, and the pins gate; conformance::_ct-tools recognizes
         # the stamped install and does not repeat it.
-        uses: polymorph-components/polymorph-test/actions/setup@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        uses: polymorph-components/polymorph-test/actions/setup@eabd159de34e38a6f2f32204ceb52392555f32d8
         with:
           tools: component-test-cli
           js-locks: |
@@ -159,7 +159,7 @@ jobs:
       # against the pin.
       - name: Publish the conformance matrix
         if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
-        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        uses: polymorph-components/polymorph-test/actions/aggregate@eabd159de34e38a6f2f32204ceb52392555f32d8
         with:
           lock: conformance/guest-ct/tests.lock
           manifest: conformance/driver-ct/targets.toml
@@ -174,7 +174,7 @@ jobs:
 
       - name: Publish the interop conformance matrix
         if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
-        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        uses: polymorph-components/polymorph-test/actions/aggregate@eabd159de34e38a6f2f32204ceb52392555f32d8
         with:
           lock: conformance/guest-pair-ct/tests.lock
           manifest: conformance/driver-ct/targets-interop.toml

@@ -10,7 +10,9 @@
 //
 // jco's async ABI needs JSPI: Node 24+ with --experimental-wasm-jspi
 // (the driver supplies it when spawning).
-import { access, readFile, readdir } from "node:fs/promises";
+import { access } from "node:fs/promises";
+
+import { loadCoreModules } from "@polymorph/component-test-js/node-runner";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -37,19 +39,6 @@ const { values } = parseArgs({
     select: { type: "string", default: "" },
   },
 });
-
-async function loadCoreModules(generatedDir) {
-  const modules = new Map();
-  const coreBytes = [];
-  for (const name of await readdir(generatedDir)) {
-    if (name.endsWith(".wasm")) {
-      const bytes = new Uint8Array(await readFile(join(generatedDir, name)));
-      coreBytes.push(bytes);
-      modules.set(name, await WebAssembly.compile(bytes));
-    }
-  }
-  return { modules, coreBytes };
-}
 
 async function main() {
   const generatedDir = resolve(values.generated);
