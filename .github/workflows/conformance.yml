@@ -69,6 +69,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: Install the component-test tools at the pinned revision
+        # Owns the rev derivation, the rev-keyed tools cache, the
+        # install, and the pins gate; conformance::_ct-tools recognizes
+        # the stamped install and does not repeat it.
+        uses: polymorph-components/polymorph-test/actions/setup@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        with:
+          tools: component-test-cli
+          js-locks: |
+            conformance/driver-ct/jco/package-lock.json
+
       - name: Build conformance artifacts
         run: just conformance::build conformance::_ct-tools
 
@@ -81,6 +91,7 @@ jobs:
             target/release/conformance-reference-peer \
             target/debug/conformance-signalingd \
             target/ct-tools/bin/component-test \
+            target/ct-tools/.rev \
             target/wasm32-wasip2/release/conformance_guest_ct.wasm \
             target/wasm32-wasip2/release/conformance_guest_pair_ct.wasm \
             target/wasm32-wasip2/release/composed \
@@ -139,6 +150,51 @@ jobs:
           conformance::run-composed conformance::run-jco-node
           conformance::run-jco-browser conformance::run-interop
           conformance::aggregate conformance::matrix-check
+
+      # Presentation, not verdict: the just recipes above already gated
+      # the same aggregates; these re-run them through component-test's
+      # composite action for the job summary and finding annotations,
+      # with the prebuilt CLI so aggregation semantics cannot skew from
+      # the pin. The action's cargo-lock input polices the `uses:` refs
+      # against the pin.
+      - name: Publish the conformance matrix
+        if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
+        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        with:
+          lock: conformance/guest-ct/tests.lock
+          manifest: conformance/driver-ct/targets.toml
+          results: |
+            wasmtime=conformance/driver-ct/results/wasmtime.jsonl
+            composed=conformance/driver-ct/results/composed.jsonl
+            jco-node=conformance/driver-ct/results/jco-node.jsonl
+            jco-browser=conformance/driver-ct/results/jco-browser.jsonl
+          summary-title: Conformance matrix
+          cli: target/ct-tools/bin/component-test
+          cargo-lock: Cargo.lock
+
+      - name: Publish the interop conformance matrix
+        if: always() && hashFiles('conformance/driver-ct/results/*.jsonl') != ''
+        uses: polymorph-components/polymorph-test/actions/aggregate@76c094576076284c1a7d0ea1b7bb724e9e7384a5
+        with:
+          lock: conformance/guest-pair-ct/tests.lock
+          manifest: conformance/driver-ct/targets-interop.toml
+          results: |
+            reference=conformance/driver-ct/results/reference.jsonl
+            wasmtime-x-reference=conformance/driver-ct/results/wasmtime-x-reference.jsonl
+            reference-x-wasmtime=conformance/driver-ct/results/reference-x-wasmtime.jsonl
+            jco-node-x-reference=conformance/driver-ct/results/jco-node-x-reference.jsonl
+            reference-x-jco-node=conformance/driver-ct/results/reference-x-jco-node.jsonl
+            jco-browser-x-reference=conformance/driver-ct/results/jco-browser-x-reference.jsonl
+            reference-x-jco-browser=conformance/driver-ct/results/reference-x-jco-browser.jsonl
+            wasip3-guest-x-reference=conformance/driver-ct/results/wasip3-guest-x-reference.jsonl
+            reference-x-wasip3-guest=conformance/driver-ct/results/reference-x-wasip3-guest.jsonl
+            wasmtime-x-jco-node=conformance/driver-ct/results/wasmtime-x-jco-node.jsonl
+            jco-node-x-wasmtime=conformance/driver-ct/results/jco-node-x-wasmtime.jsonl
+            wasmtime-x-wasip3-guest=conformance/driver-ct/results/wasmtime-x-wasip3-guest.jsonl
+            wasip3-guest-x-wasmtime=conformance/driver-ct/results/wasip3-guest-x-wasmtime.jsonl
+          summary-title: Interop conformance matrix
+          cli: target/ct-tools/bin/component-test
+          cargo-lock: Cargo.lock
 
       - name: Upload conformance results
         if: always()

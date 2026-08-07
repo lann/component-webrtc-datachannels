@@ -75,7 +75,7 @@ async function main() {
     newInstance,
     coreBytes,
     target: values.target,
-    suiteName: values.name.replaceAll("-", "_"),
+    suiteName: values.name,
     select: values.select,
     emit: (line) => process.stdout.write(`${line}\n`),
     log: (msg) => process.stderr.write(`${msg}\n`),
