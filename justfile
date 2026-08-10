@@ -19,8 +19,11 @@ default:
 # The exact set of checks CI runs (ci.yml and conformance.yml): each CI
 # job runs exactly one gha:: job recipe. The Shadow lab job
 # (gha::shadow-lab) is excluded: it needs the prebuilt shadow binary
-# (scripts/download-shadow.sh).
-ci: (gha::rust-checks) (gha::browser) (gha::conformance-build) (gha::conformance-matrix)
+# (scripts/download-shadow.sh). Body form rather than dependencies:
+# module recipes as dependencies need just 1.42+, newer than the just
+# this repository pins.
+ci:
+    @just gha::rust-checks gha::browser gha::conformance-build gha::conformance-matrix
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests); see AGENTS.md.
 check: fmt-check clippy validate-wit test
