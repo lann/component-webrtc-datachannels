@@ -236,17 +236,19 @@ humans, agents, and CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
 all run the same commands. The repo-wide checks live in the top-level justfile;
 subtree-scoped recipes live in that subtree's module —
 [`conformance/justfile`](conformance/justfile) (`just conformance::<recipe>`;
-bare `just conformance` runs the full loopback suite) and
-[`examples/justfile`](examples/justfile) (`just examples::<recipe>`). Run `just`
+bare `just conformance` runs the full loopback suite),
+[`examples/justfile`](examples/justfile) (`just examples::<recipe>`), and
+[`.github/justfile`](.github/justfile) (`just gha::<job>`, one recipe per CI
+job; CI job bodies live there). Run `just`
 with no arguments to list every recipe, or `just --list <module>` for a
 module's recipes.
 
 ### Checks to run before committing
 
 Run the check recipes that cover what you changed **before committing**, and fix
-anything they report. `just check` is the fast pre-commit gate; `just ci` mirrors
-CI exactly (it additionally builds the guest component, transpiles it, and runs
-the headless-browser test). Match the recipe to the change — and only the
+anything they report. `just check` is the fast pre-commit gate; `just ci` runs
+every CI job's body (ci.yml and conformance.yml) except the Shadow lab, which
+needs the shadow binary. Match the recipe to the change — and only the
 change: a recipe whose scope your edit does not touch can be skipped (e.g. a
 docs-, comments-, or workflow-only change needs no `just test`; a change
 confined to one crate does not need the recipes that only cover others). When
@@ -265,7 +267,7 @@ in doubt about whether a recipe's scope is touched, run it.
 | `just examples::test-browser` | the browser host (`jco-impl`, e.g. `webrtc.js`) or the component it runs. |
 | `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the suite bodies, the driver, or the manifests (CI runs it in `.github/workflows/conformance.yml`). Intentional case changes also need `just conformance::lock-update`; intentional behavior changes, `just conformance::matrix-update` — commit the diffs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
-| `just ci` | anything touching the guest, jco host, or WIT — reproduces the full CI run locally. |
+| `just ci` | anything broad — reproduces CI locally: the rust checks, the browser host test, and the full conformance suite; the Shadow lab runs separately (`just gha::shadow-lab`, needs the shadow binary). |
 
 `just examples::transpile` and `just examples::test-browser` depend on
 `just examples::build-component`, so running either rebuilds the component
