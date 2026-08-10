@@ -29,10 +29,10 @@ use orchestrate::PeerKind;
 const USAGE: &str = "usage: rtc-ct-driver exec <suite.wasm> [--jsonl] [--select prefix] \
      [--role offerer|answerer --signaling url --run-id id] [--composed] \
      [--suite-artifact path] [--jobs n] [--budget secs] [--case-timeout secs]
-       rtc-ct-driver loopback <suite.wasm> --target name --kind wasmtime|composed|jco-node|jco-browser|deltic-deno|deltic-browser \
+        rtc-ct-driver loopback <suite.wasm> --target name --kind wasmtime|composed|deltic-deno|deltic-browser \
      [--artifact path] [--script path] [-o out.jsonl]
-       rtc-ct-driver interop <pair-suite.wasm> --direction <offerer>-x-<answerer> \
-     [--composed-pair path] [--node-script path] [--browser-script path] \
+        rtc-ct-driver interop <pair-suite.wasm> --direction <offerer>-x-<answerer> \
+     [--composed-pair path] [--deno-script path] [--browser-script path] \
      [--reference-bin path] [-o out.jsonl]";
 
 /// Wall bound per case: the single-attempt hang guard (no retries). Must
@@ -186,28 +186,16 @@ fn loopback_cmd(argv: Vec<String>) -> Result<ExitCode> {
             composed: true,
             suite_artifact: Some(suite.clone()),
         },
-        "jco-node" => PeerKind::Node {
-            script: script.clone().context("--kind jco-node needs --script")?,
-            browser: false,
-            args: Vec::new(),
-        },
-        "jco-browser" => PeerKind::Node {
-            script: script
-                .clone()
-                .context("--kind jco-browser needs --script")?,
-            browser: true,
-            args: Vec::new(),
-        },
         "deltic-deno" => PeerKind::Deno {
             script: script
                 .clone()
                 .context("--kind deltic-deno needs --script")?,
+            args: Vec::new(),
         },
         "deltic-browser" => PeerKind::Node {
             script: script
                 .clone()
                 .context("--kind deltic-browser needs --script")?,
-            browser: true,
             args: Vec::new(),
         },
         other => bail!("unknown --kind {other:?}"),
@@ -236,7 +224,7 @@ fn interop_cmd(argv: Vec<String>) -> Result<ExitCode> {
     let mut suite = None;
     let mut direction = None;
     let mut composed_pair = None;
-    let mut node_script = None;
+    let mut deno_script = None;
     let mut browser_script = None;
     let mut reference_bin = PathBuf::from("target/release/conformance-reference-peer");
     let mut target = None;
@@ -250,7 +238,7 @@ fn interop_cmd(argv: Vec<String>) -> Result<ExitCode> {
         match arg.as_str() {
             "--direction" => direction = Some(value("--direction")?),
             "--composed-pair" => composed_pair = Some(PathBuf::from(value("--composed-pair")?)),
-            "--node-script" => node_script = Some(PathBuf::from(value("--node-script")?)),
+            "--deno-script" => deno_script = Some(PathBuf::from(value("--deno-script")?)),
             "--browser-script" => browser_script = Some(PathBuf::from(value("--browser-script")?)),
             "--reference-bin" => reference_bin = PathBuf::from(value("--reference-bin")?),
             "--target" => target = Some(value("--target")?),
@@ -285,19 +273,17 @@ fn interop_cmd(argv: Vec<String>) -> Result<ExitCode> {
                 composed: true,
                 suite_artifact: Some(suite.clone()),
             },
-            "jco-node" => PeerKind::Node {
-                script: node_script
+            "deltic-deno" => PeerKind::Deno {
+                script: deno_script
                     .clone()
-                    .context("direction includes jco-node: needs --node-script")?,
-                browser: false,
-                args: pair_transpile_args(),
+                    .context("direction includes deltic-deno: needs --deno-script")?,
+                args: pair_suite_args(&suite, PairSuitePath::Filesystem)?,
             },
-            "jco-browser" => PeerKind::Node {
+            "deltic-browser" => PeerKind::Node {
                 script: browser_script
                     .clone()
-                    .context("direction includes jco-browser: needs --browser-script")?,
-                browser: true,
-                args: pair_transpile_args(),
+                    .context("direction includes deltic-browser: needs --browser-script")?,
+                args: pair_suite_args(&suite, PairSuitePath::Served)?,
             },
             "reference" => PeerKind::Reference {
                 bin: reference_bin.clone(),
@@ -437,13 +423,40 @@ pub(crate) fn exit_for(merged: &str) -> ExitCode {
     }
 }
 
-/// The jco children's pair-artifact selection (the interop matrix runs
-/// the pair-only suite; the loopback legs run the full one).
-fn pair_transpile_args() -> Vec<String> {
-    vec![
-        "--generated".into(),
-        "generated-pair".into(),
+/// How an interop child addresses the pair-suite artifact.
+enum PairSuitePath {
+    /// A filesystem path (the Deno child reads the wasm directly; it runs
+    /// with the script's directory as cwd, so the path must be absolute).
+    Filesystem,
+    /// A path under the browser child's static server, which serves the
+    /// repository root (so a repo-root-relative path with a leading `/`).
+    Served,
+}
+
+/// The deltic children's pair-artifact selection (the interop matrix runs
+/// the pair-only suite; the loopback legs run the full one — the children
+/// default to it and take `--suite`/`--name` overrides).
+fn pair_suite_args(suite: &std::path::Path, form: PairSuitePath) -> Result<Vec<String>> {
+    let suite_arg = match form {
+        PairSuitePath::Filesystem => suite
+            .canonicalize()
+            .with_context(|| format!("resolving pair suite {}", suite.display()))?
+            .display()
+            .to_string(),
+        PairSuitePath::Served => {
+            if suite.is_absolute() {
+                bail!(
+                    "pair suite {} must be repo-root-relative for the browser child's static server",
+                    suite.display()
+                );
+            }
+            format!("/{}", suite.display())
+        }
+    };
+    Ok(vec![
+        "--suite".into(),
+        suite_arg,
         "--name".into(),
         "conformance-guest-pair-ct".into(),
-    ]
+    ])
 }

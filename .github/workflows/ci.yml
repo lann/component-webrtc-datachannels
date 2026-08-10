@@ -11,8 +11,7 @@ permissions:
 
 jobs:
   # Native Rust checks (formatting, lints, WIT validation, and the Wasmtime
-  # tests). Runs in parallel with the browser-host job below. No Node host is
-  # needed here, so its npm dependencies are skipped.
+  # tests). No JS host is needed here, so setup.sh's npm steps are skipped.
   rust-checks:
     runs-on: ubuntu-latest
     # WebRTC handshakes can hang; cap the job so a stuck run fails fast instead
@@ -50,7 +49,7 @@ jobs:
       - name: Install dependencies
         # This job never runs the Node host or the netns lab, so skip their
         # dependencies.
-        run: SKIP_NODE=1 SKIP_NETNS_LAB=1 ./scripts/setup.sh
+        run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
         # cargo-binstall resolves releases through api.github.com; unauthenticated
         # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
         # (intermittent 403s). The token moves it to the per-token limit.
@@ -59,55 +58,3 @@ jobs:
 
       - name: Run the rust checks
         run: just gha::rust-checks
-
-  # Guest component build + browser (jco) host test. Runs in parallel with the
-  # native Rust checks above.
-  browser:
-    runs-on: ubuntu-latest
-    # WebRTC handshakes can hang; cap the job so a stuck run fails fast instead
-    # of waiting for the default 6h limit.
-    timeout-minutes: 20
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Install Rust toolchain
-        # The toolchain version, wasm targets, and rustfmt/clippy components are
-        # pinned in rust-toolchain.toml; `rustup show` installs exactly those.
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          # Node 24+ so `node --experimental-wasm-jspi` has JSPI
-          # (WebAssembly.Suspending).
-          node-version: "24"
-          # Cache the Node host's npm downloads so `npm install` in setup.sh
-          # restores from cache instead of refetching every run.
-          cache: npm
-          cache-dependency-path: jco-impl/package-lock.json
-
-      - name: Cache cargo
-        # Caches the cargo registry, `~/.cargo/bin` (so cargo-binstall'd
-        # wasm-tools/just/nextest are reused), and the compiled `target/`
-        # artifacts, so the guest component build reuses prior builds.
-        uses: Swatinem/rust-cache@v2
-        with:
-          # One cache entry per job (see the rust-checks job for why a
-          # cross-job shared key never actually shared compiled artifacts).
-          shared-key: browser
-          cache-all-crates: true
-          # Save only on main (see the rust-checks job).
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install dependencies
-        # The netns lab never runs in CI, so its apt packages are skipped.
-        run: SKIP_NETNS_LAB=1 ./scripts/setup.sh
-        # cargo-binstall resolves releases through api.github.com; unauthenticated
-        # requests share a 60/hour per-IP limit that pooled runner IPs exhaust
-        # (intermittent 403s). The token moves it to the per-token limit.
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
-      - name: Run the browser host checks
-        run: just gha::browser

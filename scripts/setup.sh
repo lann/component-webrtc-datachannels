@@ -28,24 +28,25 @@
 #     `shadow-dev` GitHub prerelease; fetch it with scripts/download-shadow.sh or
 #     build it locally with scripts/build-shadow.sh. The lab recipe prints this
 #     guidance and fails if the binary is missing when it runs.
-#   - the Node host's npm dependencies (jco + node-datachannel), and the conformance
-#     jco adapter's npm dependencies (jco + playwright-core)
+#   - the deltic legs' runtime dependencies are NOT installed here: their just
+#     recipes materialize the pinned module graph and npm tree on first run
+#     (conformance::deltic-deps and the _deltic-browser-* recipes)
 #
 # wasm-tools, just, and cargo-nextest are installed with cargo-binstall, which
 # downloads the pinned prebuilt release binaries when available and automatically
 # falls back to `cargo install` (compiling from source) otherwise. cargo-binstall
 # itself is bootstrapped from its prebuilt release binary.
 #
-# Prerequisites (not installed here): a Rust toolchain via rustup, and Node 22+
-# with npm. CI and copilot-setup-steps provision these before calling this
-# script; local developers should install them first.
+# Prerequisites (not installed here): a Rust toolchain via rustup, Node 22+
+# with npm (the deltic browser drivers), and Deno 2.x (the deltic legs). CI
+# and copilot-setup-steps provision these before calling this script; local
+# developers should install them first.
 #
 # Environment overrides:
 #   WASM_TOOLS_VERSION   version of wasm-tools to install (default below)
 #   JUST_VERSION         version of just to install (default below)
 #   NEXTEST_VERSION      version of cargo-nextest to install (default below)
 #   SKIP_NETNS_LAB=1       skip installing the conformance netns-lab tools (coturn…)
-#   SKIP_NODE=1          skip installing the Node host's npm dependencies
 
 set -euo pipefail
 
@@ -167,15 +168,6 @@ if command -v apt-get >/dev/null 2>&1 && ! pkg-config --exists glib-2.0 gobject-
   ${APT_SUDO} apt-get update -y
   DEBIAN_FRONTEND=noninteractive ${APT_SUDO} apt-get install -y --no-install-recommends \
     pkg-config libglib2.0-dev
-fi
-
-if [ "${SKIP_NODE:-0}" = "1" ]; then
-  log "Skipping Node host dependencies (SKIP_NODE=1)"
-else
-  log "Installing Node host dependencies (jco-impl)"
-  (cd "${REPO_ROOT}/jco-impl" && npm install)
-  log "Installing conformance jco leg dependencies (conformance/driver-ct/jco)"
-  (cd "${REPO_ROOT}/conformance/driver-ct/jco" && npm install)
 fi
 
 # In GitHub Actions, $GITHUB_PATH is a file; appending a path to it makes that

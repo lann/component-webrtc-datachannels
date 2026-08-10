@@ -5,8 +5,8 @@ runs runtime-linked under stock Deno — no transpile step, no generated
 tree, no engine flag (the WIT contract's async exports run on the
 callback ABI) — against
 [`deltic-impl/src/webrtc.ts`](../../../deltic-impl/src/webrtc.ts) and the
-fetch mailbox ([`signaling.ts`](signaling.ts)). This is the deltic
-analogue of the jco Node leg (`../jco/run.mjs`): the same child contract
+fetch mailbox ([`signaling.ts`](signaling.ts)). These children carry
+the same child contract the retired jco legs did (see git history)
 under `rtc-ct-driver`'s loopback orchestration (a solo stream over
 `solo/` plus a role pair over `pair/`, folded), the same JSONL wire on
 stdout, the same 512 KiB inbound-buffer bound exported through

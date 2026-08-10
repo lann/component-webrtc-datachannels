@@ -1,7 +1,9 @@
 # `deltic-impl` — the deltic-native `polymorph:webrtc-datachannels` host module
 
 `src/webrtc.ts` is the [deltic](https://github.com/lann/deltic)-native
-port of [`jco-impl/webrtc.js`](../jco-impl/webrtc.js): the same
+port of the browser-first reference host `jco-impl/webrtc.js` **at
+commit 65bc15b** (retired with the jco legs;
+`git show 65bc15b:jco-impl/webrtc.js`): the same
 behavioral reference host, rewritten over deltic's embedder API (typed
 `Stream<T>` / `ReadableStream` rather than jco streams, and `WitError`
 throws rather than `throw { tag, val }`). It was developed as deltic's

@@ -8,7 +8,7 @@
 // `RTC_CT_RUN_ID` always; `RTC_CT_ROLE` on pair instances;
 // `RTC_CT_CASE_TIMEOUT_SECS` bounds each case; `--select` carries the
 // case-name prefix. The suite artifact is the BARE full suite — the exact
-// component the jco leg transpiles — loaded directly: deltic is a runtime
+// component the retired jco legs transpiled — loaded directly: deltic is a runtime
 // linker, so there is no transpile step, no generated tree, and no engine
 // flag; the WIT contract's async exports run on the callback ABI under
 // stock Deno.

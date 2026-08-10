@@ -4,15 +4,18 @@
 // document).
 //
 // PORT PROVENANCE. This is a faithful translation of this repository's
-// browser-first reference host, `jco-impl/webrtc.js` (cited below as
-// `jco-impl/webrtc.js:LINE`), written against the standard W3C
-// `RTCPeerConnection` / `RTCDataChannel` API; the conformance suite under
-// `conformance/` asserts the behavioral parity. The LOGIC — backend
+// browser-first reference host, `jco-impl/webrtc.js` **at commit 65bc15b**
+// — the file was retired with the jco legs, so the `jco-impl/webrtc.js:LINE`
+// citations below read against that revision
+// (`git show 65bc15b:jco-impl/webrtc.js`). It was written against the
+// standard W3C `RTCPeerConnection` / `RTCDataChannel` API; the conformance
+// suite under `conformance/` asserts the behavioral parity, and this module
+// now carries every JS-host row of the matrix. The LOGIC — backend
 // resolution, timeout and buffer bounds, the trickle-ICE surface, the
 // overflow-close behavior, the receive-via-stream single-use rule — is
 // preserved; only the boundary conventions are translated:
 //
-//   jco                                  | this port
+//   the retired jco host                 | this port
 //   -------------------------------------+------------------------------------
 //   `throw { tag, val }` (bare payload)   | `throw new WitError({ tag, val })`
 //   jco `Stream` (`read({count})`)        | `Stream<T>` / `ReadableStream`

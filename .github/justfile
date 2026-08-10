@@ -33,21 +33,15 @@ rust-checks:
     @just gha::_step test
     @just gha::_step examples::test-webrtc-composed
 
-# The guest component build + browser (jco) host test.
-browser:
-    @just gha::_step examples::build-component
-    @just gha::_step examples::transpile
-    @just gha::_step examples::test-browser
-
 # Everything the conformance runner jobs execute, compiled once.
 conformance-build:
     @just gha::_step conformance::build
     @just gha::_step conformance::_ct-tools
 
-# The loopback targets (wasmtime, composed, jco-node, jco-browser,
-# deltic-deno) and the interop directions, aggregated against both
-# committed lockfiles, then gated against both committed matrices. In CI
-# the artifacts arrive prebuilt from the build job; locally
+# The loopback targets (wasmtime, composed, deltic-deno, deltic-browser)
+# and the interop directions, aggregated against both committed
+# lockfiles, then gated against both committed matrices. In CI the
+# artifacts arrive prebuilt from the build job; locally
 # `just gha::conformance-build` produces them. deltic-check needs only
 # Deno + network, so it rides this job too.
 conformance-matrix:
@@ -55,8 +49,6 @@ conformance-matrix:
     @just gha::_step deltic-check
     @just gha::_step conformance::run-wasmtime
     @just gha::_step conformance::run-composed
-    @just gha::_step conformance::run-jco-node
-    @just gha::_step conformance::run-jco-browser
     @just gha::_step conformance::run-deltic
     @just gha::_step conformance::run-deltic-browser
     @just gha::_step conformance::run-interop

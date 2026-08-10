@@ -15,8 +15,8 @@
 //!      order while counting the messages/bytes,
 //!
 //! all within a single cooperative async task (the loops run under
-//! `futures::join!`). The same component binary runs unchanged under the Node
-//! (`jco` + `node-datachannel`) host and the Wasmtime (`webrtc-rs`) host, which is
+//! `futures::join!`). The same component binary runs unchanged under the
+//! deltic (runtime-linked JS) host and the Wasmtime (`webrtc-rs`) host, which is
 //! what demonstrates cross-implementation compatibility.
 
 wit_bindgen::generate!({

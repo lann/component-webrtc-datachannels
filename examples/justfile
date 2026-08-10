@@ -2,8 +2,8 @@
 # `examples` module of the top-level justfile: invoke as
 # `just examples::<recipe>`.
 #
-# Recipes run from the repository root so cargo invocations, `target/` paths,
-# and `jco-impl/...` paths all match the top-level layout.
+# Recipes run from the repository root so cargo invocations and `target/`
+# paths all match the top-level layout.
 set working-directory := ".."
 
 # Build the echo-demo guest component into examples/echo-demo/build/.
@@ -13,18 +13,6 @@ build-component:
     wasm-tools component new \
         target/wasm32-unknown-unknown/release/echo_demo.wasm \
         -o examples/echo-demo/build/echo-demo.component.wasm
-
-# Transpile the echo-demo component for the Node host (runs build-component).
-transpile: build-component
-    cd jco-impl && npm run transpile
-
-# Run the browser host test in headless Chrome (set CHROME_PATH to override).
-test-browser: transpile
-    cd jco-impl && npm run test:browser
-
-# Run the Node (browser-first) host demo.
-demo-node: transpile
-    cd jco-impl && npm start
 
 # Run the Wasmtime (native) host demo.
 demo-wasmtime count="1000" size="4096": build-component
@@ -70,30 +58,6 @@ demo-remote count="100" size="1024": build-echo-remote build-signalingd
     ANSWERER=$!
     WEBRTC_INCLUDE_LOOPBACK=1 timeout 120 target/release/echo-remote \
         examples/echo-remote/build/echo-remote.component.wasm \
-        --role offerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}}
-    wait $ANSWERER
-
-# Run the two-process echo demo under the Node host (transpiles the
-# echo-remote component; needs Node 24+ for JSPI).
-[doc("Run the two-process echo demo under the Node host (Node 24+)")]
-demo-node-remote count="100" size="1024": build-signalingd build-echo-remote
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd jco-impl && npm run transpile-remote && cd ..
-    target/debug/conformance-signalingd --host 127.0.0.1 --port 0 > target/demo-remote-signalingd.log 2>&1 &
-    SIG=$!
-    trap 'kill $SIG 2>/dev/null || true' EXIT
-    for _ in $(seq 50); do
-        SERVER=$(sed -n 's/.*listening on \(http:[^ ]*\).*/\1/p' target/demo-remote-signalingd.log)
-        [ -n "$SERVER" ] && break
-        sleep 0.1
-    done
-    [ -n "$SERVER" ] || { echo "signaling server never reported a URL" >&2; exit 1; }
-    cd jco-impl
-    timeout 120 node --experimental-wasm-jspi src/run-remote.mjs \
-        --role answerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}} &
-    ANSWERER=$!
-    timeout 120 node --experimental-wasm-jspi src/run-remote.mjs \
         --role offerer --server "$SERVER" --room demo-remote --count {{count}} --size {{size}}
     wait $ANSWERER
 

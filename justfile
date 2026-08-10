@@ -23,7 +23,7 @@ default:
 # module recipes as dependencies need just 1.42+, newer than the just
 # this repository pins.
 ci:
-    @just gha::rust-checks gha::browser gha::conformance-build gha::conformance-matrix
+    @just gha::rust-checks gha::conformance-build gha::conformance-matrix
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests); see AGENTS.md.
 check: fmt-check clippy validate-wit test
