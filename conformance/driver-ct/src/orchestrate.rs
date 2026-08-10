@@ -28,6 +28,10 @@ pub enum PeerKind {
         browser: bool,
         args: Vec<String>,
     },
+    /// A Deno script (the deltic leg): stock Deno — no engine flag — with
+    /// the script directory's own `deno.json`/`deno.lock` governing its
+    /// module graph; emits the same JSONL contract.
+    Deno { script: PathBuf },
     /// The native libwebrtc reference peer: one process per case,
     /// verdicts synthesized into the stream by this orchestrator.
     Reference { bin: PathBuf },
@@ -122,6 +126,32 @@ pub fn child_stream(
             }
             cmd.current_dir(script.parent().context("script has no parent dir")?);
             run_capture(cmd, &format!("node[{}]", role.unwrap_or("solo")))?
+        }
+        PeerKind::Deno { script } => {
+            let script = script
+                .canonicalize()
+                .with_context(|| format!("resolving script {}", script.display()))?;
+            let dir = script.parent().context("script has no parent dir")?;
+            let mut cmd = Command::new("deno");
+            cmd.arg("run")
+                .arg("--allow-all")
+                .arg("--frozen")
+                .arg("--config")
+                .arg(dir.join("deno.json"))
+                .arg(&script)
+                .arg("--select")
+                .arg(select);
+            cmd.env("RTC_CT_SIGNALING_URL", &ctx.signaling_url)
+                .env("RTC_CT_RUN_ID", &ctx.run_id)
+                .env(
+                    "RTC_CT_CASE_TIMEOUT_SECS",
+                    ctx.case_timeout_secs.to_string(),
+                );
+            if let Some(role) = role {
+                cmd.env("RTC_CT_ROLE", role);
+            }
+            cmd.current_dir(dir);
+            run_capture(cmd, &format!("deno[{}]", role.unwrap_or("solo")))?
         }
         PeerKind::Reference { bin } => {
             let role = role.context("the reference peer only runs pair roles")?;

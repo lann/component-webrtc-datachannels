@@ -128,6 +128,14 @@ jobs:
           cache: npm
           cache-dependency-path: conformance/driver-ct/jco/package-lock.json
 
+      # The deltic-deno leg runs the same suite runtime-linked under
+      # stock Deno — no engine flag (see
+      # conformance/driver-ct/deltic/README.md).
+      - name: Set up Deno (the deltic-deno leg; stock, no flags)
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+
       # Runtime dependencies only: the jco legs' npm packages
       # (node-datachannel, playwright-core). The netns lab never runs in
       # CI, so its apt packages are skipped.
@@ -164,6 +172,7 @@ jobs:
             composed=conformance/driver-ct/results/composed.jsonl
             jco-node=conformance/driver-ct/results/jco-node.jsonl
             jco-browser=conformance/driver-ct/results/jco-browser.jsonl
+            deltic-deno=conformance/driver-ct/results/deltic-deno.jsonl
           summary-title: Conformance matrix
           cli: target/ct-tools/bin/component-test
           cargo-lock: Cargo.lock

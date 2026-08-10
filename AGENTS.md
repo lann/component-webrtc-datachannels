@@ -48,6 +48,12 @@ wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   add_to_linker + WebrtcView (types + connections.data-channel-options/data-channel);
                                        #   crate name: wasmtime-webrtc-datachannels
 jco-impl/                              # browser-first host (Node + jco + node-datachannel)
+deltic-impl/                           # deltic-native host module (stock Deno,
+                                       #   runtime-linked; node-datachannel-backed):
+                                       #   deltic's ports/webrtc reference-host port,
+                                       #   upstreamed per lann/deltic#14; pinned to a
+                                       #   deltic release by URL import maps (see
+                                       #   deltic-impl/README.md)
 wasip3-impl/                           # wasm COMPONENT on `rtc` 0.21: runs the
                                        #   sans-I/O stack in-guest (SansIoPeer core
                                        #   + a wasi:sockets/clocks runtime driver)
@@ -83,7 +89,8 @@ conformance/                           # cross-implementation conformance suite,
                                        #     interop/shadow/netns orchestrators, the
                                        #     pair fold, the ported netns topology and
                                        #     Shadow syscall shim), the jco children
-                                       #     (jco/), targets*.toml manifests, and the
+                                       #     (jco/), the deltic child (deltic/),
+                                       #     targets*.toml manifests, and the
                                        #     committed matrix.md + matrix-interop.md
   reference/                           #   the non-wasm reference peer (libwebrtc via
                                        #     LiveKit's Rust bindings)
@@ -146,9 +153,10 @@ updating the consumers that name them as strings:
 
 ## Build & run
 
-Prerequisites: Rust with the `wasm32-unknown-unknown` target, `wasm-tools`, and
+Prerequisites: Rust with the `wasm32-unknown-unknown` target, `wasm-tools`,
 Node 24+ for the Node paths (jco's async ABI uses JSPI, which Node exposes on
-24+ behind `--experimental-wasm-jspi`).
+24+ behind `--experimental-wasm-jspi`), and Deno 2.x for the deltic paths
+(`deltic-impl/` and the `deltic-deno` conformance leg; stock Deno, no flags).
 
 ### One-shot dependency setup: `scripts/setup.sh`
 
@@ -210,11 +218,11 @@ just test
 
 # Cross-implementation conformance suite: builds the two suite
 # components, runs every loopback target (wasmtime, composed, jco-node,
-# jco-browser) and every interop direction (every implementation against
-# the non-wasm reference peer in both orders, the reference self-pair,
-# and the direct implementation pairs), aggregates against the committed
-# lockfiles + manifests, and diffs the committed matrices. Needs Node
-# 24+ and a Chrome 137+ binary:
+# jco-browser, deltic-deno) and every interop direction (every
+# implementation against the non-wasm reference peer in both orders, the
+# reference self-pair, and the direct implementation pairs), aggregates
+# against the committed lockfiles + manifests, and diffs the committed
+# matrices. Needs Node 24+, Deno 2.x, and a Chrome 137+ binary:
 just conformance
 
 # Conformance netns lab (real non-loopback candidate paths via network
@@ -265,6 +273,7 @@ in doubt about whether a recipe's scope is touched, run it.
 | `just examples::test-echo-remote-composed` | the `echo-remote` guest, `rendezvous-http`, the `wasip3-impl` provider, or the `rendezvous`/`remote` WIT (composes the fully in-guest peer and connects two `wasmtime run` processes over a signaling server). |
 | `just examples::transpile` | anything affecting the component's interfaces, or the `jco transpile` flags / `--map` targets in `jco-impl`. |
 | `just examples::test-browser` | the browser host (`jco-impl`, e.g. `webrtc.js`) or the component it runs. |
+| `just deltic-check` | the deltic host module (`deltic-impl/`) or the deltic conformance leg's TS (`conformance/driver-ct/deltic/`): type-checks both and runs the `deltic-impl` unit tests. Behavior changes also need `just conformance` (the `deltic-deno` target). |
 | `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the suite bodies, the driver, or the manifests (CI runs it in `.github/workflows/conformance.yml`). Intentional case changes also need `just conformance::lock-update`; intentional behavior changes, `just conformance::matrix-update` — commit the diffs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
 | `just ci` | anything broad — reproduces CI locally: the rust checks, the browser host test, and the full conformance suite; the Shadow lab runs separately (`just gha::shadow-lab`, needs the shadow binary). |
@@ -336,6 +345,7 @@ documented at its use site):
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
 | `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `rtc-ct-driver` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated wasmtime-kind peers. |
 | `RTC_CT_ROLE`, `RTC_CT_SIGNALING_URL`, `RTC_CT_RUN_ID` | the conformance suites (via the store environment) | The pair-instance channel: which half this instance drives, the mailbox base URL, and the room-derivation seed. Set by `rtc-ct-driver` on the children it spawns; never set by hand. |
+| `DELTIC_TRANSLATOR` | the deltic conformance child (`conformance/driver-ct/deltic/run.ts`) | Path to the deltic translator-shim wasm. Exported by the `conformance::run-deltic` recipe (which fetches the sha256-pinned release asset via `fetch-translator.ts`) and inherited through the driver by the deltic children it spawns. |
 | `CHROME_PATH` / `CHROME_BIN` / `PUPPETEER_EXECUTABLE_PATH` | the browser test and browser conformance adapter | Chrome/Chromium binary override (first set one wins; else auto-detected). |
 | `SKIP_NODE`, `SKIP_NETNS_LAB` | `scripts/setup.sh` | Skip the npm installs / the netns-lab tooling install. |
 
