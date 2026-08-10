@@ -58,6 +58,7 @@ conformance-matrix:
     @just gha::_step conformance::run-jco-node
     @just gha::_step conformance::run-jco-browser
     @just gha::_step conformance::run-deltic
+    @just gha::_step conformance::run-deltic-browser
     @just gha::_step conformance::run-interop
     @just gha::_step conformance::aggregate
     @just gha::_step conformance::matrix-check
