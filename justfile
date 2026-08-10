@@ -3,8 +3,12 @@
 #   just conformance             — the full loopback + interop conformance suite
 #   just conformance::<recipe>   — individual targets, labs, builders
 #   just examples::<recipe>      — demo components, hosts, and compositions
+#   just gha::<job>              — one recipe per CI job; CI job bodies live in
+#                                   .github/justfile
 # Run `just --list` (or `just --list <module>`) to see every recipe.
 
+# GitHub Actions plumbing: CI job entry points.
+mod gha '.github'
 mod conformance
 mod examples
 
@@ -12,9 +16,11 @@ mod examples
 default:
     @just --list
 
-# Run every CI check locally, in the same order as .github/workflows/ci.yml.
-ci:
-    @just fmt-check clippy validate-wit examples::build-component examples::transpile examples::test-browser test
+# The exact set of checks CI runs (ci.yml and conformance.yml): each CI
+# job runs exactly one gha:: job recipe. The Shadow lab job
+# (gha::shadow-lab) is excluded: it needs the prebuilt shadow binary
+# (scripts/download-shadow.sh).
+ci: (gha::rust-checks) (gha::browser) (gha::conformance-build) (gha::conformance-matrix)
 
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests); see AGENTS.md.
 check: fmt-check clippy validate-wit test

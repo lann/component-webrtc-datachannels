@@ -57,24 +57,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      # Cheap checks first so an obvious formatting or WIT mistake fails the job
-      # before the slower clippy/test compilation.
-      - name: Check formatting
-        run: just fmt-check
-
-      - name: Validate WIT
-        run: just validate-wit
-
-      - name: Run clippy
-        run: just clippy
-
-      - name: Run tests
-        run: just test
-
-      # Build the wasip3 provider + webrtc-consumer, compose them with `wac
-      # plug`, and run the composed in-guest WebRTC round trip under wasmtime.
-      - name: Run composed WebRTC integration test
-        run: just examples::test-webrtc-composed
+      - name: Run the rust checks
+        run: just gha::rust-checks
 
   # Guest component build + browser (jco) host test. Runs in parallel with the
   # native Rust checks above.
@@ -125,11 +109,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      - name: Build echo-demo guest component
-        run: just examples::build-component
-
-      - name: Transpile echo-demo component (Node host)
-        run: just examples::transpile
-
-      - name: Run browser host test (headless Chrome)
-        run: just examples::test-browser
+      - name: Run the browser host checks
+        run: just gha::browser

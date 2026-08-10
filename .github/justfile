@@ -1,0 +1,65 @@
+# CI job bodies: each workflow job runs exactly one `gha::` recipe, so
+# `just ci` is exactly CI and the workflow files carry no logic beyond
+# environment setup.
+
+set working-directory := '..'
+
+# Wrap one recipe in a GitHub Actions log group (plain passthrough
+# locally).
+[private]
+_step recipe:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+        echo "::group::just {{recipe}}"
+        status=0
+        just {{recipe}} || status=$?
+        echo "::endgroup::"
+        if [ $status -ne 0 ]; then
+            echo "::error title=just {{recipe}} failed::exit status $status"
+            exit $status
+        fi
+    else
+        just {{recipe}}
+    fi
+
+# Cheap checks first so a formatting or WIT mistake fails before the
+# slower clippy/test compilation, then the composed in-guest WebRTC round
+# trip.
+rust-checks:
+    @just gha::_step fmt-check
+    @just gha::_step validate-wit
+    @just gha::_step clippy
+    @just gha::_step test
+    @just gha::_step examples::test-webrtc-composed
+
+# The guest component build + browser (jco) host test.
+browser:
+    @just gha::_step examples::build-component
+    @just gha::_step examples::transpile
+    @just gha::_step examples::test-browser
+
+# Everything the conformance runner jobs execute, compiled once.
+conformance-build:
+    @just gha::_step conformance::build
+    @just gha::_step conformance::_ct-tools
+
+# The loopback targets (wasmtime, composed, jco-node, jco-browser) and the
+# interop directions, aggregated against both committed lockfiles, then
+# gated against both committed matrices. In CI the artifacts arrive
+# prebuilt from the build job; locally `just gha::conformance-build`
+# produces them.
+conformance-matrix:
+    @just gha::_step conformance::lock-check
+    @just gha::_step conformance::run-wasmtime
+    @just gha::_step conformance::run-composed
+    @just gha::_step conformance::run-jco-node
+    @just gha::_step conformance::run-jco-browser
+    @just gha::_step conformance::run-interop
+    @just gha::_step conformance::aggregate
+    @just gha::_step conformance::matrix-check
+
+# The pair corpus over a routed, non-loopback path inside the Shadow
+# simulator. Needs the `shadow` binary (scripts/download-shadow.sh).
+shadow-lab:
+    @just gha::_step conformance::shadow

@@ -80,7 +80,7 @@ jobs:
             conformance/driver-ct/jco/package-lock.json
 
       - name: Build conformance artifacts
-        run: just conformance::build conformance::_ct-tools
+        run: just gha::conformance-build
 
       # Tar (rather than upload the paths directly) to preserve the
       # executable bits, which upload-artifact's zip archive drops.
@@ -145,11 +145,7 @@ jobs:
         run: tar xzf conformance-build.tar.gz
 
       - name: Run the conformance matrices
-        run: >
-          just conformance::lock-check conformance::run-wasmtime
-          conformance::run-composed conformance::run-jco-node
-          conformance::run-jco-browser conformance::run-interop
-          conformance::aggregate conformance::matrix-check
+        run: just gha::conformance-matrix
 
       # Presentation, not verdict: the just recipes above already gated
       # the same aggregates; these re-run them through component-test's
@@ -242,7 +238,7 @@ jobs:
         run: tar xzf conformance-build.tar.gz
 
       - name: Run the Shadow lab
-        run: just conformance::shadow
+        run: just gha::shadow-lab
 
       - name: Upload Shadow results
         if: always()
