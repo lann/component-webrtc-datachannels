@@ -36,12 +36,28 @@ async function connectPair(): Promise<{ a: PeerConnection; b: PeerConnection }> 
   const a = await PeerConnection.create();
   const b = await PeerConnection.create();
 
-  const pumpCandidates = (from: PeerConnection, to: PeerConnection) => {
+  // Candidates start flowing as soon as a local description is set — on a
+  // slow machine that is BEFORE the counterpart has its remote description,
+  // and an addIceCandidate delivered that early is rejected
+  // (invalid-signaling) and lost (the stream delivers each candidate once).
+  // Hold each pump until its receiving peer is ready.
+  let aHasRemote!: () => void;
+  let bHasRemote!: () => void;
+  const ready = {
+    a: new Promise<void>((r) => (aHasRemote = r)),
+    b: new Promise<void>((r) => (bHasRemote = r)),
+  };
+  const pumpCandidates = (
+    from: PeerConnection,
+    to: PeerConnection,
+    toReady: Promise<void>,
+  ) => {
     (async () => {
       // `localIceCandidates()` returns a plain `ReadableStream<IceCandidate>`
       // (one candidate per element — see src/webrtc.ts's
       // "Module wiring"/streams note), not a batched `Stream<T>` handle.
       for await (const candidate of from.localIceCandidates()) {
+        await toReady;
         try {
           await to.addIceCandidate(candidate);
         } catch {
@@ -50,15 +66,17 @@ async function connectPair(): Promise<{ a: PeerConnection; b: PeerConnection }> 
       }
     })();
   };
-  pumpCandidates(a, b);
-  pumpCandidates(b, a);
+  pumpCandidates(a, b, ready.b);
+  pumpCandidates(b, a, ready.a);
 
   const offer = await a.createOffer();
   await a.setLocalDescription(offer);
   await b.setRemoteDescription(offer);
+  bHasRemote();
   const answer = await b.createAnswer();
   await b.setLocalDescription(answer);
   await a.setRemoteDescription(answer);
+  aHasRemote();
 
   await Promise.all([a.waitConnected(), b.waitConnected()]);
   return { a, b };
@@ -339,6 +357,12 @@ Deno.test({
     try {
       const nodeDatachannel = await import("node-datachannel");
       nodeDatachannel.cleanup?.();
+      // Give libdatachannel's poll/worker threads time to join before the
+      // test runner tears the isolate down: an exit that races the joins
+      // can die in native teardown (SIGSEGV) after every test has already
+      // passed. (A hard process exit right after cleanup() is fine — this
+      // settle exists for harnesses that keep the runtime alive.)
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch {
       // Not resolved to node-datachannel in this run (e.g. werift-forced
       // test environment, or a browser-like global) — nothing to clean up.
