@@ -41,3 +41,10 @@ version = "0.1"
 # transpile step, no engine flag; the fetch mailbox
 # (conformance/driver-ct/deltic/signaling.ts).
 [targets.deltic-deno]
+
+# The deltic-native host module (deltic-impl) runtime-linked inside a
+# real headless Chromium over the browser's native RTCPeerConnection —
+# the run happens in the page (Window-only API), one deno-bundled
+# module; the fetch mailbox reaches the driver's signaling server
+# through the leg's same-origin proxy.
+[targets.deltic-browser]

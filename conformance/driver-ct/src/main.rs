@@ -29,7 +29,7 @@ use orchestrate::PeerKind;
 const USAGE: &str = "usage: rtc-ct-driver exec <suite.wasm> [--jsonl] [--select prefix] \
      [--role offerer|answerer --signaling url --run-id id] [--composed] \
      [--suite-artifact path] [--jobs n] [--budget secs] [--case-timeout secs]
-       rtc-ct-driver loopback <suite.wasm> --target name --kind wasmtime|composed|jco-node|jco-browser|deltic-deno \
+       rtc-ct-driver loopback <suite.wasm> --target name --kind wasmtime|composed|jco-node|jco-browser|deltic-deno|deltic-browser \
      [--artifact path] [--script path] [-o out.jsonl]
        rtc-ct-driver interop <pair-suite.wasm> --direction <offerer>-x-<answerer> \
      [--composed-pair path] [--node-script path] [--browser-script path] \
@@ -202,6 +202,13 @@ fn loopback_cmd(argv: Vec<String>) -> Result<ExitCode> {
             script: script
                 .clone()
                 .context("--kind deltic-deno needs --script")?,
+        },
+        "deltic-browser" => PeerKind::Node {
+            script: script
+                .clone()
+                .context("--kind deltic-browser needs --script")?,
+            browser: true,
+            args: Vec::new(),
         },
         other => bail!("unknown --kind {other:?}"),
     };

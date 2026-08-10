@@ -8,9 +8,10 @@
     "@deltic/wasi-shims": "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/wasi-shims/src/mod.ts",
     "node-datachannel": "npm:node-datachannel@0.32.3",
     "node-datachannel/polyfill": "npm:node-datachannel@0.32.3/polyfill",
-    "werift": "npm:werift@0.22.2"
+    "werift": "npm:werift@0.22.2",
+    "@deltic/release-bundle-entry": "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/tools/release-bundle/entry.ts"
   },
   "tasks": {
-    "check": "deno check run.ts fetch-translator.ts signaling.ts"
+    "check": "deno check run.ts fetch-translator.ts signaling.ts browser/page-entry.ts"
   }
 }

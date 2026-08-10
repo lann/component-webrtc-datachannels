@@ -45,9 +45,11 @@ close) keep both halves.
   in-guest mailbox client: the whole WebRTC stack in wasm over
   `wasi:sockets`), `jco-node` (the browser-first host under Node 24+
   with JSPI), `jco-browser` (the same host module in headless
-  Chromium), and `deltic-deno` (the deltic-native host,
+  Chromium), `deltic-deno` (the deltic-native host,
   `deltic-impl/`, runtime-linked under stock Deno — no transpile step,
-  no engine flag).
+  no engine flag), and `deltic-browser` (the same deltic host module
+  over the browser's native `RTCPeerConnection` in headless Chromium,
+  served as one deno-bundled page module).
 - **Interop** (`targets-interop.toml`, committed `matrix-interop.md`):
   the pair-only suite per `<offerer>-x-<answerer>` direction — every
   implementation against the reference peer in both orders (a red cell
