@@ -28,6 +28,15 @@ ci:
 # Run the fast pre-commit checks (fmt, clippy, WIT, Rust tests); see AGENTS.md.
 check: fmt-check clippy validate-wit test
 
+# Type-check and unit-test the deltic-native host module (deltic-impl)
+# and type-check the deltic conformance leg. Needs Deno; the installs
+# materialize the pinned module graph + the node-datachannel addon.
+deltic-check:
+    cd deltic-impl && deno install --frozen --allow-scripts=npm:node-datachannel
+    cd deltic-impl && deno task check && deno task test
+    cd conformance/driver-ct/deltic && deno install --frozen --allow-scripts=npm:node-datachannel
+    cd conformance/driver-ct/deltic && deno task check
+
 # Check formatting across all crates.
 fmt-check:
     cargo fmt --all -- --check

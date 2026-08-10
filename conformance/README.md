@@ -9,8 +9,8 @@ contract, runners emit one canonical results JSONL stream per target,
 and `component-test aggregate` validates every stream against the
 committed lockfile and target manifest before rendering the matrix.
 
-Run everything with `just conformance` (Node 24+, a Chrome 137+ binary,
-and `wac` required; see [`AGENTS.md`](../AGENTS.md) for setup).
+Run everything with `just conformance` (Node 24+, Deno 2.x, a Chrome 137+
+binary, and `wac` required; see [`AGENTS.md`](../AGENTS.md) for setup).
 
 ## How it works
 
@@ -19,9 +19,9 @@ and `wac` required; see [`AGENTS.md`](../AGENTS.md) for setup).
 | [`suite-body/`](suite-body) | The case bodies and SUT bindings, shared by both suite components: the incumbent guest's assertions re-plumbed for the harness (config via the store environment, per-case rooms). |
 | [`guest-ct/`](guest-ct) | The full suite component. The name hierarchy is the execution topology: `solo/*` cases run in one instance (two in-process peer connections, or a lone peer for the error probes); `pair/*` cases run as two role-paired instances of the same binary sharing a signaling room. The committed `tests.lock` is the corpus inventory. |
 | [`guest-pair-ct/`](guest-pair-ct) | The pair-only sibling suite: the `pair/*` subset as its own artifact with its own `tests.lock` — the corpus the interop directions and the network labs run (their targets never execute `solo/*` cases). |
-| [`driver-ct/`](driver-ct) | The legs. `rtc-ct-driver`'s child mode (`exec`) runs one suite instance's stream — a role, a selection, a linker profile — on the component-test runner (fresh instance per case, budgets, the wire format). Its orchestrator modes provision the signaling server, spawn one child stream per instance, fold the two sides of each pair case (worst status wins, details role-labelled), and emit one stream per target. `jco/` holds the Node and headless-Chromium children on the upstream JS runner core. `targets*.toml` are the per-matrix manifests; `matrix.md` and `matrix-interop.md` are the committed review surfaces. |
+| [`driver-ct/`](driver-ct) | The legs. `rtc-ct-driver`'s child mode (`exec`) runs one suite instance's stream — a role, a selection, a linker profile — on the component-test runner (fresh instance per case, budgets, the wire format). Its orchestrator modes provision the signaling server, spawn one child stream per instance, fold the two sides of each pair case (worst status wins, details role-labelled), and emit one stream per target. `jco/` holds the Node and headless-Chromium children on the upstream JS runner core; `deltic/` holds the [deltic](https://github.com/lann/deltic) child (stock Deno, runtime-linked — no transpile step or engine flag). `targets*.toml` are the per-matrix manifests; `matrix.md` and `matrix-interop.md` are the committed review surfaces. |
 | [`reference/`](reference) | The non-wasm reference peer: a native binary driving Google's libwebrtc (via LiveKit's Rust bindings), the suite's wire-level anchor. One process per case; the orchestrator synthesizes its stream and pairs it against any suite target. |
-| [`signaling/`](signaling) | `conformance-signalingd`, the suite-owned HTTP mailbox (see `signaling/PROTOCOL.md`). The guest never speaks HTTP: it imports `conformance:signaling/mailbox`, served natively by the driver, by `fetch` in the jco legs (`driver-ct/jco/signaling.js`), and by the in-guest `wasi:http` client ([`wasip3-mailbox/`](wasip3-mailbox)) in the composed artifacts. |
+| [`signaling/`](signaling) | `conformance-signalingd`, the suite-owned HTTP mailbox (see `signaling/PROTOCOL.md`). The guest never speaks HTTP: it imports `conformance:signaling/mailbox`, served natively by the driver, by `fetch` in the jco legs (`driver-ct/jco/signaling.js`) and the deltic leg (`driver-ct/deltic/signaling.ts`), and by the in-guest `wasi:http` client ([`wasip3-mailbox/`](wasip3-mailbox)) in the composed artifacts. |
 | [`wit/`](wit) | The suite world (`sut-imports`): only the surface under test and the mailbox — the export surface comes from the component-test SDK. The `polymorph:webrtc-datachannels` package arrives through the `deps` symlink, never a copy. |
 
 ### Pairing
@@ -44,8 +44,10 @@ close) keep both halves.
   (the suite `wac plug`ged with the `wasip3-impl` provider and the
   in-guest mailbox client: the whole WebRTC stack in wasm over
   `wasi:sockets`), `jco-node` (the browser-first host under Node 24+
-  with JSPI), and `jco-browser` (the same host module in headless
-  Chromium).
+  with JSPI), `jco-browser` (the same host module in headless
+  Chromium), and `deltic-deno` (the deltic-native host,
+  `deltic-impl/`, runtime-linked under stock Deno — no transpile step,
+  no engine flag).
 - **Interop** (`targets-interop.toml`, committed `matrix-interop.md`):
   the pair-only suite per `<offerer>-x-<answerer>` direction — every
   implementation against the reference peer in both orders (a red cell

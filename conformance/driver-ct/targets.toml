@@ -35,3 +35,9 @@ version = "0.1"
 # headless Chromium (Chrome 137+ ships JSPI); the mailbox reaches the
 # driver's signaling server through the leg's same-origin proxy.
 [targets.jco-browser]
+
+# The deltic-native host (deltic-impl/src/webrtc.ts,
+# node-datachannel-backed) runtime-linked under stock Deno — no
+# transpile step, no engine flag; the fetch mailbox
+# (conformance/driver-ct/deltic/signaling.ts).
+[targets.deltic-deno]
