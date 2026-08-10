@@ -26,7 +26,7 @@ deltic := "conformance/driver-ct/deltic"
 # The full conformance run: every loopback target, every interop
 # direction, both aggregates, and the committed-matrix gates.
 [doc("Run the loopback + interop conformance suites and gate the matrices")]
-all: build lock-check run-wasmtime run-composed run-jco-node run-jco-browser run-deltic run-interop aggregate matrix-check
+all: build lock-check run-wasmtime run-composed run-jco-node run-jco-browser run-deltic run-deltic-browser run-interop aggregate matrix-check
 
 # ---------------------------------------------------------------------------
 # Builders.
@@ -83,7 +83,8 @@ _ct-tools:
         printf '%s' "$rev" > target/ct-tools/.rev
     fi
     {{ct_cli}} pins --cargo-lock Cargo.lock \
-        --js-lock {{jco}}/package-lock.json --expect "$rev" > /dev/null
+        --js-lock {{jco}}/package-lock.json \
+        --js-lock {{deltic}}/package-lock.json --expect "$rev" > /dev/null
 
 # The committed lockfiles are the corpus inventories; drift fails here
 # and in the runner's own cross-check.
@@ -140,6 +141,34 @@ run-deltic: _results-dir deltic-deps
         --target deltic-deno --kind deltic-deno --script {{deltic}}/run.ts \
         -o {{results}}/deltic-deno.jsonl
 
+# The deltic browser driver's npm tree (the upstream page driver +
+# playwright-core; no transpiler).
+_deltic-browser-prepared:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd {{deltic}}
+    if [ package-lock.json -nt node_modules/.package-lock.json ]; then
+        npm ci --no-audit --no-fund
+    fi
+
+# The suite runtime-linked inside headless Chromium against the deltic
+# host module (deltic-impl over the browser's native RTCPeerConnection):
+# the run happens in the page (RTCPeerConnection is Window-only), served
+# as one deno-bundled module — no transpile step, no generated tree.
+run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared
+    #!/usr/bin/env bash
+    set -euo pipefail
+    deno run --config {{deltic}}/deno.json --frozen \
+        --allow-read=. --allow-write=target/deltic \
+        --allow-net=github.com,objects.githubusercontent.com,release-assets.githubusercontent.com \
+        {{deltic}}/fetch-translator.ts >/dev/null
+    mkdir -p target/deltic-browser
+    (cd {{deltic}}/browser && deno bundle --config deno.json --platform browser \
+        -o ../../../../target/deltic-browser/webrtc-page.mjs page-entry.ts)
+    timeout {{timeout}} {{driver}} loopback {{suite}} \
+        --target deltic-browser --kind deltic-browser --script {{deltic}}/run-browser.mjs \
+        -o {{results}}/deltic-browser.jsonl
+
 # ---------------------------------------------------------------------------
 # Interop directions (the pair-only suite; every implementation against
 # the reference peer in both orders, the reference self-pair, and the
@@ -183,6 +212,7 @@ aggregate: _ct-tools
         --results jco-node={{results}}/jco-node.jsonl \
         --results jco-browser={{results}}/jco-browser.jsonl \
         --results deltic-deno={{results}}/deltic-deno.jsonl \
+        --results deltic-browser={{results}}/deltic-browser.jsonl \
         -o {{results}}/matrix.md
     args=(aggregate --lock conformance/guest-pair-ct/tests.lock \
         --manifest conformance/driver-ct/targets-interop.toml \

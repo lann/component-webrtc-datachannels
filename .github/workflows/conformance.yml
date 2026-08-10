@@ -173,6 +173,7 @@ jobs:
             jco-node=conformance/driver-ct/results/jco-node.jsonl
             jco-browser=conformance/driver-ct/results/jco-browser.jsonl
             deltic-deno=conformance/driver-ct/results/deltic-deno.jsonl
+            deltic-browser=conformance/driver-ct/results/deltic-browser.jsonl
           summary-title: Conformance matrix
           cli: target/ct-tools/bin/component-test
           cargo-lock: Cargo.lock

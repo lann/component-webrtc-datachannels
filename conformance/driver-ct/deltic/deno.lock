@@ -2,6 +2,7 @@
   "version": "5",
   "specifiers": {
     "npm:node-datachannel@0.32.3": "0.32.3",
+    "npm:playwright-core@^1.61.1": "1.62.1",
     "npm:werift@0.22.2": "0.22.2"
   },
   "npm": {
@@ -351,6 +352,10 @@
     "p-cancelable@2.1.1": {
       "integrity": "sha512-BZOr3nRQHOntUjTrH8+Lh54smKHoHyur8We1V8DSMVrl5A2malOOwuJRnKRDjSnkoeBh4at6BwEnb5I7Jl31wg=="
     },
+    "playwright-core@1.62.1": {
+      "integrity": "sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==",
+      "bin": true
+    },
     "prebuild-install@7.1.3": {
       "integrity": "sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==",
       "dependencies": [
@@ -626,6 +631,7 @@
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/runtime/src/task/subtask.ts": "750b13a1318f62836bfd149f1b9144de5b017fd7a84adc8e2fb2151e63130fbc",
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/runtime/src/task/thread.ts": "81fe38b37a1ec130803b478a24e428b19ee4e1ef8c0bae741395cd8d52751580",
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/runtime/src/task/waitable.ts": "5e1fc092e3d8f1fb4429d6a91d8886b3e474aa9ac6254e7924fd896c4929e1f9",
+    "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/tools/release-bundle/entry.ts": "2b6a277d426c5930b79e120bb792506329cc2603e54a8e50a27cb7b76e39e2fa",
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/wasi-shims/src/cli.ts": "d1617e12dc2569f4ee107f8b92488797daf431d14b8a86a1ab10750a28757394",
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/wasi-shims/src/clocks.ts": "05468a822b635408ce3a671b40fd06fd4448c220019f9449bf029ac1c7e59664",
     "https://raw.githubusercontent.com/lann/deltic/pre-10cc776/wasi-shims/src/filesystem.ts": "6dcead5346d78084c3923410e44875e678f3b58db0c2d59513339b428596ec25",
@@ -637,6 +643,11 @@
     "dependencies": [
       "npm:node-datachannel@0.32.3",
       "npm:werift@0.22.2"
-    ]
+    ],
+    "packageJson": {
+      "dependencies": [
+        "npm:playwright-core@^1.61.1"
+      ]
+    }
   }
 }
