@@ -6,7 +6,7 @@ Guidance for automated agents (and humans) working in this repository.
 
 `polymorph:webrtc-datachannels`: a WIT interface plus multiple implementations that
 run the *same* guest component over a real WebRTC data channel: two hosts
-(Wasmtime and jco) and one in-guest component (`wasip3-impl`). It is
+(Wasmtime and deltic) and one in-guest component (`wasip3-impl`). It is
 intentionally small — prefer clarity and correctness over features, and keep the
 implementations behaviourally in sync (asserted by the conformance suite under
 [`conformance/`](conformance)). See [`README.md`](README.md) for the findings
@@ -47,7 +47,6 @@ wasmtime-impl/                         # Wasmtime host crate (webrtc-rs),
                                        #   modeled after wasmtime_wasi_http::p3;
                                        #   add_to_linker + WebrtcView (types + connections.data-channel-options/data-channel);
                                        #   crate name: wasmtime-webrtc-datachannels
-jco-impl/                              # browser-first host (Node + jco + node-datachannel)
 deltic-impl/                           # deltic-native host module (stock Deno,
                                        #   runtime-linked; node-datachannel-backed):
                                        #   deltic's ports/webrtc reference-host port,
@@ -88,8 +87,8 @@ conformance/                           # cross-implementation conformance suite,
   driver-ct/                           #   rtc-ct-driver (child exec mode + loopback/
                                        #     interop/shadow/netns orchestrators, the
                                        #     pair fold, the ported netns topology and
-                                       #     Shadow syscall shim), the jco children
-                                       #     (jco/), the deltic child (deltic/),
+                                       #     Shadow syscall shim), the deltic
+                                       #     children (deltic/),
                                        #     targets*.toml manifests, and the
                                        #     committed matrix.md + matrix-interop.md
   reference/                           #   the non-wasm reference peer (libwebrtc via
@@ -146,17 +145,17 @@ updating the consumers that name them as strings:
   `wit/world.wit` also pulls in the root package through a
   `deps/polymorph-webrtc-datachannels` symlink),
 - the Wasmtime host bindings in `examples/wasmtime-demo/src/main.rs`,
-- the conformance suite bodies, driver, and jco transpile flags under
-  `conformance/`, and
-- the `jco transpile` `--async-exports` / `--async-imports` / `--map` flags in
-  `jco-impl/package.json`.
+- the conformance suite bodies and driver under `conformance/`, and
+- the deltic import-record assembly in `deltic-impl/src/webrtc.ts` (the
+  interface keys and error-class wiring the conformance children and any
+  embedder use).
 
 ## Build & run
 
 Prerequisites: Rust with the `wasm32-unknown-unknown` target, `wasm-tools`,
-Node 24+ for the Node paths (jco's async ABI uses JSPI, which Node exposes on
-24+ behind `--experimental-wasm-jspi`), and Deno 2.x for the deltic paths
-(`deltic-impl/` and the `deltic-deno` conformance leg; stock Deno, no flags).
+Deno 2.x for the deltic paths (`deltic-impl/` and the deltic conformance
+legs; stock Deno, no flags), and Node 24+ for the deltic browser page
+drivers (plain `node`, no engine flag).
 
 ### One-shot dependency setup: `scripts/setup.sh`
 
@@ -174,9 +173,9 @@ It is idempotent, so it is safe to re-run. Assuming a Rust toolchain (via
 It adds the `wasm32-unknown-unknown` and `wasm32-wasip2` Rust targets; installs
 `wasm-tools`, `just`, `cargo-nextest`, `wac`, and `wasmtime` (each skipped if
 already on `PATH`; versions pinned via `*_VERSION` variables); installs the
-netns-lab tools (iproute2, nftables, coturn; skip with `SKIP_NETNS_LAB=1`); and runs
-`npm install` in `jco-impl` and `conformance/driver-ct/jco`. Set `SKIP_NODE=1` to
-skip the Node dependencies when you only need the Rust/Wasmtime path. It does
+netns-lab tools (iproute2, nftables, coturn; skip with `SKIP_NETNS_LAB=1`).
+The deltic legs' runtime dependencies are not installed here: their just
+recipes materialize the pinned module graph and npm trees on first run. It does
 **not** install the Shadow network simulator (see below). CI is kept in sync by
 calling this same script rather than duplicating the install steps.
 
@@ -194,13 +193,11 @@ missing when the lab runs.
 # Guest component (produces examples/echo-demo/build/echo-demo.component.wasm):
 just examples::build-component
 
-# Node (browser-first) host:
-just examples::demo-node
-
-# Browser host test (headless Chrome 137+; the same webrtc.js + component as the
-# Node host, run through a real browser — this is the CI check for the browser
-# path). Requires a Chrome/Chromium binary (auto-detected, or set CHROME_PATH):
-just examples::test-browser
+# deltic (runtime-linked JS) host — the conformance legs are the maintained
+# entry points (stock Deno; headless Chromium for the browser leg, which is
+# also the CI check for the browser path; set CHROME_PATH to override):
+just conformance::run-deltic
+just conformance::run-deltic-browser
 
 # Wasmtime (native) host (defaults: 1000 messages of 4096 bytes):
 just examples::demo-wasmtime          # or: just examples::demo-wasmtime 1000 4096
@@ -217,12 +214,12 @@ just examples::test-webrtc-composed
 just test
 
 # Cross-implementation conformance suite: builds the two suite
-# components, runs every loopback target (wasmtime, composed, jco-node,
-# jco-browser, deltic-deno) and every interop direction (every
+# components, runs every loopback target (wasmtime, composed,
+# deltic-deno, deltic-browser) and every interop direction (every
 # implementation against the non-wasm reference peer in both orders, the
 # reference self-pair, and the direct implementation pairs), aggregates
 # against the committed lockfiles + manifests, and diffs the committed
-# matrices. Needs Node 24+, Deno 2.x, and a Chrome 137+ binary:
+# matrices. Needs Node 24+, Deno 2.x, and a Chrome/Chromium binary:
 just conformance
 
 # Conformance netns lab (real non-loopback candidate paths via network
@@ -271,16 +268,12 @@ in doubt about whether a recipe's scope is touched, run it.
 | `just examples::build-component` | the `echo-demo` guest or its WIT. |
 | `just examples::test-webrtc-composed` | the `wasip3-impl` provider component, the `webrtc-consumer`, or the `connections` WIT (composes them with `wac plug` and runs the round trip under `wasmtime`). |
 | `just examples::test-echo-remote-composed` | the `echo-remote` guest, `rendezvous-http`, the `wasip3-impl` provider, or the `rendezvous`/`remote` WIT (composes the fully in-guest peer and connects two `wasmtime run` processes over a signaling server). |
-| `just examples::transpile` | anything affecting the component's interfaces, or the `jco transpile` flags / `--map` targets in `jco-impl`. |
-| `just examples::test-browser` | the browser host (`jco-impl`, e.g. `webrtc.js`) or the component it runs. |
 | `just deltic-check` | the deltic host module (`deltic-impl/`) or the deltic conformance leg's TS (`conformance/driver-ct/deltic/`): type-checks both and runs the `deltic-impl` unit tests. Behavior changes also need `just conformance` (the `deltic-deno` target). |
 | `just conformance` | any host/guest behavior the suite asserts — the WIT surface, a host implementation, the suite bodies, the driver, or the manifests (CI runs it in `.github/workflows/conformance.yml`). Intentional case changes also need `just conformance::lock-update`; intentional behavior changes, `just conformance::matrix-update` — commit the diffs. |
 | `just check` | broad Rust/WIT changes — the quick gate for most commits. |
-| `just ci` | anything broad — reproduces CI locally: the rust checks, the browser host test, and the full conformance suite; the Shadow lab runs separately (`just gha::shadow-lab`, needs the shadow binary). |
+| `just ci` | anything broad — reproduces CI locally: the rust checks and the full conformance suite; the Shadow lab runs separately (`just gha::shadow-lab`, needs the shadow binary). |
 
-`just examples::transpile` and `just examples::test-browser` depend on
-`just examples::build-component`, so running either rebuilds the component
-first. Keep the implementations producing
+Keep the implementations producing
 the same result — the conformance suite is what asserts it.
 
 ### Awaiting PR checks
@@ -325,7 +318,7 @@ omitted.
 WIT tooling makes no semantic distinction between `//` and `///`: every
 comment attached to an item lands in the parsed `docs` (adjacent `//`/`///`
 runs are merged, and even a comment separated from the item by a blank line
-still attaches), and `wit-bindgen`, `bindgen!`, and jco all render those docs
+still attaches), and `wit-bindgen`, `bindgen!`, and the JS toolchains all render those docs
 into generated bindings. So there is no maintainer-only comment position in a
 `.wit` file — write every sentence in one as if it will appear in a
 consumer's rendered documentation, because it will. Interface contracts and
@@ -341,7 +334,7 @@ documented at its use site):
 | Variable | Read by | Effect |
 | --- | --- | --- |
 | `WEBRTC_UDP_BIND_ADDR` | `wasip3-impl` provider | IP address the in-guest `peer-connection` binds its UDP socket to (and derives its host candidate from); default IPv4 loopback. An unparsable value constructs dead connections (methods fail `closed`; the cause is printed to stderr). |
-| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations, but only the `wasip3-impl` guest reads it directly (the env var is its only channel); the host libraries read no ambient state — the Wasmtime hosts (demo binaries, conformance adapter) wire the variable through `WebrtcCtx`, and the jco Node demo runners wire it through `webrtc.js`'s exported `setMaxInboundBufferBytes` hook (browser embedders call the hook directly; there is no `globalThis` channel) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. |
+| `WEBRTC_MAX_INBOUND_BUFFER_BYTES` | all three implementations, but only the `wasip3-impl` guest reads it directly (the env var is its only channel); the host libraries read no ambient state — the Wasmtime hosts (demo binaries, conformance adapter) wire the variable through `WebrtcCtx`, and the deltic children wire it through `deltic-impl`'s exported `setMaxInboundBufferBytes` hook (embedders call the hook directly; there is no `globalThis` channel) | Overrides the 8 MiB inbound buffer bound; primarily a test knob (the conformance overflow probe shrinks it). Set-but-invalid values fail loud. |
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
 | `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `rtc-ct-driver` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated wasmtime-kind peers. |
 | `RTC_CT_ROLE`, `RTC_CT_SIGNALING_URL`, `RTC_CT_RUN_ID` | the conformance suites (via the store environment) | The pair-instance channel: which half this instance drives, the mailbox base URL, and the room-derivation seed. Set by `rtc-ct-driver` on the children it spawns; never set by hand. |
@@ -352,8 +345,8 @@ documented at its use site):
 Every env var is an undeclared API each deployer must discover, and this
 table is its only registry — so add no new implementation-level env var
 without first considering the proper channel: `WebrtcCtx` on the Wasmtime
-host, an exported configure hook for the jco module (`jco --map` gives no
-instantiation-time config channel), or the WIT surface itself (as
+host, an exported configure hook for the deltic host module (a module-level
+knob captured at channel creation), or the WIT surface itself (as
 `peer-connection-config` demonstrates for in-guest configuration).
 `WEBRTC_UDP_BIND_ADDR` is environment-shaped on purpose: the bind address is
 deployment topology, owned by whoever runs the process, not by the guest —
@@ -372,8 +365,8 @@ exist:
 
 - the Wasmtime demo host implements it natively (the `echo-remote` binary in
   `examples/wasmtime-demo`; `just examples::demo-remote`),
-- the jco host implements it over `fetch` (`jco-impl/rendezvous.js`;
-  `just examples::demo-node-remote`), and
+- the conformance deltic children implement the same mailbox protocol over
+  `fetch` (`conformance/driver-ct/deltic/signaling.ts`), and
 - [`examples/rendezvous-http`](examples/rendezvous-http) is a **component**
   implementing it over in-guest `wasi:http@0.3`, composable under the guest so
   a plain `wasmtime run -S http` provisions it (the fully in-guest path below).

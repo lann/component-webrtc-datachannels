@@ -22,16 +22,13 @@ pub enum PeerKind {
         composed: bool,
         suite_artifact: Option<PathBuf>,
     },
-    /// A Node script (the jco legs): emits the same JSONL contract.
-    Node {
-        script: PathBuf,
-        browser: bool,
-        args: Vec<String>,
-    },
+    /// A Node script (the deltic browser leg: the page driver runs under
+    /// Node, no engine flag): emits the same JSONL contract.
+    Node { script: PathBuf, args: Vec<String> },
     /// A Deno script (the deltic leg): stock Deno — no engine flag — with
     /// the script directory's own `deno.json`/`deno.lock` governing its
     /// module graph; emits the same JSONL contract.
-    Deno { script: PathBuf },
+    Deno { script: PathBuf, args: Vec<String> },
     /// The native libwebrtc reference peer: one process per case,
     /// verdicts synthesized into the stream by this orchestrator.
     Reference { bin: PathBuf },
@@ -102,18 +99,11 @@ pub fn child_stream(
             }
             run_capture(cmd, &format!("{}[{}]", "self-exec", role.unwrap_or("solo")))?
         }
-        PeerKind::Node {
-            script,
-            browser,
-            args,
-        } => {
+        PeerKind::Node { script, args } => {
             let script = script
                 .canonicalize()
                 .with_context(|| format!("resolving script {}", script.display()))?;
             let mut cmd = Command::new("node");
-            if !browser {
-                cmd.arg("--experimental-wasm-jspi");
-            }
             cmd.arg(&script).arg("--select").arg(select).args(args);
             cmd.env("RTC_CT_SIGNALING_URL", &ctx.signaling_url)
                 .env("RTC_CT_RUN_ID", &ctx.run_id)
@@ -127,7 +117,7 @@ pub fn child_stream(
             cmd.current_dir(script.parent().context("script has no parent dir")?);
             run_capture(cmd, &format!("node[{}]", role.unwrap_or("solo")))?
         }
-        PeerKind::Deno { script } => {
+        PeerKind::Deno { script, args } => {
             let script = script
                 .canonicalize()
                 .with_context(|| format!("resolving script {}", script.display()))?;
@@ -140,7 +130,8 @@ pub fn child_stream(
                 .arg(dir.join("deno.json"))
                 .arg(&script)
                 .arg("--select")
-                .arg(select);
+                .arg(select)
+                .args(args);
             cmd.env("RTC_CT_SIGNALING_URL", &ctx.signaling_url)
                 .env("RTC_CT_RUN_ID", &ctx.run_id)
                 .env(

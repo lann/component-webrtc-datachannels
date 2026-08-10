@@ -6,9 +6,9 @@ Component Model's async features** (`stream`, `future`, async imports/exports),
 with a *single* guest component binary running unchanged against very
 different stacks:
 
-- a **browser-first** host (Node.js + [`jco`] + [`node-datachannel`]),
 - a **native Rust** host ([Wasmtime] + [`webrtc-rs`]),
-- a **runtime-linked** host ([`deltic`] under stock Deno + `node-datachannel` —
+- a **runtime-linked JS** host ([`deltic`] on stock Deno — and inside a real
+  browser — backed by [`node-datachannel`] or the native `RTCPeerConnection`;
   no transpile step, no engine flag), and
 - an **in-guest** component ([`wasip3-impl`](wasip3-impl)) that runs the whole
   sans-I/O WebRTC stack inside wasm over `wasi:sockets`.
@@ -17,7 +17,6 @@ All of them run the identical component and round-trip every message through a
 genuine WebRTC/SCTP data channel; the [conformance suite](conformance) asserts
 they behave compatibly.
 
-[`jco`]: https://github.com/bytecodealliance/jco
 [`node-datachannel`]: https://github.com/murat-dogan/node-datachannel
 [Wasmtime]: https://github.com/bytecodealliance/wasmtime
 [`webrtc-rs`]: https://github.com/webrtc-rs/webrtc
@@ -30,13 +29,12 @@ they behave compatibly.
 | [`wit/`](wit) | The streaming **WIT interface**, the `polymorph:webrtc-datachannels@0.1.0` package. Each demo component keeps its own demo-only WIT and symlinks this package in as a dependency. |
 | [`examples/echo-demo`](examples/echo-demo) | A **Rust example component** exercising a data channel one message at a time. |
 | [`wasmtime-impl`](wasmtime-impl) | The **Wasmtime host crate** (webrtc-rs), modeled after `wasmtime_wasi_http::p3`. Provides `add_to_linker` + `WebrtcView` for the `types` interface and the `data-channel` resource of `connections` (the `peer-connection` resource is unimplemented). Crate name: `wasmtime-webrtc-datachannels`. |
-| [`jco-impl`](jco-impl) | The **browser-first host** (Node stand-in for the browser, jco + node-datachannel). |
-| [`deltic-impl`](deltic-impl) | The **runtime-linked host module** ([deltic](https://github.com/lann/deltic) under stock Deno, node-datachannel-backed): `jco-impl/webrtc.js` ported to deltic's embedder conventions, upstreamed from deltic's `ports/webrtc`. |
+| [`deltic-impl`](deltic-impl) | The **runtime-linked JS host module** ([deltic](https://github.com/lann/deltic) on stock Deno or in the browser, node-datachannel/RTCPeerConnection-backed): the browser-first reference host (`jco-impl/webrtc.js`, retired with the jco legs — see git history) ported to deltic's embedder conventions, upstreamed from deltic's `ports/webrtc`. |
 | [`examples/wasmtime-demo`](examples/wasmtime-demo) | The **native Rust host** (Wasmtime + webrtc-rs): demo binaries built on `wasmtime-impl`. |
 | [`examples/cli-signaling`](examples/cli-signaling) | The **manual-signaling CLI guest component** (Rust), driving `connections.peer-connection` with guest-side vanilla ICE. |
 | [`examples/webrtc-consumer`](examples/webrtc-consumer) | A **minimal consumer component** that imports `connections`. Composed (`wac plug`) with `wasip3-impl` for the in-guest round-trip integration test (`just examples::test-webrtc-composed`). |
 | [`wasip3-impl`](wasip3-impl) | The **third implementation**: a wasm **component** (built for `wasm32-wasip2`) that runs the sans-I/O `rtc` 0.21 WebRTC stack *in-guest* — importing only `wasi:sockets`/`wasi:clocks` — and **exports** `polymorph:webrtc-datachannels/connections`. Its `SansIoPeer` core is driven over `wasi:sockets` UDP and WASI timers by an in-guest runtime pump. Composable via `wac plug`. Crate name: `wasip3-webrtc-datachannels`. |
-| [`conformance/`](conformance) | The **cross-implementation conformance suite**, on the [`polymorph:test`](https://github.com/polymorph-components/polymorph-test) harness: two suite components (full and pair-only) run against every target (wasmtime, the composed wasip3 stack, jco under Node and headless Chrome, deltic under stock Deno), an interop matrix pairing every implementation with a non-wasm reference peer (Google's libwebrtc via LiveKit's Rust bindings), a netns lab, and a Shadow lab. `just conformance`; see [`conformance/README.md`](conformance/README.md). |
+| [`conformance/`](conformance) | The **cross-implementation conformance suite**, on the [`polymorph:test`](https://github.com/polymorph-components/polymorph-test) harness: two suite components (full and pair-only) run against every target (wasmtime, the composed wasip3 stack, deltic under stock Deno and inside headless Chromium), an interop matrix pairing every implementation with a non-wasm reference peer (Google's libwebrtc via LiveKit's Rust bindings), a netns lab, and a Shadow lab. `just conformance`; see [`conformance/README.md`](conformance/README.md). |
 | [`AGENTS.md`](AGENTS.md) | Orientation for agents/contributors, linking the `lann/wasm-component-starter` knowledge base. |
 
 ## The interface
@@ -125,34 +123,24 @@ world webrtc-echo-demo {
 ## Running it
 
 Prerequisites: Rust (with the `wasm32-unknown-unknown` target),
-[`wasm-tools`], Node 24+ (for the Node host). The Node host needs JSPI, which
-Node exposes on 24+ behind `--experimental-wasm-jspi`.
+[`wasm-tools`], Deno 2.x (the deltic host), and Node 24+ (the deltic
+browser drivers — plain `node`, no engine flag).
 
 [`wasm-tools`]: https://github.com/bytecodealliance/wasm-tools
 
-### Node (browser-first) host
+### deltic (runtime-linked JS) host
+
+The conformance legs are the maintained entry points — the component is
+runtime-linked at load time, so there is nothing to transpile or stage:
 
 ```sh
-cd jco-impl
-npm install
-just examples::build-component   # build the guest .wasm component (cargo + wasm-tools)
-npm run transpile                # jco transpile with JSPI async + host maps
-npm start
+just conformance::run-deltic           # the full suite under stock Deno
+just conformance::run-deltic-browser   # the same suite inside headless Chromium
 ```
 
-The host builds two `RTCPeerConnection`s with `node-datachannel`, performs a real
-SDP/ICE handshake, and echoes on the far side.
-
-The same `webrtc.js` host module runs unchanged in a real browser: it resolves
-`RTCPeerConnection` from the browser global when present and falls back to
-`node-datachannel` under Node. A headless-Chrome test drives the *identical*
-transpiled component through that browser path and is what runs in CI:
-
-```sh
-cd jco-impl
-just examples::build-component && npm run transpile
-npm run test:browser     # headless Chrome (137+); set CHROME_PATH to override
-```
+The host module (`deltic-impl/src/webrtc.ts`) is environment-portable: it
+resolves `RTCPeerConnection` from the browser global when present and falls
+back to `node-datachannel` under Deno.
 
 ### Wasmtime (native Rust) host
 

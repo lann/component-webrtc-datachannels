@@ -20,13 +20,12 @@ composed := "target/wasm32-wasip2/release/composed/conformance_guest_ct.wasm"
 composed_pair := "target/wasm32-wasip2/release/composed/conformance_guest_pair_ct.wasm"
 results := "conformance/driver-ct/results"
 ct_cli := "target/ct-tools/bin/component-test"
-jco := "conformance/driver-ct/jco"
 deltic := "conformance/driver-ct/deltic"
 
 # The full conformance run: every loopback target, every interop
 # direction, both aggregates, and the committed-matrix gates.
 [doc("Run the loopback + interop conformance suites and gate the matrices")]
-all: build lock-check run-wasmtime run-composed run-jco-node run-jco-browser run-deltic run-deltic-browser run-interop aggregate matrix-check
+all: build lock-check run-wasmtime run-composed run-deltic run-deltic-browser run-interop aggregate matrix-check
 
 # ---------------------------------------------------------------------------
 # Builders.
@@ -58,11 +57,7 @@ build-composed: build-suites
         --plug target/wasm32-wasip2/release/conformance_wasip3_mailbox.wasm \
         -o {{composed_pair}}
 
-# Transpile both suites for the jco legs (Node + browser).
-transpile: build-suites
-    cd {{jco}} && npm run transpile && npm run transpile-pair
-
-build: build-suites build-driver build-composed transpile
+build: build-suites build-driver build-composed
 
 # The component-test CLI, installed --locked from the same git rev
 # Cargo.lock pins for the library crates (the lock is the single source
@@ -83,7 +78,6 @@ _ct-tools:
         printf '%s' "$rev" > target/ct-tools/.rev
     fi
     {{ct_cli}} pins --cargo-lock Cargo.lock \
-        --js-lock {{jco}}/package-lock.json \
         --js-lock {{deltic}}/package-lock.json --expect "$rev" > /dev/null
 
 # The committed lockfiles are the corpus inventories; drift fails here
@@ -114,16 +108,6 @@ run-composed: _results-dir
         --target composed --kind composed --artifact {{composed}} \
         -o {{results}}/composed.jsonl
 
-run-jco-node: _results-dir
-    timeout {{timeout}} {{driver}} loopback {{suite}} \
-        --target jco-node --kind jco-node --script {{jco}}/run.mjs \
-        -o {{results}}/jco-node.jsonl
-
-run-jco-browser: _results-dir
-    timeout {{timeout}} {{driver}} loopback {{suite}} \
-        --target jco-browser --kind jco-browser --script {{jco}}/run-browser.mjs \
-        -o {{results}}/jco-browser.jsonl
-
 # The deltic leg's dependencies: Deno materializes the pinned module
 # graph and the node-datachannel native addon (whose install script needs
 # an explicit grant) into the leg's node_modules. Idempotent.
@@ -151,11 +135,11 @@ _deltic-browser-prepared:
         npm ci --no-audit --no-fund
     fi
 
-# The suite runtime-linked inside headless Chromium against the deltic
-# host module (deltic-impl over the browser's native RTCPeerConnection):
-# the run happens in the page (RTCPeerConnection is Window-only), served
-# as one deno-bundled module — no transpile step, no generated tree.
-run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared
+# The deltic browser leg's runtime inputs: the pinned translator +
+# embedder assets and the one deno-bundled page module (engine + host
+# module + page loop) the static server serves. Shared by the loopback
+# leg and the interop directions.
+_deltic-browser-bundle:
     #!/usr/bin/env bash
     set -euo pipefail
     deno run --config {{deltic}}/deno.json --frozen \
@@ -165,6 +149,12 @@ run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared
     mkdir -p target/deltic-browser
     (cd {{deltic}}/browser && deno bundle --config deno.json --platform browser \
         -o ../../../../target/deltic-browser/webrtc-page.mjs page-entry.ts)
+
+# The suite runtime-linked inside headless Chromium against the deltic
+# host module (deltic-impl over the browser's native RTCPeerConnection):
+# the run happens in the page (RTCPeerConnection is Window-only), served
+# as one deno-bundled module — no transpile step, no generated tree.
+run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared _deltic-browser-bundle
     timeout {{timeout}} {{driver}} loopback {{suite}} \
         --target deltic-browser --kind deltic-browser --script {{deltic}}/run-browser.mjs \
         -o {{results}}/deltic-browser.jsonl
@@ -175,17 +165,26 @@ run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared
 # direct implementation pairs).
 # ---------------------------------------------------------------------------
 
-interop_directions := "wasmtime-x-reference reference-x-wasmtime jco-node-x-reference reference-x-jco-node jco-browser-x-reference reference-x-jco-browser wasip3-guest-x-reference reference-x-wasip3-guest wasmtime-x-jco-node jco-node-x-wasmtime wasmtime-x-wasip3-guest wasip3-guest-x-wasmtime"
+interop_directions := "wasmtime-x-reference reference-x-wasmtime deltic-deno-x-reference reference-x-deltic-deno deltic-browser-x-reference reference-x-deltic-browser wasip3-guest-x-reference reference-x-wasip3-guest wasmtime-x-deltic-deno deltic-deno-x-wasmtime wasmtime-x-wasip3-guest wasip3-guest-x-wasmtime"
 
-run-interop: _results-dir
+# The deltic children join interop directions the same way they run
+# loopback: the Deno child reads the pair suite off the filesystem (and
+# the translator from DELTIC_TRANSLATOR), the browser child fetches both
+# from its static server (prepared by _deltic-browser-bundle).
+run-interop: _results-dir deltic-deps _deltic-browser-prepared _deltic-browser-bundle
     #!/usr/bin/env bash
     set -euo pipefail
+    shim=$(deno run --config {{deltic}}/deno.json --frozen \
+        --allow-read=. --allow-write=target/deltic \
+        --allow-net=github.com,objects.githubusercontent.com,release-assets.githubusercontent.com \
+        {{deltic}}/fetch-translator.ts)
+    export DELTIC_TRANSLATOR="$shim"
     code=0
     for d in {{interop_directions}}; do
         echo "== interop $d =="
         timeout {{timeout}} {{driver}} interop {{pair_suite}} --direction "$d" \
             --composed-pair {{composed_pair}} \
-            --node-script {{jco}}/run.mjs --browser-script {{jco}}/run-browser.mjs \
+            --deno-script {{deltic}}/run.ts --browser-script {{deltic}}/run-browser.mjs \
             -o {{results}}/"$d".jsonl || code=1
     done
     echo "== interop reference (self-pair) =="
@@ -209,8 +208,6 @@ aggregate: _ct-tools
         --manifest conformance/driver-ct/targets.toml \
         --results wasmtime={{results}}/wasmtime.jsonl \
         --results composed={{results}}/composed.jsonl \
-        --results jco-node={{results}}/jco-node.jsonl \
-        --results jco-browser={{results}}/jco-browser.jsonl \
         --results deltic-deno={{results}}/deltic-deno.jsonl \
         --results deltic-browser={{results}}/deltic-browser.jsonl \
         -o {{results}}/matrix.md

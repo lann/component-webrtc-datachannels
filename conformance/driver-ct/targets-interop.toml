@@ -10,10 +10,10 @@ version = "0.1"
 
 [targets.wasmtime-x-reference]
 [targets.reference-x-wasmtime]
-[targets.jco-node-x-reference]
-[targets.reference-x-jco-node]
-[targets.jco-browser-x-reference]
-[targets.reference-x-jco-browser]
+[targets.deltic-deno-x-reference]
+[targets.reference-x-deltic-deno]
+[targets.deltic-browser-x-reference]
+[targets.reference-x-deltic-browser]
 
 [targets.wasip3-guest-x-reference]
 
@@ -35,7 +35,7 @@ tracking = "https://github.com/polymorph-components/polymorph-webrtc-datachannel
 # wire-level anchor row.
 [targets.reference]
 
-[targets.wasmtime-x-jco-node]
-[targets.jco-node-x-wasmtime]
+[targets.wasmtime-x-deltic-deno]
+[targets.deltic-deno-x-wasmtime]
 [targets.wasmtime-x-wasip3-guest]
 [targets.wasip3-guest-x-wasmtime]

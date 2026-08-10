@@ -6,9 +6,5 @@ node_modules/
 
 # Build artifacts
 build/
-jco-impl/generated/
-jco-impl/generated-remote/
-conformance/driver-ct/jco/generated/
-conformance/driver-ct/jco/generated-pair/
 conformance/driver-ct/results/
 /target-linux/

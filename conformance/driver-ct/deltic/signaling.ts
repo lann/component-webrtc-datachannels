@@ -1,7 +1,7 @@
 // The `conformance:signaling/mailbox` host for the deltic conformance leg: a
 // `fetch`-based client for the suite-owned HTTP mailbox served by
 // `conformance-signalingd` (see `conformance/signaling/PROTOCOL.md`). The
-// deltic analogue of `../jco/signaling.js` — same endpoints, same long-poll
+// deltic analogue of the retired jco `signaling.js` (see git history) — same endpoints, same long-poll
 // discipline; only the boundary conventions differ (`throw new
 // WitError({ tag, val })` rather than a bare `{ tag, val }` payload, per
 // deltic's contracts/embedder-api.md §"Error model").

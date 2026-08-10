@@ -9,8 +9,8 @@
 // module — RTCPeerConnection is Window-only, so no Web Worker pool, and
 // the bundle needs no import map). This file is the frame: the
 // signaling reverse-proxy, the role environment, target configuration,
-// and the stdout contract — the deltic sibling of ../jco/run-browser.mjs
-// exactly as ./run.ts is of ../jco/run.mjs.
+// and the stdout contract — the browser sibling of ./run.ts (the retired
+// jco legs carried the same sibling split; see git history).
 //
 // deltic is a runtime linker: no transpile step, no generated tree, no
 // engine flag (the callback ABI runs on stock Chromium).
