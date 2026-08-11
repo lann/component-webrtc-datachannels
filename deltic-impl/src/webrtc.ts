@@ -140,6 +140,34 @@ const CONNECT_TIMEOUT_MS = 20_000;
  */
 const CLOSE_DRAIN_MS = 1_000;
 
+/**
+ * How long a REMOTE close/error may wait for already-delivered messages to
+ * dispatch before readers observe the end, re-armed by each late arrival
+ * (a quiesce window, the receive-side sibling of CLOSE_DRAIN_MS). Chromium
+ * can dispatch an RTCDataChannel `close` event ahead of `message` events
+ * for data that arrived on the wire first (dispatch inversion, observed
+ * under CPU starvation in the conformance browser leg — issue #154):
+ * rejecting waiters inside the close task then fails `receive()` with
+ * `closed` while the payload sits one task behind, which breaks the WIT
+ * contract's drop-implies-close ordering (messages sent before the implied
+ * close must still arrive). Under the starvation that triggers the
+ * inversion the late message task can itself lag far behind the close
+ * task, so the window is generous; a quiet channel just reports `closed`
+ * this much later. Local paths are NOT deferred: `close()` latches
+ * `#localClosed` synchronously (the WIT contract's "observed locally at
+ * once") and overflow signals through `overflowed` immediately.
+ */
+const REMOTE_END_DRAIN_MS = 1_000;
+
+/**
+ * How long a channel `close()` (or drop) waits for payload already handed
+ * to the transport to flush before the SCTP reset is issued — the
+ * channel-level sibling of CLOSE_DRAIN_MS. The close is still observed
+ * locally at once (the WIT contract): sends after `close()` fail `closed`
+ * synchronously; only the wire-level teardown waits for the send queue.
+ */
+const CHANNEL_CLOSE_DRAIN_MS = 1_000;
+
 /** The default bound on buffered inbound payload bytes awaiting `receive`. */
 const DEFAULT_MAX_INBOUND_BUFFERED = 8 * 1024 * 1024;
 
@@ -287,6 +315,7 @@ function incomingQueue(channel: {
   let closed = false;
 
   const push = (message: Message, size: number) => {
+    if (endTimer !== undefined && !closed) armEnd(); // late arrival: re-arm the quiesce window
     const waiter = waiters.shift();
     if (waiter) {
       waiter.resolve(message);
@@ -314,10 +343,24 @@ function incomingQueue(channel: {
 
   const endError = (): WebrtcError =>
     overflowed ? { tag: "receive-buffer-overflow" } : { tag: "closed" };
+  let endTimer: ReturnType<typeof setTimeout> | undefined;
+  const armEnd = () => {
+    if (endTimer !== undefined) clearTimeout(endTimer);
+    endTimer = setTimeout(() => {
+      if (closed) return;
+      closed = true;
+      while (waiters.length) waiters.shift()!.reject(endError());
+    }, REMOTE_END_DRAIN_MS);
+  };
   const end = () => {
-    if (closed) return;
-    closed = true;
-    while (waiters.length) waiters.shift()!.reject(endError());
+    // Deferred, not immediate: the `close` event can be dispatched ahead of
+    // `message` events whose data arrived first (see REMOTE_END_DRAIN_MS).
+    // Within the window, late messages resolve parked waiters in arrival
+    // order via `push` (each one re-arming the window); `next()` keeps
+    // draining the backlog after `closed` flips, so nothing already
+    // delivered is ever dropped.
+    if (closed || endTimer !== undefined) return;
+    armEnd();
   };
   channel.addEventListener("close", end);
   channel.addEventListener("error", end);
@@ -344,6 +387,7 @@ function incomingQueue(channel: {
     },
     /** Discard the unread backlog; fail pending and future reads `closed`. */
     discard(): void {
+      if (endTimer !== undefined) clearTimeout(endTimer);
       messages.length = 0;
       buffered = 0;
       closed = true;
@@ -504,10 +548,45 @@ export class DataChannel {
     if (this.#localClosed) return;
     this.#localClosed = true;
     this.#incoming.discard();
-    try {
-      this.#channel.close();
-    } catch {
-      // Already closed.
+    const channel = this.#channel;
+    const finish = () => {
+      try {
+        channel.close();
+      } catch {
+        // Already closed.
+      }
+    };
+    // Flush before the reset: Chromium can DISCARD payload still in the
+    // SCTP send queue when `RTCDataChannel.close()` is called (observed as
+    // issue #154 — an 8-byte probe buffered at close never reached the
+    // peer), even though the WHATWG closing procedure says queued data is
+    // sent first. The close stays observed locally at once (`#localClosed`
+    // above, per the WIT contract); only the transport-level reset waits,
+    // bounded, for the queue to drain — the channel-level sibling of
+    // CLOSE_DRAIN_MS. `bufferedamountlow` with threshold 0 fires when the
+    // queue empties; the timer covers backends without the event (and
+    // queues that never drain).
+    if (channel.bufferedAmount > 0 && channel.readyState === "open") {
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        finish();
+      }, CHANNEL_CLOSE_DRAIN_MS);
+      const onDrain = () => {
+        if (channel.bufferedAmount > 0 || done) return;
+        done = true;
+        clearTimeout(timer);
+        finish();
+      };
+      try {
+        channel.bufferedAmountLowThreshold = 0;
+        channel.addEventListener("bufferedamountlow", onDrain);
+      } catch {
+        // No bufferedamountlow on this backend: the timer bound covers it.
+      }
+    } else {
+      finish();
     }
     for (const poke of this.#statePokes) poke();
   }
