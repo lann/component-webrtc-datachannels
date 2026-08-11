@@ -346,6 +346,127 @@ Deno.test("loopback: wait-connected resolves and is latched", NO_SANITIZE, async
   }
 });
 
+// The browser leg's dispatch-inversion regression (issue #154): Chromium
+// can dispatch an RTCDataChannel `close` event AHEAD of `message` events
+// for data that arrived on the wire first. The WIT contract's
+// drop-implies-close ordering requires the payload to win: a parked
+// `receive()` must still resolve with the late-dispatched message, and
+// only the NEXT receive reports `closed`. Deterministic here: a fake
+// channel dispatches the events in the inverted order on purpose (no
+// timing, no browser).
+Deno.test("remote close dispatched before a delivered message: payload still wins", NO_SANITIZE, async () => {
+  const listeners = new Map<string, ((e: unknown) => void)[]>();
+  const fake = {
+    label: "inversion-probe",
+    binaryType: "",
+    readyState: "open",
+    bufferedAmount: 0,
+    addEventListener(type: string, fn: (e: unknown) => void) {
+      let fns = listeners.get(type);
+      if (!fns) listeners.set(type, fns = []);
+      fns.push(fn);
+    },
+    send(_: unknown) {},
+    close() {},
+  };
+  const fire = (type: string, event: unknown = {}) => {
+    for (const fn of listeners.get(type) ?? []) fn(event);
+  };
+
+  const dc = new DataChannel(fake);
+  const parked = dc.receive(); // waiter parked before any event
+  fire("close"); // the inversion: close dispatched first...
+  fire("message", { data: new Uint8Array([7, 7, 7, 7, 7, 7, 7, 7]).buffer }); // ...payload one task behind
+
+  const got = await parked;
+  assertEquals(got, {
+    tag: "binary",
+    val: new Uint8Array([7, 7, 7, 7, 7, 7, 7, 7]),
+  } as Message);
+
+  // After the drain window the implied close reaches readers as `closed`.
+  const err = await assertRejects(() => dc.receive(), WitError);
+  assertEquals((err.payload as WebrtcError).tag, "closed");
+});
+
+// The sender half of issue #154: Chromium can DISCARD payload still in the
+// SCTP send queue when `RTCDataChannel.close()` is called, so the port's
+// `close()` (and drop) must hold the wire-level reset until the queue
+// drains, while the close is still observed locally at once. Deterministic
+// against a fake channel that reports a non-empty send buffer.
+Deno.test("close with buffered payload defers the reset until the queue drains", NO_SANITIZE, async () => {
+  const listeners = new Map<string, ((e: unknown) => void)[]>();
+  let nativeCloseCalls = 0;
+  const fake = {
+    label: "flush-probe",
+    binaryType: "",
+    readyState: "open",
+    bufferedAmount: 8,
+    bufferedAmountLowThreshold: -1,
+    addEventListener(type: string, fn: (e: unknown) => void) {
+      let fns = listeners.get(type);
+      if (!fns) listeners.set(type, fns = []);
+      fns.push(fn);
+    },
+    send(_: unknown) {},
+    close() {
+      nativeCloseCalls++;
+    },
+  };
+  const fire = (type: string, event: unknown = {}) => {
+    for (const fn of listeners.get(type) ?? []) fn(event);
+  };
+
+  const dc = new DataChannel(fake);
+  dc.close();
+  // Locally the close is immediate (WIT contract)...
+  await assertRejects(
+    () => dc.send({ tag: "binary", val: new Uint8Array([1]) }),
+    WitError,
+  );
+  // ...but the wire-level reset waits for the transport queue.
+  assertEquals(nativeCloseCalls, 0);
+  assertEquals(fake.bufferedAmountLowThreshold, 0);
+
+  fake.bufferedAmount = 0;
+  fire("bufferedamountlow");
+  assertEquals(nativeCloseCalls, 1);
+
+  // Idempotent: a second close (e.g. the drop after an explicit close)
+  // does not re-arm anything.
+  dc.close();
+  assertEquals(nativeCloseCalls, 1);
+});
+
+Deno.test("close with a stuck send queue still resets after the drain bound", NO_SANITIZE, async () => {
+  const listeners = new Map<string, ((e: unknown) => void)[]>();
+  let nativeCloseCalls = 0;
+  const fake = {
+    label: "stuck-probe",
+    binaryType: "",
+    readyState: "open",
+    bufferedAmount: 8, // never drains
+    bufferedAmountLowThreshold: -1,
+    addEventListener(type: string, fn: (e: unknown) => void) {
+      let fns = listeners.get(type);
+      if (!fns) listeners.set(type, fns = []);
+      fns.push(fn);
+    },
+    send(_: unknown) {},
+    close() {
+      nativeCloseCalls++;
+    },
+  };
+
+  const dc = new DataChannel(fake);
+  dc.close();
+  assertEquals(nativeCloseCalls, 0);
+  // The 1s drain bound (CHANNEL_CLOSE_DRAIN_MS) fires even though the
+  // queue never empties.
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+  assertEquals(nativeCloseCalls, 1);
+});
+
 // Run node-datachannel's cleanup once, after every test has finished, per
 // the probe's discipline (probe.mjs:74/89-90) — it tears down the shared
 // native ICE/DTLS/SCTP worker context so the process can exit. This must be
