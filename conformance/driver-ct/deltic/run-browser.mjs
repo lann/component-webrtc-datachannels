@@ -26,11 +26,11 @@ import {
 
 const DELTIC_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DELTIC_DIR, "..", "..", "..");
-// Must agree with fetch-translator.ts's TAG (the translator is served
-// from its cache directory) and the justfile's bundle output path.
-const TAG = "pre-10cc776";
+// The bundle + translator asset live in a version-free directory: the
+// deno.lock files own the deltic version now (no tag to keep in sync
+// here; see justfile's `_deltic-browser-bundle` recipe).
 const PAGE_URL = "/target/deltic-browser/webrtc-page.mjs";
-const TRANSLATOR_URL = `/target/deltic/${TAG}/deltic-translator-shim.wasm`;
+const TRANSLATOR_URL = "/target/deltic-browser/deltic-translator-shim.wasm";
 const MAX_INBOUND_BUFFER_BYTES = 512 * 1024;
 // The single-attempt wall bound per case, matching the wasmtime leg.
 const CASE_TIMEOUT_MS = 90_000;
@@ -80,7 +80,7 @@ async function proxy(req, res, signalingBase) {
 async function main() {
   for (const [what, rel] of [
     ["bundled page (run `just conformance::run-deltic-browser`)", PAGE_URL],
-    ["translator asset (run fetch-translator.ts)", TRANSLATOR_URL],
+    ["translator asset (run `just conformance::run-deltic-browser`)", TRANSLATOR_URL],
     ["suite component (run `just conformance::build-suites`)", values.suite],
   ]) {
     try {

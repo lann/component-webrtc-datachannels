@@ -12,8 +12,8 @@
 // driver's signaling server and forwards this page's `__report`ed lines
 // to stdout for the driver's fold.
 
-import { runSuite, wasiShims } from "@deltic/release-bundle-entry";
-import { Translator } from "@deltic/release-bundle-entry";
+import { runSuite, wasiShims } from "./browser-bundle-entry.ts";
+import { Translator } from "./browser-bundle-entry.ts";
 import { setMaxInboundBufferBytes, webrtcImports } from "../../../../deltic-impl/src/webrtc.ts";
 import { mailboxImports } from "../signaling.ts";
 

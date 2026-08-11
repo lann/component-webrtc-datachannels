@@ -51,7 +51,7 @@ deltic-impl/                           # deltic-native host module (stock Deno,
                                        #   runtime-linked; node-datachannel-backed):
                                        #   deltic's ports/webrtc reference-host port,
                                        #   upstreamed per lann/deltic#14; pinned to a
-                                       #   deltic release by URL import maps (see
+                                       #   deltic prerelease via JSR import maps (see
                                        #   deltic-impl/README.md)
 wasip3-impl/                           # wasm COMPONENT on `rtc` 0.21: runs the
                                        #   sans-I/O stack in-guest (SansIoPeer core
@@ -338,7 +338,6 @@ documented at its use site):
 | `WEBRTC_INCLUDE_LOOPBACK` | the `wasmtime-demo` binaries | Enables loopback ICE candidates so same-host peers can pair. |
 | `CONFORMANCE_SHADOW_SYSCALL_SHIM` | `rtc-ct-driver` | Arms the Shadow syscall shim; set only by the Shadow executor on simulated wasmtime-kind peers. |
 | `RTC_CT_ROLE`, `RTC_CT_SIGNALING_URL`, `RTC_CT_RUN_ID` | the conformance suites (via the store environment) | The pair-instance channel: which half this instance drives, the mailbox base URL, and the room-derivation seed. Set by `rtc-ct-driver` on the children it spawns; never set by hand. |
-| `DELTIC_TRANSLATOR` | the deltic conformance child (`conformance/driver-ct/deltic/run.ts`) | Path to the deltic translator-shim wasm. Exported by the `conformance::run-deltic` recipe (which fetches the sha256-pinned release asset via `fetch-translator.ts`) and inherited through the driver by the deltic children it spawns. |
 | `CHROME_PATH` / `CHROME_BIN` / `PUPPETEER_EXECUTABLE_PATH` | the browser test and browser conformance adapter | Chrome/Chromium binary override (first set one wins; else auto-detected). |
 | `SKIP_NODE`, `SKIP_NETNS_LAB` | `scripts/setup.sh` | Skip the npm installs / the netns-lab tooling install. |
 

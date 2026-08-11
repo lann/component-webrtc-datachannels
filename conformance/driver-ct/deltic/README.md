@@ -26,37 +26,47 @@ just conformance::run-deltic
 ```
 
 which installs the leg's pinned module graph + the `node-datachannel`
-addon (`just conformance::deltic-deps`, idempotent), fetches (and
-caches) the pinned translator-shim release asset, and runs the loopback
-leg through the driver, writing
-`conformance/driver-ct/results/deltic-deno.jsonl`.
+addon (`just conformance::deltic-deps`, idempotent) and runs the
+loopback leg through the driver, writing
+`conformance/driver-ct/results/deltic-deno.jsonl`. The translator shim
+comes from the pinned `@deltic/translator` JSR package through the
+module graph — no fetch step, no network.
 
 ## The pin
 
-deltic is pinned to a release tag in **three** places, cross-checked at
-run time by `fetch-translator.ts`:
+deltic ships as exact-pinned JSR prereleases (one per green upstream
+commit; the hash in the version names the commit — see the [deltic
+README's "Consuming the unstable
+prereleases"](https://github.com/lann/deltic#readme)). The version is
+pinned in **three** places, cross-checked by `just deltic-check`'s pin
+gate (`../../../scripts/check-deltic-pin.sh`):
 
-- `deno.json` (this directory) — import-map URLs
-  (`raw.githubusercontent.com/lann/deltic/<tag>/…`) for `@deltic/ct-runner`,
-  `@deltic/runtime/embedder`, `@deltic/runtime/shim`, `@deltic/wasi-shims`.
-  `deno.lock` carries integrity hashes for that module graph, enforced
-  with `--frozen`.
+- `deno.json` (this directory) — import-map versions
+  (`jsr:@deltic/<pkg>@<version>`) for `@deltic/ct-runner`,
+  `@deltic/runtime/embedder`, `@deltic/runtime/shim`,
+  `@deltic/wasi-shims`, `@deltic/translator`. `deno.lock` carries
+  integrity hashes for that module graph, enforced with `--frozen`.
 - [`../../../deltic-impl/deno.json`](../../../deltic-impl/deno.json) —
-  the SAME `@deltic/runtime/embedder` URL (the module-identity
+  the SAME `@deltic/runtime/embedder` version (the module-identity
   constraint: deltic's `wasi-shims` imports that specifier by bare name
   internally, so every config resolving it must agree, or the embedder
-  module loads twice and `instanceof WitError` stops holding across the
-  boundary).
-- `fetch-translator.ts` — `TAG` + `TRANSLATOR_SHA256` for the
-  `deltic-translator-shim.wasm` release asset (cached under
-  `target/deltic/<tag>/`).
+  module loads twice and `instanceof WitError` stops holding across
+  the boundary).
+- [`browser/deno.json`](browser/deno.json) — the SAME pins again, with
+  the npm WebRTC backends stubbed out (never executed in a page).
 
-To bump: update the tag in all three files (this `deno.json`,
-`deltic-impl/deno.json`, and `fetch-translator.ts`) and the sha256 from
-the release's `SHA256SUMS`, delete BOTH `deno.lock` files (this
-directory and `deltic-impl/`), re-run
-`deno install --allow-scripts=npm:node-datachannel` here and in
-`deltic-impl/` to regenerate them, then re-run
-`just conformance::run-deltic` and commit the diff (including the
-regenerated `matrix.md`, via `just conformance::matrix-update`, if
-behavior changed).
+Each `deno.json` also carries a
+`"minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@deltic/*"] }`
+stanza: the JSR prereleases are typically published well under 24h
+before consumption, and without the exclude the default supply-chain
+age gate blocks resolution.
+
+To bump: update the version in all three `deno.json` files, delete all
+three `deno.lock` files (this directory, `browser/`, and
+`deltic-impl/`), re-run
+`deno install --frozen --allow-scripts=npm:node-datachannel` in this
+directory and in `deltic-impl/`, and `deno install` in `browser/`, to
+regenerate the locks (`just deltic-check` also does the first two
+installs). Then re-run `just conformance::run-deltic` and commit the
+diff (including the regenerated `matrix.md`, via
+`just conformance::matrix-update`, if behavior changed).
