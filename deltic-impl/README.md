@@ -38,12 +38,14 @@ a subset of the protocol surface; the conformance suite
 
 ## Module identity
 
-`deno.json` pins `@deltic/runtime/embedder` to a release URL that MUST
-stay byte-identical with the one in
-[`conformance/driver-ct/deltic/deno.json`](../conformance/driver-ct/deltic/deno.json):
-deltic's `wasi-shims` imports that specifier by bare name internally, so
-two divergent mappings load the embedder module twice and
-`instanceof WitError` stops holding across the module boundary. The
-bump procedure lives in
+`deno.json` pins `@deltic/runtime/embedder` to an exact-pinned
+`jsr:@deltic/runtime@<version>/embedder` specifier that MUST stay
+byte-identical with the one in
+[`conformance/driver-ct/deltic/deno.json`](../conformance/driver-ct/deltic/deno.json)
+(and its `browser/deno.json`): deltic's `wasi-shims` imports that
+specifier by bare name internally, so two divergent mappings load the
+embedder module twice and `instanceof WitError` stops holding across
+the module boundary. The bump procedure lives in
 [`conformance/driver-ct/deltic/README.md`](../conformance/driver-ct/deltic/README.md);
-`fetch-translator.ts` cross-checks both configs at run time.
+`just deltic-check` asserts all three configs agree on one version
+(the pin gate, `scripts/check-deltic-pin.sh`).

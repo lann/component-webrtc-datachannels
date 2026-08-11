@@ -13,18 +13,21 @@
 // flag; the WIT contract's async exports run on the callback ABI under
 // stock Deno.
 //
-// The translator shim arrives through `DELTIC_TRANSLATOR` (or
-// `--translator`); the `conformance::run-deltic` justfile recipe fetches the
-// sha256-pinned release asset with `fetch-translator.ts` and exports the
-// path, so the driver's child spawn needs no deltic-specific arguments.
+// The translator shim comes packaged with `@deltic/translator` (the SAME
+// pinned commit as the rest of the deltic graph); `defaultTranslator()`
+// loads it through the module graph, permission-free. `--translator
+// <path>` remains as an optional override (a documented interface for
+// swapping in a locally built shim), but is no longer required to run.
 //
 // MODULE-IDENTITY CONSTRAINT: deltic's wasi-shims module imports
 // `@deltic/runtime/embedder` by bare specifier internally; this leg's
-// `deno.json` AND `deltic-impl/deno.json` must map that specifier to the
-// IDENTICAL pinned URL, or the embedder module loads twice and
-// `instanceof WitError` stops holding across the module boundary.
+// `deno.json` AND `deltic-impl/deno.json` (AND `browser/deno.json`) must
+// map that specifier to the IDENTICAL pinned JSR version, or the embedder
+// module loads twice and `instanceof WitError` stops holding across the
+// module boundary.
 
 import { Translator } from "@deltic/runtime/shim";
+import { defaultTranslator } from "@deltic/translator";
 import type { ComponentArtifacts } from "@deltic/runtime/embedder";
 import { runSuite } from "@deltic/ct-runner";
 import { wasiShims } from "@deltic/wasi-shims";
@@ -95,10 +98,12 @@ function parseArgs(argv: string[]): Cli {
 }
 
 async function loadArtifacts(
-  translatorPath: string,
+  translatorPath: string | undefined,
   suitePath: string,
 ): Promise<ComponentArtifacts> {
-  const translator = await Translator.create(await Deno.readFile(translatorPath));
+  const translator = translatorPath
+    ? await Translator.create(await Deno.readFile(translatorPath))
+    : await defaultTranslator();
   const componentBytes = await Deno.readFile(suitePath);
   const { plan, adapters } = translator.translate(componentBytes);
   return { plan, componentBytes, adapters };
@@ -118,16 +123,6 @@ function emitLine(line: string): void {
 async function main() {
   const cli = parseArgs(Deno.args);
 
-  const translatorPath = cli.translator ?? Deno.env.get("DELTIC_TRANSLATOR");
-  if (!translatorPath) {
-    throw new Error(
-      "no translator shim: pass --translator <path> or set DELTIC_TRANSLATOR; " +
-        "the pinned release asset is fetched by " +
-        "conformance/driver-ct/deltic/fetch-translator.ts " +
-        "(the conformance::run-deltic recipe does both).",
-    );
-  }
-
   setMaxInboundBufferBytes(MAX_INBOUND_BUFFER_BYTES);
 
   // The suite's store environment: the buffer bound always, the pair-run
@@ -144,7 +139,7 @@ async function main() {
     Deno.env.get("RTC_CT_CASE_TIMEOUT_SECS") ?? DEFAULT_CASE_TIMEOUT_SECS,
   );
 
-  const artifacts = await loadArtifacts(translatorPath, cli.suite);
+  const artifacts = await loadArtifacts(cli.translator, cli.suite);
   const imports = {
     ...wasiShims({ cli: { env, passthrough: false } }),
     ...webrtcImports(),

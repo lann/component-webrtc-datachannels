@@ -115,13 +115,7 @@ deltic-deps:
     cd {{deltic}} && deno install --frozen --allow-scripts=npm:node-datachannel
 
 run-deltic: _results-dir deltic-deps
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shim=$(deno run --config {{deltic}}/deno.json --frozen \
-        --allow-read=. --allow-write=target/deltic \
-        --allow-net=github.com,objects.githubusercontent.com,release-assets.githubusercontent.com \
-        {{deltic}}/fetch-translator.ts)
-    DELTIC_TRANSLATOR="$shim" timeout {{timeout}} {{driver}} loopback {{suite}} \
+    timeout {{timeout}} {{driver}} loopback {{suite}} \
         --target deltic-deno --kind deltic-deno --script {{deltic}}/run.ts \
         -o {{results}}/deltic-deno.jsonl
 
@@ -138,16 +132,20 @@ _deltic-browser-prepared:
 # The deltic browser leg's runtime inputs: the pinned translator +
 # embedder assets and the one deno-bundled page module (engine + host
 # module + page loop) the static server serves. Shared by the loopback
-# leg and the interop directions.
+# leg and the interop directions. The translator wasm is extracted from
+# the lock-pinned module cache (no network, no sha bookkeeping — JSR
+# package integrity is in the lock); see scripts/extract-deltic-translator.py.
 _deltic-browser-bundle:
     #!/usr/bin/env bash
     set -euo pipefail
-    deno run --config {{deltic}}/deno.json --frozen \
-        --allow-read=. --allow-write=target/deltic \
-        --allow-net=github.com,objects.githubusercontent.com,release-assets.githubusercontent.com \
-        {{deltic}}/fetch-translator.ts >/dev/null
     mkdir -p target/deltic-browser
-    (cd {{deltic}}/browser && deno bundle --config deno.json --platform browser \
+    deno info --json --config {{deltic}}/deno.json --frozen @deltic/translator \
+        > target/deltic-browser/.deltic-info.json
+    pin=$(grep -o 'jsr:@deltic/runtime@[^/"]*' {{deltic}}/deno.json | head -1 | sed 's/.*@//')
+    python3 scripts/extract-deltic-translator.py \
+        target/deltic-browser/.deltic-info.json \
+        target/deltic-browser/deltic-translator-shim.wasm "$pin"
+    (cd {{deltic}}/browser && deno bundle --config deno.json --frozen --platform browser \
         -o ../../../../target/deltic-browser/webrtc-page.mjs page-entry.ts)
 
 # The suite runtime-linked inside headless Chromium against the deltic
@@ -168,17 +166,13 @@ run-deltic-browser: _results-dir deltic-deps _deltic-browser-prepared _deltic-br
 interop_directions := "wasmtime-x-reference reference-x-wasmtime deltic-deno-x-reference reference-x-deltic-deno deltic-browser-x-reference reference-x-deltic-browser wasip3-guest-x-reference reference-x-wasip3-guest wasmtime-x-deltic-deno deltic-deno-x-wasmtime wasmtime-x-wasip3-guest wasip3-guest-x-wasmtime"
 
 # The deltic children join interop directions the same way they run
-# loopback: the Deno child reads the pair suite off the filesystem (and
-# the translator from DELTIC_TRANSLATOR), the browser child fetches both
-# from its static server (prepared by _deltic-browser-bundle).
+# loopback: the Deno child obtains the translator through the module
+# graph (@deltic/translator's packaged wasm), the browser child fetches
+# both bundle + translator from its static server (prepared by
+# _deltic-browser-bundle).
 run-interop: _results-dir deltic-deps _deltic-browser-prepared _deltic-browser-bundle
     #!/usr/bin/env bash
     set -euo pipefail
-    shim=$(deno run --config {{deltic}}/deno.json --frozen \
-        --allow-read=. --allow-write=target/deltic \
-        --allow-net=github.com,objects.githubusercontent.com,release-assets.githubusercontent.com \
-        {{deltic}}/fetch-translator.ts)
-    export DELTIC_TRANSLATOR="$shim"
     code=0
     for d in {{interop_directions}}; do
         echo "== interop $d =="
