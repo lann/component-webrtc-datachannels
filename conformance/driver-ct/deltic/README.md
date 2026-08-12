@@ -50,7 +50,7 @@ gate (`../../../scripts/check-deltic-pin.sh`):
   the SAME `@deltic/runtime/embedder` version (the module-identity
   constraint: deltic's `wasi-shims` imports that specifier by bare name
   internally, so every config resolving it must agree, or the embedder
-  module loads twice and `instanceof WitError` stops holding across
+  module loads twice and `instanceof ComponentException` stops holding across
   the boundary).
 - [`browser/deno.json`](browser/deno.json) — the SAME pins again, with
   the npm WebRTC backends stubbed out (never executed in a page).

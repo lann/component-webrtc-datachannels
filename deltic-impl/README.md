@@ -5,7 +5,7 @@ port of the browser-first reference host `jco-impl/webrtc.js` **at
 commit 65bc15b** (retired with the jco legs;
 `git show 65bc15b:jco-impl/webrtc.js`): the same
 behavioral reference host, rewritten over deltic's embedder API (typed
-`Stream<T>` / `ReadableStream` rather than jco streams, and `WitError`
+`Stream<T>` / `ReadableStream` rather than jco streams, and `ComponentException`
 throws rather than `throw { tag, val }`). It was developed as deltic's
 own `ports/webrtc` reference-host port and is upstreamed here per
 [lann/deltic#14](https://github.com/lann/deltic/issues/14); the WIT
@@ -44,7 +44,7 @@ byte-identical with the one in
 [`conformance/driver-ct/deltic/deno.json`](../conformance/driver-ct/deltic/deno.json)
 (and its `browser/deno.json`): deltic's `wasi-shims` imports that
 specifier by bare name internally, so two divergent mappings load the
-embedder module twice and `instanceof WitError` stops holding across
+embedder module twice and `instanceof ComponentException` stops holding across
 the module boundary. The bump procedure lives in
 [`conformance/driver-ct/deltic/README.md`](../conformance/driver-ct/deltic/README.md);
 `just deltic-check` asserts all three configs agree on one version

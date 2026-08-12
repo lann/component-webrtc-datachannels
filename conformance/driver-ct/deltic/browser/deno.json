@@ -2,10 +2,10 @@
   "//": "The browser-bundle import map: identical deltic pins to ../deno.json, with the npm WebRTC backends mapped to ./stub.ts (never executed in a page; see stub.ts). deltic ships as exact-pinned JSR prereleases; the pin gate (`just deltic-check`) asserts one version repo-wide.",
   "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@deltic/*"] },
   "imports": {
-    "@deltic/ct-runner": "jsr:@deltic/ct-runner@0.1.0-pre.ga67ee83",
-    "@deltic/runtime/embedder": "jsr:@deltic/runtime@0.1.0-pre.ga67ee83/embedder",
-    "@deltic/runtime/shim": "jsr:@deltic/runtime@0.1.0-pre.ga67ee83/shim",
-    "@deltic/wasi-shims": "jsr:@deltic/wasi-shims@0.1.0-pre.ga67ee83",
+    "@deltic/ct-runner": "jsr:@deltic/ct-runner@0.1.0-pre.g078aa15",
+    "@deltic/runtime/embedder": "jsr:@deltic/runtime@0.1.0-pre.g078aa15/embedder",
+    "@deltic/runtime/shim": "jsr:@deltic/runtime@0.1.0-pre.g078aa15/shim",
+    "@deltic/wasi-shims": "jsr:@deltic/wasi-shims@0.1.0-pre.g078aa15",
     "node-datachannel": "./stub.ts",
     "node-datachannel/polyfill": "./stub.ts",
     "werift": "./stub.ts"
