@@ -21,7 +21,7 @@ import {
   resetMaxInboundBufferBytes,
   setMaxInboundBufferBytes,
 } from "../src/webrtc.ts";
-import { WitError } from "@deltic/runtime/embedder";
+import { ComponentException } from "@deltic/runtime/embedder";
 import type { IceCandidate, Message, WebrtcError } from "../src/types.ts";
 
 const NO_SANITIZE = { sanitizeResources: false, sanitizeOps: false };
@@ -96,13 +96,13 @@ Deno.test("loopback: text echo both directions", NO_SANITIZE, async () => {
     const chA = a.createDataChannel(options);
     const chB = await firstIncoming(b);
 
-    await chA.send({ tag: "string", val: "hello from a" });
+    await chA.send({ kind: "string", value: "hello from a" });
     const gotAtB = await chB.receive();
-    assertEquals(gotAtB, { tag: "string", val: "hello from a" });
+    assertEquals(gotAtB, { kind: "string", value: "hello from a" });
 
-    await chB.send({ tag: "string", val: "hello from b" });
+    await chB.send({ kind: "string", value: "hello from b" });
     const gotAtA = await chA.receive();
-    assertEquals(gotAtA, { tag: "string", val: "hello from b" });
+    assertEquals(gotAtA, { kind: "string", value: "hello from b" });
   } finally {
     a.close();
     b.close();
@@ -117,13 +117,13 @@ Deno.test("loopback: binary echo + message-boundary preservation", NO_SANITIZE, 
 
     const msg1 = new Uint8Array([1, 2, 3]);
     const msg2 = new Uint8Array([4, 5]);
-    await chA.send({ tag: "binary", val: msg1 });
-    await chA.send({ tag: "binary", val: msg2 });
+    await chA.send({ kind: "binary", value: msg1 });
+    await chA.send({ kind: "binary", value: msg2 });
 
     const got1 = await chB.receive();
     const got2 = await chB.receive();
-    assertEquals(got1, { tag: "binary", val: msg1 });
-    assertEquals(got2, { tag: "binary", val: msg2 });
+    assertEquals(got1, { kind: "binary", value: msg1 });
+    assertEquals(got2, { kind: "binary", value: msg2 });
   } finally {
     a.close();
     b.close();
@@ -141,8 +141,8 @@ Deno.test("loopback: unordered/maxRetransmits options accepted", NO_SANITIZE, as
 
     const chA = a.createDataChannel(options);
     const chB = await firstIncoming(b);
-    await chA.send({ tag: "string", val: "unordered ok" });
-    assertEquals(await chB.receive(), { tag: "string", val: "unordered ok" });
+    await chA.send({ kind: "string", value: "unordered ok" });
+    assertEquals(await chB.receive(), { kind: "string", value: "unordered ok" });
   } finally {
     a.close();
     b.close();
@@ -162,21 +162,21 @@ Deno.test("loopback: receive-via-stream consumes a burst", NO_SANITIZE, async ()
         const bytes = await collectU8(sm.data as unknown as AsyncIterable<Uint8Array>);
         received.push(
           sm.kind === "string"
-            ? { tag: "string", val: new TextDecoder().decode(bytes) }
-            : { tag: "binary", val: bytes },
+            ? { kind: "string", value: new TextDecoder().decode(bytes) }
+            : { kind: "binary", value: bytes },
         );
         if (received.length === 3) return;
       }
     })();
 
     for (let i = 0; i < 3; i++) {
-      await chA.send({ tag: "string", val: `msg-${i}` });
+      await chA.send({ kind: "string", value: `msg-${i}` });
     }
     await streamDone;
     assertEquals(received, [
-      { tag: "string", val: "msg-0" },
-      { tag: "string", val: "msg-1" },
-      { tag: "string", val: "msg-2" },
+      { kind: "string", value: "msg-0" },
+      { kind: "string", value: "msg-1" },
+      { kind: "string", value: "msg-2" },
     ]);
   } finally {
     a.close();
@@ -208,8 +208,8 @@ Deno.test("loopback: single-use violation -> receiving-via-stream error", NO_SAN
     void chA; // keep `a`'s channel referenced for symmetry/documentation
 
     chB.receiveViaStream();
-    const err = await assertRejects(() => chB.receive(), WitError);
-    assertEquals((err as WitError<WebrtcError>).payload, { tag: "receiving-via-stream" });
+    const err = await assertRejects(() => chB.receive(), ComponentException);
+    assertEquals((err as ComponentException<WebrtcError>).payload, { kind: "receiving-via-stream" });
 
     // A second `receiveViaStream` call after the first also violates the
     // once-only rule (thrown synchronously, per the WIT contract).
@@ -219,8 +219,8 @@ Deno.test("loopback: single-use violation -> receiving-via-stream error", NO_SAN
     } catch (e) {
       threw = e;
     }
-    assert(threw instanceof WitError);
-    assertEquals((threw as WitError<WebrtcError>).payload, { tag: "receiving-via-stream" });
+    assert(threw instanceof ComponentException);
+    assertEquals((threw as ComponentException<WebrtcError>).payload, { kind: "receiving-via-stream" });
   } finally {
     a.close();
     b.close();
@@ -240,7 +240,7 @@ Deno.test("loopback: inbound-buffer overflow -> overflow-close semantics", NO_SA
       // and the overflow-close fires on the sender or receiver's channel.
       for (let i = 0; i < 20; i++) {
         try {
-          await chA.send({ tag: "string", val: `0123456789-${i}` });
+          await chA.send({ kind: "string", value: `0123456789-${i}` });
         } catch {
           break; // sender side observed the close once b's channel closed.
         }
@@ -256,9 +256,9 @@ Deno.test("loopback: inbound-buffer overflow -> overflow-close semantics", NO_SA
         try {
           await chB.receive();
         } catch (e) {
-          assert(e instanceof WitError);
-          assertEquals((e as WitError<WebrtcError>).payload, {
-            tag: "receive-buffer-overflow",
+          assert(e instanceof ComponentException);
+          assertEquals((e as ComponentException<WebrtcError>).payload, {
+            kind: "receive-buffer-overflow",
           });
           overflowed = true;
           break;
@@ -280,8 +280,8 @@ Deno.test("loopback: close propagation + post-close error cases", NO_SANITIZE, a
   const chB = await firstIncoming(b);
 
   chA.close();
-  const err = await assertRejects(() => chA.send({ tag: "string", val: "x" }), WitError);
-  assertEquals((err as WitError<WebrtcError>).payload, { tag: "closed" });
+  const err = await assertRejects(() => chA.send({ kind: "string", value: "x" }), ComponentException);
+  assertEquals((err as ComponentException<WebrtcError>).payload, { kind: "closed" });
 
   // The peer observes the remote close too (eventually `receive` fails).
   let sawClosed = false;
@@ -289,7 +289,7 @@ Deno.test("loopback: close propagation + post-close error cases", NO_SANITIZE, a
     try {
       await chB.receive();
     } catch (e) {
-      assert(e instanceof WitError);
+      assert(e instanceof ComponentException);
       sawClosed = true;
       break;
     }
@@ -298,8 +298,8 @@ Deno.test("loopback: close propagation + post-close error cases", NO_SANITIZE, a
 
   a.close();
   b.close();
-  const connErr = await assertRejects(() => a.createOffer(), WitError);
-  assertEquals((connErr as WitError<WebrtcError>).payload, { tag: "closed" });
+  const connErr = await assertRejects(() => a.createOffer(), ComponentException);
+  assertEquals((connErr as ComponentException<WebrtcError>).payload, { kind: "closed" });
 });
 
 Deno.test(
@@ -317,17 +317,17 @@ Deno.test(
     // the backend transitions the native readyState.
     a.close();
     const errA = await assertRejects(
-      () => chA.send({ tag: "string", val: "after-close" }),
-      WitError,
+      () => chA.send({ kind: "string", value: "after-close" }),
+      ComponentException,
     );
-    assertEquals((errA as WitError<WebrtcError>).payload, { tag: "closed" });
+    assertEquals((errA as ComponentException<WebrtcError>).payload, { kind: "closed" });
 
     b.close();
     const errB = await assertRejects(
-      () => chB.send({ tag: "string", val: "after-close" }),
-      WitError,
+      () => chB.send({ kind: "string", value: "after-close" }),
+      ComponentException,
     );
-    assertEquals((errB as WitError<WebrtcError>).payload, { tag: "closed" });
+    assertEquals((errB as ComponentException<WebrtcError>).payload, { kind: "closed" });
   },
 );
 
@@ -380,13 +380,13 @@ Deno.test("remote close dispatched before a delivered message: payload still win
 
   const got = await parked;
   assertEquals(got, {
-    tag: "binary",
-    val: new Uint8Array([7, 7, 7, 7, 7, 7, 7, 7]),
+    kind: "binary",
+    value: new Uint8Array([7, 7, 7, 7, 7, 7, 7, 7]),
   } as Message);
 
   // After the drain window the implied close reaches readers as `closed`.
-  const err = await assertRejects(() => dc.receive(), WitError);
-  assertEquals((err.payload as WebrtcError).tag, "closed");
+  const err = await assertRejects(() => dc.receive(), ComponentException);
+  assertEquals((err.payload as WebrtcError).kind, "closed");
 });
 
 // The sender half of issue #154: Chromium can DISCARD payload still in the
@@ -421,8 +421,8 @@ Deno.test("close with buffered payload defers the reset until the queue drains",
   dc.close();
   // Locally the close is immediate (WIT contract)...
   await assertRejects(
-    () => dc.send({ tag: "binary", val: new Uint8Array([1]) }),
-    WitError,
+    () => dc.send({ kind: "binary", value: new Uint8Array([1]) }),
+    ComponentException,
   );
   // ...but the wire-level reset waits for the transport queue.
   assertEquals(nativeCloseCalls, 0);
