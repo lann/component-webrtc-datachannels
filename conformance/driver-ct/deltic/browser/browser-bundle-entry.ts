@@ -9,5 +9,5 @@
 export * from "@deltic/runtime/embedder";
 export { Translator } from "@deltic/runtime/shim";
 export * from "@deltic/ct-runner";
-export { wasiShims } from "@deltic/wasi-shims";
-export type { WasiShims, WasiShimsOptions } from "@deltic/wasi-shims";
+export { wasi } from "@deltic/wasi";
+export type { WasiImports, WasiOptions } from "@deltic/wasi";

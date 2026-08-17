@@ -58,7 +58,7 @@ webrtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4
 # Cargo.toml --package-json conformance/driver-ct/deltic/package.json
 # --workflow .github/workflows/conformance.yml`, then the follow-ups
 # it prints.
-component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "aca1008344f754db1c2b88da05cb5999333f8d6a" }
-component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "aca1008344f754db1c2b88da05cb5999333f8d6a" }
-component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "aca1008344f754db1c2b88da05cb5999333f8d6a" }
-component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "aca1008344f754db1c2b88da05cb5999333f8d6a" }
+component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "b4444a25a22106ad4128549bdc9e579552e62210" }
+component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "b4444a25a22106ad4128549bdc9e579552e62210" }
+component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "b4444a25a22106ad4128549bdc9e579552e62210" }
+component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "b4444a25a22106ad4128549bdc9e579552e62210" }

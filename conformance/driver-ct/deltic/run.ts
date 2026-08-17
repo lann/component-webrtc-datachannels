@@ -19,7 +19,7 @@
 // <path>` remains as an optional override (a documented interface for
 // swapping in a locally built shim), but is no longer required to run.
 //
-// MODULE-IDENTITY CONSTRAINT: deltic's wasi-shims module imports
+// MODULE-IDENTITY CONSTRAINT: deltic's wasi module imports
 // `@deltic/runtime/embedder` by bare specifier internally; this leg's
 // `deno.json` AND `deltic-impl/deno.json` (AND `browser/deno.json`) must
 // map that specifier to the IDENTICAL pinned JSR version, or the embedder
@@ -30,7 +30,7 @@ import { Translator } from "@deltic/runtime/shim";
 import { defaultTranslator } from "@deltic/translator";
 import type { ComponentArtifacts } from "@deltic/runtime/embedder";
 import { runSuite } from "@deltic/ct-runner";
-import { wasiShims } from "@deltic/wasi-shims";
+import { wasi } from "@deltic/wasi";
 import { setMaxInboundBufferBytes, webrtcImports } from "../../../deltic-impl/src/webrtc.ts";
 import { mailboxImports } from "./signaling.ts";
 
@@ -141,7 +141,7 @@ async function main() {
 
   const artifacts = await loadArtifacts(cli.translator, cli.suite);
   const imports = {
-    ...wasiShims({ cli: { env, passthrough: false } }),
+    ...wasi({ cli: { env, passthrough: false } }),
     ...webrtcImports(),
     ...mailboxImports(),
   };

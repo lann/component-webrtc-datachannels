@@ -1,41 +1,41 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@deltic/ct-runner@0.1.0-pre.ga2f84a5": "0.1.0-pre.ga2f84a5",
+    "jsr:@deltic/ct-runner@0.1.0": "0.1.0",
     "jsr:@deltic/protocol@0.2": "0.2.0",
-    "jsr:@deltic/runtime@0.1.0-pre.ga2f84a5": "0.1.0-pre.ga2f84a5",
-    "jsr:@deltic/runtime@~0.1.0-pre.ga2f84a5": "0.1.0-pre.ga2f84a5",
-    "jsr:@deltic/wasi-shims@0.1.0-pre.ga2f84a5": "0.1.0-pre.ga2f84a5"
+    "jsr:@deltic/runtime@0.1": "0.1.0",
+    "jsr:@deltic/runtime@0.1.0": "0.1.0",
+    "jsr:@deltic/wasi@0.1.0": "0.1.0"
   },
   "jsr": {
-    "@deltic/ct-runner@0.1.0-pre.ga2f84a5": {
-      "integrity": "4695ae5509c99a10ba67e6dfef66b2a567b169f40aa93b3c105f7f7062380e59",
+    "@deltic/ct-runner@0.1.0": {
+      "integrity": "cf642f22675d6733b6d13117cebdd2de95135884d2a1231764a3f7a4e3314982",
       "dependencies": [
-        "jsr:@deltic/runtime@~0.1.0-pre.ga2f84a5"
+        "jsr:@deltic/runtime@0.1"
       ]
     },
     "@deltic/protocol@0.2.0": {
       "integrity": "028be6a3623c5e910598aa7a199209b85e8931ae484ac7f6638d610ddb0e19fa"
     },
-    "@deltic/runtime@0.1.0-pre.ga2f84a5": {
-      "integrity": "c9abb811d0c814c819924e92d57eed5f68b7bad35593edc5dcf3fc656022f4e1",
+    "@deltic/runtime@0.1.0": {
+      "integrity": "8d3f52f1a336a2dd9aed28a5c34fd281612a2f55a1582b159be614dd678593b3",
       "dependencies": [
         "jsr:@deltic/protocol"
       ]
     },
-    "@deltic/wasi-shims@0.1.0-pre.ga2f84a5": {
-      "integrity": "92bb3f82371b1e356734e6d173fa7c38eeadf5f4cdf5c58393d2a3b7287c1b0b",
+    "@deltic/wasi@0.1.0": {
+      "integrity": "c35a19d139d684dafeca8ba200230a3eb1154627c80db298ae1393e3af938d68",
       "dependencies": [
         "jsr:@deltic/protocol",
-        "jsr:@deltic/runtime@~0.1.0-pre.ga2f84a5"
+        "jsr:@deltic/runtime@0.1"
       ]
     }
   },
   "workspace": {
     "dependencies": [
-      "jsr:@deltic/ct-runner@0.1.0-pre.ga2f84a5",
-      "jsr:@deltic/runtime@0.1.0-pre.ga2f84a5",
-      "jsr:@deltic/wasi-shims@0.1.0-pre.ga2f84a5"
+      "jsr:@deltic/ct-runner@0.1.0",
+      "jsr:@deltic/runtime@0.1.0",
+      "jsr:@deltic/wasi@0.1.0"
     ]
   }
 }
