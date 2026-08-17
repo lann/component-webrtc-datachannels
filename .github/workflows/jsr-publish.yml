@@ -1,0 +1,23 @@
+# Publish @polymorph/webrtc-datachannels (deltic-impl) to JSR.
+#
+# Auth is GitHub Actions OIDC: the package's GitHub-repository link on
+# jsr.io authorizes runs from this repository — no tokens. Dispatch
+# after a release whose manifest version is not yet on JSR; JSR rejects
+# duplicate versions, so a re-run is a no-op-by-failure.
+name: jsr-publish
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9.5"
+      - run: deno publish
+        working-directory: deltic-impl

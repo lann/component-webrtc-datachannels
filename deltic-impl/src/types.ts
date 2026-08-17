@@ -23,7 +23,10 @@ export type Message =
   | { kind: "binary"; value: Uint8Array }
   | { kind: "string"; value: string };
 
-export const Message = {
+export const Message: {
+  binary(bytes: Uint8Array): Message;
+  string(text: string): Message;
+} = {
   binary(bytes: Uint8Array): Message {
     return { kind: "binary", value: bytes };
   },
