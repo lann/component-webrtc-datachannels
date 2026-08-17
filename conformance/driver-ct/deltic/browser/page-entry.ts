@@ -12,7 +12,7 @@
 // driver's signaling server and forwards this page's `__report`ed lines
 // to stdout for the driver's fold.
 
-import { runSuite, wasiShims } from "./browser-bundle-entry.ts";
+import { runSuite, wasi } from "./browser-bundle-entry.ts";
 import { Translator } from "./browser-bundle-entry.ts";
 import { setMaxInboundBufferBytes, webrtcImports } from "../../../../deltic-impl/src/webrtc.ts";
 import { mailboxImports } from "../signaling.ts";
@@ -71,7 +71,7 @@ export async function run(config: PageConfig): Promise<void> {
     const { plan, adapters } = translator.translate(suiteBytes);
 
     const imports = {
-      ...wasiShims({ cli: { env, passthrough: false } }),
+      ...wasi({ cli: { env, passthrough: false } }),
       ...webrtcImports(),
       ...mailboxImports(),
     };

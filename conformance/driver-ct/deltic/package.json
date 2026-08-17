@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Node driver for the deltic-browser child of rtc-ct-driver: playwright + the upstream page harness serving the deno-bundled deltic page (deltic-impl over the browser's RTCPeerConnection).",
   "dependencies": {
-    "@polymorph/component-test-js": "github:polymorph-components/polymorph-test#aca1008344f754db1c2b88da05cb5999333f8d6a",
+    "@polymorph/component-test-js": "github:polymorph-components/polymorph-test#b4444a25a22106ad4128549bdc9e579552e62210",
     "playwright-core": "^1.61.1"
   }
 }

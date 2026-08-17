@@ -22,6 +22,14 @@ they behave compatibly.
 [`webrtc-rs`]: https://github.com/webrtc-rs/webrtc
 [`deltic`]: https://github.com/lann/deltic
 
+## Releases
+
+Everything here is **unstable** (0.x), but [releases](../../releases) are
+**caret-honest**: within a minor line they stay backward-compatible, and
+anything breaking bumps the minor. Consumption is pinned at a release's
+commit — cargo git dependencies, vendored WIT, the release-pinned
+deltic/JSR graph — and bumped deliberately.
+
 ## What's here
 
 | Path | Deliverable |
