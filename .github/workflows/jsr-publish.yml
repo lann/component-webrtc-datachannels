@@ -1,4 +1,4 @@
-# Publish @polymorph/webrtc-datachannels-deltic (deltic-impl) to JSR.
+# Publish @polymorph/webrtc-datachannels (deltic-impl) to JSR.
 #
 # Auth is GitHub Actions OIDC: the package's GitHub-repository link on
 # jsr.io authorizes runs from this repository — no tokens. Dispatch
