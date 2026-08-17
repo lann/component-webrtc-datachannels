@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@deltic/protocol@0.2": "0.2.0",
-    "jsr:@deltic/runtime@0.1.0": "0.1.0",
+    "jsr:@deltic/runtime@0.1": "0.1.0",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "npm:node-datachannel@0.32.3": "0.32.3",
@@ -596,7 +596,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@deltic/runtime@0.1.0",
+      "jsr:@deltic/runtime@0.1",
       "npm:node-datachannel@0.32.3",
       "npm:werift@0.22.2"
     ]

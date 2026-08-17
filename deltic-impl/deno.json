@@ -1,15 +1,19 @@
 {
   "name": "@polymorph/webrtc-datachannels-deltic",
-  "version": "0.0.0",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
   "exports": "./src/webrtc.ts",
-  "//": "MODULE-IDENTITY CONSTRAINT: deltic's wasi module imports @deltic/runtime/embedder by bare specifier internally. Every config in this repo (this file AND conformance/driver-ct/deltic/deno.json AND conformance/driver-ct/deltic/browser/deno.json) must map that specifier to the IDENTICAL exact-pinned JSR version, or the embedder module loads twice and `instanceof ComponentException` stops holding across the module boundary. deltic ships as exact-pinned JSR releases (caret-honest upstream; per-commit `<next>-pre.g<hash>` prereleases exist between releases — pin exactly); the lock carries integrity and --frozen enforces it; the pin gate (`just deltic-check`) asserts one version repo-wide.",
+  "//": "MODULE-IDENTITY CONSTRAINT: deltic's wasi module imports @deltic/runtime/embedder by bare specifier internally. Every config in this repo (this file AND conformance/driver-ct/deltic/deno.json AND conformance/driver-ct/deltic/browser/deno.json) must map that specifier to the IDENTICAL exact-pinned JSR version, or the embedder module loads twice and `instanceof ComponentException` stops holding across the module boundary. deltic ships as exact-pinned JSR releases (caret-honest upstream; per-commit `<next>-pre.g<hash>` prereleases exist between releases — the OTHER two configs still pin exactly, since they load the same on-disk deltic module and must resolve identically; this JSR-published package instead depends on a caret range, since published dependency constraints must be ranges — the pin gate (`just deltic-check`) asserts one RESOLVED version across all three repo deno.locks). The lock carries integrity and --frozen enforces it.",
   "nodeModulesDir": "auto",
   "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@deltic/*"] },
   "imports": {
-    "@deltic/runtime/embedder": "jsr:@deltic/runtime@0.1.0/embedder",
+    "@deltic/runtime/embedder": "jsr:@deltic/runtime@^0.1.0/embedder",
     "node-datachannel": "npm:node-datachannel@0.32.3",
     "node-datachannel/polyfill": "npm:node-datachannel@0.32.3/polyfill",
     "werift": "npm:werift@0.22.2"
+  },
+  "publish": {
+    "exclude": ["tests"]
   },
   "tasks": {
     "check": "deno check src tests",
