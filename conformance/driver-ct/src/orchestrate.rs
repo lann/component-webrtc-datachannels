@@ -353,17 +353,34 @@ pub fn merge_target(
         .with_context(|| format!("reading {}", suite_artifact.display()))?;
     let sha = component_test_formats::sha256_hex(&bytes);
     let mut run_errors = Vec::new();
+    // The streams carry disjoint selections (`--select solo/` vs `pair/`)
+    // over one census, and each reports the remainder of the census as
+    // `deselected` (selection policy — runner-policy.md, "Selection is
+    // not capability"). Reassembling the target, a deselected row must
+    // not displace the verdict from the stream selected to run the case:
+    // a case stays deselected only when every stream deselected it.
     let mut results: BTreeMap<String, CaseResult> = BTreeMap::new();
+    let merge =
+        |map: &mut BTreeMap<String, CaseResult>, r: CaseResult| match map.entry(r.case.clone()) {
+            std::collections::btree_map::Entry::Vacant(v) => {
+                v.insert(r);
+            }
+            std::collections::btree_map::Entry::Occupied(mut o) => {
+                if r.status != Status::Deselected || o.get().status == Status::Deselected {
+                    o.insert(r);
+                }
+            }
+        };
     if let Some(doc) = solo {
         run_errors.extend(doc.run_errors.iter().map(|e| format!("solo: {e}")));
         for r in doc.results {
-            results.insert(r.case.clone(), r);
+            merge(&mut results, r);
         }
     }
     let (pair_results, pair_errors) = pair;
     run_errors.extend(pair_errors);
     for r in pair_results {
-        results.insert(r.case.clone(), r);
+        merge(&mut results, r);
     }
     let results: Vec<CaseResult> = results.into_values().collect();
     stream::emit(
