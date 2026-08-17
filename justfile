@@ -33,9 +33,12 @@ check: fmt-check clippy validate-wit test
 # materialize the pinned module graph + the node-datachannel addon.
 # Also asserts the one-version-everywhere pin gate across every deno.json
 # that imports a jsr:@deltic/* package (replaces the retired
-# assertPinConsistency(); see conformance/driver-ct/deltic/README.md).
+# assertPinConsistency(); see conformance/driver-ct/deltic/README.md),
+# and the sibling one-version gate for the JS runner core
+# (@jsr/polymorph__test, from JSR; see scripts/check-runner-js-pin.sh).
 deltic-check:
     ./scripts/check-deltic-pin.sh
+    ./scripts/check-runner-js-pin.sh
     cd deltic-impl && deno install --frozen --allow-scripts=npm:node-datachannel
     cd deltic-impl && deno task check && deno task test
     cd conformance/driver-ct/deltic && deno install --frozen --allow-scripts=npm:node-datachannel
