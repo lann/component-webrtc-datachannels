@@ -65,8 +65,11 @@ build: build-suites build-driver build-composed
 # bootstrap extraction anchors on the crate name, not the repository
 # URL (URLs change on renames): the sdk's [[package]] block in
 # Cargo.lock carries the git source to install from. The pins gate then
-# asserts one rev everywhere — a skewed bump runs the JS harness
-# against a Rust runner from a different rev.
+# asserts one rev everywhere across the Cargo-side crates. The JS
+# runner core arrives from JSR now (@jsr/polymorph__test, version-pinned
+# in the deltic driver's package-lock.json) rather than a git rev, so it
+# has its own one-version gate (scripts/check-deltic-pin.sh's
+# runner-js-pin-check) instead of a --js-lock leg here.
 _ct-tools:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -77,8 +80,7 @@ _ct-tools:
         cargo install --locked --root target/ct-tools --git "$url" --rev "$rev" component-test-cli
         printf '%s' "$rev" > target/ct-tools/.rev
     fi
-    {{ct_cli}} pins --cargo-lock Cargo.lock \
-        --js-lock {{deltic}}/package-lock.json --expect "$rev" > /dev/null
+    {{ct_cli}} pins --cargo-lock Cargo.lock --expect "$rev" > /dev/null
 
 # The committed lockfiles are the corpus inventories; drift fails here
 # and in the runner's own cross-check.

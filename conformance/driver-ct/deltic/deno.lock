@@ -7,6 +7,7 @@
     "jsr:@deltic/runtime@0.1.0": "0.1.0",
     "jsr:@deltic/translator@0.1.0": "0.1.0",
     "jsr:@deltic/wasi@0.1.0": "0.1.0",
+    "npm:@jsr/polymorph__test@0.1.1": "0.1.1",
     "npm:node-datachannel@0.32.3": "0.32.3",
     "npm:playwright-core@^1.61.1": "1.62.1",
     "npm:werift@0.22.2": "0.22.2"
@@ -51,6 +52,10 @@
         "@fidm/asn1",
         "tweetnacl"
       ]
+    },
+    "@jsr/polymorph__test@0.1.1": {
+      "integrity": "sha512-bu0jE52btthChm83f04rQo+twOLszJ/JN7nLGl/5W/66cZb8tQrlZG+Lnd4/XierTlBgy0PpW75bjbqQBY2nDg==",
+      "tarball": "https://npm.jsr.io/~/11/@jsr/polymorph__test/0.1.1.tgz"
     },
     "@leichtgewicht/ip-codec@2.0.5": {
       "integrity": "sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw=="
@@ -622,6 +627,7 @@
     ],
     "packageJson": {
       "dependencies": [
+        "npm:@jsr/polymorph__test@0.1.1",
         "npm:playwright-core@^1.61.1"
       ]
     }

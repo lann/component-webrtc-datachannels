@@ -22,7 +22,7 @@ import { parseArgs } from "node:util";
 import {
   findChrome,
   runPageHarness,
-} from "@polymorph/component-test-js/browser-driver";
+} from "@jsr/polymorph__test/browser-driver";
 
 const DELTIC_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(DELTIC_DIR, "..", "..", "..");
