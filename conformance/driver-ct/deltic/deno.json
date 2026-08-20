@@ -3,11 +3,11 @@
   "nodeModulesDir": "auto",
   "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@deltic/*", "npm:@jsr/*"] },
   "imports": {
-    "@deltic/ct-runner": "jsr:@deltic/ct-runner@0.1.0",
-    "@deltic/runtime/embedder": "jsr:@deltic/runtime@0.1.0/embedder",
-    "@deltic/runtime/shim": "jsr:@deltic/runtime@0.1.0/shim",
-    "@deltic/wasi": "jsr:@deltic/wasi@0.1.0",
-    "@deltic/translator": "jsr:@deltic/translator@0.1.0",
+    "@deltic/ct-runner": "jsr:@deltic/ct-runner@0.2.0",
+    "@deltic/runtime/embedder": "jsr:@deltic/runtime@0.2.0/embedder",
+    "@deltic/runtime/shim": "jsr:@deltic/runtime@0.2.0/shim",
+    "@deltic/wasi": "jsr:@deltic/wasi@0.2.0",
+    "@deltic/translator": "jsr:@deltic/translator@0.2.0",
     "node-datachannel": "npm:node-datachannel@0.32.3",
     "node-datachannel/polyfill": "npm:node-datachannel@0.32.3/polyfill",
     "werift": "npm:werift@0.22.2"
