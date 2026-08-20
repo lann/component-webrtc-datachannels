@@ -2,7 +2,7 @@
   "version": "5",
   "specifiers": {
     "jsr:@deltic/protocol@0.2": "0.2.0",
-    "jsr:@deltic/runtime@0.1": "0.1.0",
+    "jsr:@deltic/runtime@0.2": "0.2.0",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "npm:node-datachannel@0.32.3": "0.32.3",
@@ -12,8 +12,8 @@
     "@deltic/protocol@0.2.0": {
       "integrity": "028be6a3623c5e910598aa7a199209b85e8931ae484ac7f6638d610ddb0e19fa"
     },
-    "@deltic/runtime@0.1.0": {
-      "integrity": "8d3f52f1a336a2dd9aed28a5c34fd281612a2f55a1582b159be614dd678593b3",
+    "@deltic/runtime@0.2.0": {
+      "integrity": "cf8b0bdd9e6bc4488ba78cc91661103bfcbd78f5a5c4ff99132799618a9db4bb",
       "dependencies": [
         "jsr:@deltic/protocol"
       ]
@@ -596,7 +596,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@deltic/runtime@0.1",
+      "jsr:@deltic/runtime@0.2",
       "npm:node-datachannel@0.32.3",
       "npm:werift@0.22.2"
     ]
