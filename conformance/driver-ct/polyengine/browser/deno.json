@@ -1,0 +1,13 @@
+{
+  "//": "The browser-bundle import map: identical polyengine pins to ../deno.json, with the npm WebRTC backends mapped to ./stub.ts (never executed in a page; see stub.ts). polyengine ships as exact-pinned JSR prereleases; the pin gate (`just polyengine-check`) asserts one version repo-wide.",
+  "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@polyengine/*"] },
+  "imports": {
+    "@polyengine/ct-runner": "jsr:@polyengine/ct-runner@0.3.0",
+    "@polyengine/runtime/embedder": "jsr:@polyengine/runtime@0.3.0/embedder",
+    "@polyengine/runtime/shim": "jsr:@polyengine/runtime@0.3.0/shim",
+    "@polyengine/wasi": "jsr:@polyengine/wasi@0.3.0",
+    "node-datachannel": "./stub.ts",
+    "node-datachannel/polyfill": "./stub.ts",
+    "werift": "./stub.ts"
+  }
+}

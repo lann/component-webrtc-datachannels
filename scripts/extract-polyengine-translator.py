@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Extract the deltic translator-shim wasm from a `deno info --json` module
-graph, per the deltic->JSR migration contract: the translator wasm ships
-inside the pinned `@deltic/translator` JSR package, cached on disk by
+"""Extract the polyengine translator-shim wasm from a `deno info --json` module
+graph, per the polyengine->JSR migration contract: the translator wasm ships
+inside the pinned `@polyengine/translator` JSR package, cached on disk by
 `deno info --frozen`. No network, no sha bookkeeping — the deno.lock's
 package integrity already covers the bytes; this script only picks the
-right cached file out and asserts the whole @deltic graph agrees on one
+right cached file out and asserts the whole @polyengine graph agrees on one
 pinned version.
 
 WARNING (verified the hard way): Deno's on-disk
@@ -14,7 +14,7 @@ CORRUPT wasm module (fails to compile: "unexpected section <Code>" /
 "section out of order" near EOF). This script truncates to the byte size
 `deno info` reports and sanity-checks the result.
 
-Usage: extract-deltic-translator.py <deno-info.json> <out.wasm>
+Usage: extract-polyengine-translator.py <deno-info.json> <out.wasm>
 """
 import json
 import os
@@ -26,9 +26,9 @@ def main() -> None:
     with open(info_path) as f:
         graph = json.load(f)
 
-    modules = [m for m in graph["modules"] if "/@deltic/" in m.get("specifier", "")]
+    modules = [m for m in graph["modules"] if "/@polyengine/" in m.get("specifier", "")]
     if not modules:
-        sys.exit(f"{info_path}: no @deltic modules found in graph")
+        sys.exit(f"{info_path}: no @polyengine modules found in graph")
 
     bad = {m["specifier"] for m in modules if expected_pin not in m["specifier"]}
     if bad:

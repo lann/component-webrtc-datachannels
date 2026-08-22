@@ -1,4 +1,4 @@
-// In-process loopback tests for the `deltic-impl` host module: two
+// In-process loopback tests for the `polyengine-impl` host module: two
 // instantiations of the port's `PeerConnection`/`DataChannel` classes wired
 // directly to each other (no signaling server), buffering trickled
 // candidates until the peer has its remote description.
@@ -21,7 +21,7 @@ import {
   resetMaxInboundBufferBytes,
   setMaxInboundBufferBytes,
 } from "../src/webrtc.ts";
-import { ComponentException } from "@deltic/runtime/embedder";
+import { ComponentException } from "@polyengine/runtime/embedder";
 import type { IceCandidate, Message, WebrtcError } from "../src/types.ts";
 
 const NO_SANITIZE = { sanitizeResources: false, sanitizeOps: false };

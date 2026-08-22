@@ -1,4 +1,4 @@
-# Publish @polymorph/webrtc-datachannels (deltic-impl) to JSR.
+# Publish @polymorph/webrtc-datachannels (polyengine-impl) to JSR.
 #
 # Auth is GitHub Actions OIDC: the package's GitHub-repository link on
 # jsr.io authorizes runs from this repository — no tokens. Dispatch
@@ -20,4 +20,4 @@ jobs:
         with:
           deno-version: "2.9.5"
       - run: deno publish
-        working-directory: deltic-impl
+        working-directory: polyengine-impl

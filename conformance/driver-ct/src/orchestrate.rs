@@ -22,10 +22,10 @@ pub enum PeerKind {
         composed: bool,
         suite_artifact: Option<PathBuf>,
     },
-    /// A Node script (the deltic browser leg: the page driver runs under
+    /// A Node script (the polyengine browser leg: the page driver runs under
     /// Node, no engine flag): emits the same JSONL contract.
     Node { script: PathBuf, args: Vec<String> },
-    /// A Deno script (the deltic leg): stock Deno — no engine flag — with
+    /// A Deno script (the polyengine leg): stock Deno — no engine flag — with
     /// the script directory's own `deno.json`/`deno.lock` governing its
     /// module graph; emits the same JSONL contract.
     Deno { script: PathBuf, args: Vec<String> },
