@@ -1,5 +1,5 @@
 // Host module for `polymorph:webrtc-datachannels/connections@0.1.0` under
-// the deltic embedder conventions (contracts/embedder-api.md in the deltic
+// the polyengine embedder conventions (contracts/embedder-api.md in the polyengine
 // repository — every `contracts/embedder-api.md` citation below names that
 // document).
 //
@@ -30,8 +30,8 @@
 //     messages) / `ReadableStream` (produced, e.g. `receive-via-stream`'s
 //     result — one of the natural JS producers the conventions accept where
 //     a `stream<T>` is expected). Imported from
-//     `@deltic/runtime/embedder` (pinned in this package's `deno.json` to
-//     the exact release URL every deltic-facing module in this repository
+//     `@polyengine/runtime/embedder` (pinned in this package's `deno.json` to
+//     the exact release URL every polyengine-facing module in this repository
 //     shares), NOT reimplemented locally: `ComponentException` is a plain branded
 //     class with no `Store` involvement, so a local clone would produce a
 //     second class identity and every `throw` from this port would fail
@@ -44,7 +44,7 @@
 //     per the `data-channel` resource's doc comment), so there is no
 //     guest-facing shape to convert.
 
-import { Stream, type StreamSource, ComponentException } from "@deltic/runtime/embedder";
+import { Stream, type StreamSource, ComponentException } from "@polyengine/runtime/embedder";
 import type {
   ConfigError,
   ConnectionState,
@@ -99,7 +99,7 @@ async function resolveRTCPeerConnection(): Promise<RTCPeerConnectionCtor> {
     throw new Error(
       "no RTCPeerConnection available: not running in a browser and " +
         "node-datachannel could not be loaded (run `deno install " +
-        "--allow-scripts=npm:node-datachannel` in deltic-impl)",
+        "--allow-scripts=npm:node-datachannel` in polyengine-impl)",
       { cause },
     );
   }

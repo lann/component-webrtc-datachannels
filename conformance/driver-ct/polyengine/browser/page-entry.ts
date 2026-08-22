@@ -1,10 +1,10 @@
-// The deltic-browser page: the endpoint of one browser child of
+// The polyengine-browser page: the endpoint of one browser child of
 // rtc-ct-driver — the suite COMPONENT runtime-linked against this repo's
-// deltic host module (deltic-impl over the browser's native
+// polyengine host module (polyengine-impl over the browser's native
 // RTCPeerConnection) and the fetch mailbox, for one selection and (for
 // pair runs) one role. RTCPeerConnection is a Window-only API, so the run
 // happens here in the page; this module is served as ONE deno-bundled
-// file (deltic engine + host module + mailbox in a single graph, so
+// file (polyengine engine + host module + mailbox in a single graph, so
 // exactly one embedder module instance exists) and needs no import map.
 //
 // The page's mailbox fetches are same-origin (`/rooms/*`, `/healthz`);
@@ -14,7 +14,7 @@
 
 import { runSuite, wasi } from "./browser-bundle-entry.ts";
 import { Translator } from "./browser-bundle-entry.ts";
-import { setMaxInboundBufferBytes, webrtcImports } from "../../../../deltic-impl/src/webrtc.ts";
+import { setMaxInboundBufferBytes, webrtcImports } from "../../../../polyengine-impl/src/webrtc.ts";
 import { mailboxImports } from "../signaling.ts";
 
 interface PageConfig {
