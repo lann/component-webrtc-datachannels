@@ -1,41 +1,41 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@polyengine/ct-runner@0.3.0": "0.3.0",
-    "jsr:@polyengine/protocol@0.1": "0.1.0",
-    "jsr:@polyengine/runtime@0.3": "0.3.0",
-    "jsr:@polyengine/runtime@0.3.0": "0.3.0",
-    "jsr:@polyengine/wasi@0.3.0": "0.3.0"
+    "jsr:@polyengine/ct-runner@0.4.0": "0.4.0",
+    "jsr:@polyengine/protocol@~0.2.1": "0.2.1",
+    "jsr:@polyengine/runtime@0.4": "0.4.0",
+    "jsr:@polyengine/runtime@0.4.0": "0.4.0",
+    "jsr:@polyengine/wasi@0.4.0": "0.4.0"
   },
   "jsr": {
-    "@polyengine/ct-runner@0.3.0": {
-      "integrity": "d58720da80bf29cb6a975e4750a53bbe9b75ab6e3bde1340299ed69726702174",
+    "@polyengine/ct-runner@0.4.0": {
+      "integrity": "a309b2cfc20549068718cea6813ec1553a5c2b2700eb46855582a21116fbc63a",
       "dependencies": [
-        "jsr:@polyengine/runtime@0.3"
+        "jsr:@polyengine/runtime@0.4"
       ]
     },
-    "@polyengine/protocol@0.1.0": {
-      "integrity": "0c97f34166f22ba55e7b084148df96e47aebe47cd9dd13930057759c9161bb1c"
+    "@polyengine/protocol@0.2.1": {
+      "integrity": "857bef84afedc414d47daedf203448f72e8803cf96301afb783b1ac975f3dcec"
     },
-    "@polyengine/runtime@0.3.0": {
-      "integrity": "97d7648c104dd0f08b4d10e1ed0117ab0cb5243db68c139f1f3df25755ed4e60",
+    "@polyengine/runtime@0.4.0": {
+      "integrity": "d34a59d9df58bd48541483619d1987319d8aad4d2e0f3775890177ffb0878a5a",
       "dependencies": [
         "jsr:@polyengine/protocol"
       ]
     },
-    "@polyengine/wasi@0.3.0": {
-      "integrity": "991adfdd39f795f94bba91a523322b88d45ff42800669b5b472356676e3c97e7",
+    "@polyengine/wasi@0.4.0": {
+      "integrity": "b946443255e98cb6156237de90f051af7e483d2afdc0d721bdba64392cdbd896",
       "dependencies": [
         "jsr:@polyengine/protocol",
-        "jsr:@polyengine/runtime@0.3"
+        "jsr:@polyengine/runtime@0.4"
       ]
     }
   },
   "workspace": {
     "dependencies": [
-      "jsr:@polyengine/ct-runner@0.3.0",
-      "jsr:@polyengine/runtime@0.3.0",
-      "jsr:@polyengine/wasi@0.3.0"
+      "jsr:@polyengine/ct-runner@0.4.0",
+      "jsr:@polyengine/runtime@0.4.0",
+      "jsr:@polyengine/wasi@0.4.0"
     ]
   }
 }
