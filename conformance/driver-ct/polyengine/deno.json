@@ -3,11 +3,11 @@
   "nodeModulesDir": "auto",
   "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@polyengine/*", "npm:@jsr/*"] },
   "imports": {
-    "@polyengine/ct-runner": "jsr:@polyengine/ct-runner@0.3.0",
-    "@polyengine/runtime/embedder": "jsr:@polyengine/runtime@0.3.0/embedder",
-    "@polyengine/runtime/shim": "jsr:@polyengine/runtime@0.3.0/shim",
-    "@polyengine/wasi": "jsr:@polyengine/wasi@0.3.0",
-    "@polyengine/translator": "jsr:@polyengine/translator@0.3.0",
+    "@polyengine/ct-runner": "jsr:@polyengine/ct-runner@0.4.0",
+    "@polyengine/runtime/embedder": "jsr:@polyengine/runtime@0.4.0/embedder",
+    "@polyengine/runtime/shim": "jsr:@polyengine/runtime@0.4.0/shim",
+    "@polyengine/wasi": "jsr:@polyengine/wasi@0.4.0",
+    "@polyengine/translator": "jsr:@polyengine/translator@0.4.0",
     "node-datachannel": "npm:node-datachannel@0.32.3",
     "node-datachannel/polyfill": "npm:node-datachannel@0.32.3/polyfill",
     "werift": "npm:werift@0.22.2"

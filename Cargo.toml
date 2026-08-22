@@ -64,7 +64,7 @@ webrtc = { git = "https://github.com/lann/webrtc.git", rev = "15755c6b99458ea5a4
 # cargo pins gate (conformance::_ct-tools), the JS runner-js pin gate
 # (scripts/check-runner-js-pin.sh), and the actions' own ref checks fail
 # on skew.
-component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "38bfedf2b989522b82ddce5320fc1557a2f61461" }
-component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "38bfedf2b989522b82ddce5320fc1557a2f61461" }
-component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "38bfedf2b989522b82ddce5320fc1557a2f61461" }
-component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "38bfedf2b989522b82ddce5320fc1557a2f61461" }
+component-test-sdk = { git = "https://github.com/polymorph-components/polymorph-test", rev = "9f9e4d544b90e3321ac0572be92c57339b963d34" }
+component-test-runner = { git = "https://github.com/polymorph-components/polymorph-test", rev = "9f9e4d544b90e3321ac0572be92c57339b963d34" }
+component-test-formats = { git = "https://github.com/polymorph-components/polymorph-test", rev = "9f9e4d544b90e3321ac0572be92c57339b963d34" }
+component-test-results = { git = "https://github.com/polymorph-components/polymorph-test", rev = "9f9e4d544b90e3321ac0572be92c57339b963d34" }
