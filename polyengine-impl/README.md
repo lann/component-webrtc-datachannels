@@ -38,14 +38,17 @@ a subset of the protocol surface; the conformance suite
 
 ## Module identity
 
-`deno.json` pins `@polyengine/runtime/embedder` to an exact-pinned
-`jsr:@polyengine/runtime@<version>/embedder` specifier that MUST stay
-byte-identical with the one in
+As of A22 (`@polyengine/runtime@0.5.0` / `@polyengine/protocol@0.2.2`), this
+package depends on `@polyengine/protocol` only — host modules must not import
+`@polyengine/runtime` (protocol copies are harmless by construction, so no
+module-identity constraint applies to this package's pin). `deno.json` maps
+`@polyengine/protocol` to a caret range (published dependency constraints
+must be ranges). The runtime-module-identity constraint still applies between
+the two driver configs that load the embedder,
 [`conformance/driver-ct/polyengine/deno.json`](../conformance/driver-ct/polyengine/deno.json)
-(and its `browser/deno.json`): polyengine's `wasi-shims` imports that
-specifier by bare name internally, so two divergent mappings load the
-embedder module twice and `instanceof ComponentException` stops holding across
-the module boundary. The bump procedure lives in
-[`conformance/driver-ct/polyengine/README.md`](../conformance/driver-ct/polyengine/README.md);
-`just polyengine-check` asserts all three configs agree on one version
+and its `browser/deno.json` sibling: see
+[`conformance/driver-ct/polyengine/README.md`](../conformance/driver-ct/polyengine/README.md).
+`just polyengine-check` asserts one resolved `@polyengine/runtime` version
+across those two configs, one resolved `@polyengine/protocol` version across
+all three, and that this package names no `@polyengine/runtime` specifier
 (the pin gate, `scripts/check-polyengine-pin.sh`).

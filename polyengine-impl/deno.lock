@@ -1,22 +1,15 @@
 {
   "version": "5",
   "specifiers": {
-    "jsr:@polyengine/protocol@~0.2.1": "0.2.1",
-    "jsr:@polyengine/runtime@0.4": "0.4.0",
+    "jsr:@polyengine/protocol@~0.2.2": "0.2.2",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "npm:node-datachannel@0.32.3": "0.32.3",
     "npm:werift@0.22.2": "0.22.2"
   },
   "jsr": {
-    "@polyengine/protocol@0.2.1": {
-      "integrity": "857bef84afedc414d47daedf203448f72e8803cf96301afb783b1ac975f3dcec"
-    },
-    "@polyengine/runtime@0.4.0": {
-      "integrity": "d34a59d9df58bd48541483619d1987319d8aad4d2e0f3775890177ffb0878a5a",
-      "dependencies": [
-        "jsr:@polyengine/protocol"
-      ]
+    "@polyengine/protocol@0.2.2": {
+      "integrity": "ff470d7183924119ae181cc513093318f1587f7ad5c4bc02db7344e90c9ff52b"
     },
     "@std/assert@1.0.19": {
       "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
@@ -583,7 +576,7 @@
   },
   "workspace": {
     "dependencies": [
-      "jsr:@polyengine/runtime@0.4",
+      "jsr:@polyengine/protocol@~0.2.2",
       "npm:node-datachannel@0.32.3",
       "npm:werift@0.22.2"
     ]

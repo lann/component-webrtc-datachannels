@@ -30,21 +30,31 @@
 //     messages) / `ReadableStream` (produced, e.g. `receive-via-stream`'s
 //     result — one of the natural JS producers the conventions accept where
 //     a `stream<T>` is expected). Imported from
-//     `@polyengine/runtime/embedder` (pinned in this package's `deno.json` to
-//     the exact release URL every polyengine-facing module in this repository
-//     shares), NOT reimplemented locally: `ComponentException` is a plain branded
+//     `@polyengine/protocol` (this package's only polyengine dependency, per
+//     A22 — host modules must not import `@polyengine/runtime`; pinned in
+//     this package's `deno.json` to a caret range), NOT reimplemented
+//     locally: `ComponentException` is a plain branded
 //     class with no `Store` involvement, so a local clone would produce a
 //     second class identity and every `throw` from this port would fail
-//     `instanceof ComponentException` at a real component boundary — silently
-//     becoming an unbranded-throw trap instead of a guest-visible err.
-//     `deno.json` documents the module-identity constraint.
+//     the `isComponentException` brand check at a real component boundary —
+//     silently becoming an unbranded-throw trap instead of a guest-visible
+//     err. Brand predicates (`isComponentException`, `isStream`), not
+//     `instanceof`, are used against these classes throughout this module —
+//     `instanceof` is not contract behavior across separately-loaded
+//     protocol module copies.
 //   - the inbound buffer bound stays a module-level setter
 //     (`setMaxInboundBufferBytes`), exactly as in the reference: the WIT
 //     does not expose the bound as guest-configurable (it is host policy
 //     per the `data-channel` resource's doc comment), so there is no
 //     guest-facing shape to convert.
 
-import { Stream, type StreamSource, ComponentException } from "@polyengine/runtime/embedder";
+import {
+  ComponentException,
+  isComponentException,
+  isStream,
+  type Stream,
+  type StreamSource,
+} from "@polyengine/protocol";
 import type {
   ConfigError,
   ConnectionState,
@@ -477,7 +487,7 @@ export class DataChannel {
         sent += 1n;
       }
     } catch (error) {
-      const payload: WebrtcError = error instanceof ComponentException
+      const payload: WebrtcError = isComponentException(error)
         ? (error.payload as WebrtcError)
         : (isWebrtcError(error) ? error : { kind: "closed" });
       throw new ComponentException<SendViaStreamError>({ error: payload, sent });
@@ -1082,7 +1092,7 @@ async function collectByteStream(
     } finally {
       reader.releaseLock();
     }
-  } else if (stream instanceof Stream) {
+  } else if (isStream(stream)) {
     const READ_BATCH = 65536;
     for (;;) {
       const chunk = await stream.read(READ_BATCH);

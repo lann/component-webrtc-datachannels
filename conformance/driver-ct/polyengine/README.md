@@ -37,23 +37,33 @@ module graph — no fetch step, no network.
 polyengine ships as exact-pinned JSR prereleases (one per green upstream
 commit; the hash in the version names the commit — see the [polyengine
 README's "Consuming the unstable
-prereleases"](https://github.com/polymorph-components/polyengine#readme)). The version is
-pinned in **three** places, cross-checked by `just polyengine-check`'s pin
-gate (`../../../scripts/check-polyengine-pin.sh`):
+prereleases"](https://github.com/polymorph-components/polyengine#readme)). As
+of A22, the `@polyengine/protocol` line versions independently of the
+`@polyengine/{runtime,translator,wasi,ct-runner}` lockstep line: `just
+polyengine-check`'s pin gate (`../../../scripts/check-polyengine-pin.sh`)
+asserts one resolved `@polyengine/runtime` version across the two configs
+that load the embedder, one resolved `@polyengine/protocol` version across
+all three configs, and that `polyengine-impl` names no `@polyengine/runtime`
+specifier at all (published host modules must not import
+`@polyengine/runtime` — see `../../../polyengine-impl/README.md`).
 
 - `deno.json` (this directory) — import-map versions
   (`jsr:@polyengine/<pkg>@<version>`) for `@polyengine/ct-runner`,
   `@polyengine/runtime/embedder`, `@polyengine/runtime/shim`,
-  `@polyengine/wasi-shims`, `@polyengine/translator`. `deno.lock` carries
-  integrity hashes for that module graph, enforced with `--frozen`.
+  `@polyengine/wasi`, `@polyengine/translator`, `@polyengine/protocol`.
+  `deno.lock` carries integrity hashes for that module graph, enforced
+  with `--frozen`.
+- [`browser/deno.json`](browser/deno.json) — the SAME `@polyengine/runtime`
+  and `@polyengine/protocol` pins again (the module-identity constraint:
+  stateful handles minted by one embedder copy are refused by another, so
+  every config that loads the embedder must agree), with the npm WebRTC
+  backends stubbed out (never executed in a page).
 - [`../../../polyengine-impl/deno.json`](../../../polyengine-impl/deno.json) —
-  the SAME `@polyengine/runtime/embedder` version (the module-identity
-  constraint: polyengine's `wasi-shims` imports that specifier by bare name
-  internally, so every config resolving it must agree, or the embedder
-  module loads twice and `instanceof ComponentException` stops holding across
-  the boundary).
-- [`browser/deno.json`](browser/deno.json) — the SAME pins again, with
-  the npm WebRTC backends stubbed out (never executed in a page).
+  the SAME `@polyengine/protocol` version only. As of A22 this package (a
+  published host module) does not map `@polyengine/runtime` at all: its
+  copies of `@polyengine/protocol` are harmless by construction, so it no
+  longer participates in the runtime module-identity constraint above.
+
 
 Each `deno.json` also carries a
 `"minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@polyengine/*"] }`
