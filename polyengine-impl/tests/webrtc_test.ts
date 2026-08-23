@@ -21,7 +21,7 @@ import {
   resetMaxInboundBufferBytes,
   setMaxInboundBufferBytes,
 } from "../src/webrtc.ts";
-import { ComponentException } from "@polyengine/runtime/embedder";
+import { ComponentException } from "@polyengine/protocol";
 import type { IceCandidate, Message, WebrtcError } from "../src/types.ts";
 
 const NO_SANITIZE = { sanitizeResources: false, sanitizeOps: false };

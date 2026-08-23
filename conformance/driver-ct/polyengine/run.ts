@@ -19,12 +19,13 @@
 // <path>` remains as an optional override (a documented interface for
 // swapping in a locally built shim), but is no longer required to run.
 //
-// MODULE-IDENTITY CONSTRAINT: polyengine's wasi module imports
-// `@polyengine/runtime/embedder` by bare specifier internally; this leg's
-// `deno.json` AND `polyengine-impl/deno.json` (AND `browser/deno.json`) must
-// map that specifier to the IDENTICAL pinned JSR version, or the embedder
-// module loads twice and `instanceof ComponentException` stops holding across the
-// module boundary.
+// MODULE-IDENTITY CONSTRAINT (A22): this leg's `deno.json` AND
+// `browser/deno.json` still load the embedder (`@polyengine/runtime/embedder`)
+// and must map it to the IDENTICAL pinned JSR version, or stateful handles
+// minted by one copy are refused by another. `polyengine-impl/deno.json` no
+// longer maps `@polyengine/runtime` at all — as of A22 it depends only on
+// `@polyengine/protocol`, whose copies are harmless by construction, so it
+// no longer participates in this constraint.
 
 import { Translator } from "@polyengine/runtime/shim";
 import { defaultTranslator } from "@polyengine/translator";

@@ -10,7 +10,7 @@
 // Failures are thrown as the WIT `error` variant's `other` case, which the
 // runtime lifts into the `result<_, error>` the mailbox interface declares.
 
-import { ComponentException } from "@polyengine/runtime/embedder";
+import { ComponentException } from "@polyengine/protocol";
 
 /** The mailbox interface's WIT id (conformance/wit/deps/conformance-signaling). */
 export const MAILBOX_INTERFACE = "conformance:signaling/mailbox@0.1.0";

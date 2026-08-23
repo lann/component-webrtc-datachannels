@@ -1,13 +1,14 @@
 {
-  "//": "MODULE-IDENTITY CONSTRAINT: polyengine's wasi module imports @polyengine/runtime/embedder by bare specifier internally. Every config in this repo (this file AND polyengine-impl/deno.json AND browser/deno.json) must map that specifier to the IDENTICAL exact-pinned JSR version, or the embedder module loads twice and `instanceof ComponentException` stops holding across the module boundary. polyengine ships as exact-pinned JSR releases (caret-honest upstream; per-commit `<next>-pre.g<hash>` prereleases exist between releases — pin exactly); the lock carries integrity and --frozen enforces it; the pin gate (`just polyengine-check`) asserts one version repo-wide. The npm mappings mirror polyengine-impl/deno.json: the host module's bare `node-datachannel/polyfill` / `werift` specifiers resolve against THIS config when run.ts is the entry module.",
+  "//": "MODULE-IDENTITY CONSTRAINT (A22): this file AND browser/deno.json still load the embedder (@polyengine/runtime/embedder) and must map it to the IDENTICAL exact-pinned JSR version, or stateful handles minted by one copy are refused by another. polyengine-impl/deno.json no longer participates in this constraint: as of A22, published host modules (like polyengine-impl) depend only on @polyengine/protocol, whose copies are harmless by construction. @polyengine/protocol itself must resolve to one version across ALL THREE configs in this repo (this file, browser/deno.json, and polyengine-impl/deno.json), since it carries the vocabulary (ComponentException, Stream, brand predicates, ...) that crosses those module boundaries. polyengine ships as exact-pinned JSR releases (caret-honest upstream; per-commit `<next>-pre.g<hash>` prereleases exist between releases — pin exactly); the lock carries integrity and --frozen enforces it; the pin gate (`just polyengine-check`) asserts this repo-wide. The npm mappings mirror polyengine-impl/deno.json: the host module's bare `node-datachannel/polyfill` / `werift` specifiers resolve against THIS config when run.ts is the entry module.",
   "nodeModulesDir": "auto",
   "minimumDependencyAge": { "age": "P1D", "exclude": ["jsr:@polyengine/*", "npm:@jsr/*"] },
   "imports": {
-    "@polyengine/ct-runner": "jsr:@polyengine/ct-runner@0.4.0",
-    "@polyengine/runtime/embedder": "jsr:@polyengine/runtime@0.4.0/embedder",
-    "@polyengine/runtime/shim": "jsr:@polyengine/runtime@0.4.0/shim",
-    "@polyengine/wasi": "jsr:@polyengine/wasi@0.4.0",
-    "@polyengine/translator": "jsr:@polyengine/translator@0.4.0",
+    "@polyengine/ct-runner": "jsr:@polyengine/ct-runner@0.5.0",
+    "@polyengine/runtime/embedder": "jsr:@polyengine/runtime@0.5.0/embedder",
+    "@polyengine/runtime/shim": "jsr:@polyengine/runtime@0.5.0/shim",
+    "@polyengine/wasi": "jsr:@polyengine/wasi@0.5.0",
+    "@polyengine/translator": "jsr:@polyengine/translator@0.5.0",
+    "@polyengine/protocol": "jsr:@polyengine/protocol@0.2.2",
     "node-datachannel": "npm:node-datachannel@0.32.3",
     "node-datachannel/polyfill": "npm:node-datachannel@0.32.3/polyfill",
     "werift": "npm:werift@0.22.2"

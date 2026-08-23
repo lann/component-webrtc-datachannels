@@ -5,7 +5,7 @@
 // read-only reference). Enums are kebab-case string literal unions; variants
 // are `{ kind, value? }`; records are plain camelCase objects.
 
-import type { Stream, StreamSource } from "@polyengine/runtime/embedder";
+import type { Stream, StreamSource } from "@polyengine/protocol";
 
 // --- error -----------------------------------------------------------------
 
