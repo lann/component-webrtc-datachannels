@@ -71,7 +71,7 @@ export async function run(config: PageConfig): Promise<void> {
     const { plan, adapters } = translator.translate(suiteBytes);
 
     const imports = {
-      ...wasi({ cli: { env, passthrough: false } }),
+      ...wasi({ cli: { env } }),
       ...webrtcImports(),
       ...mailboxImports(),
     };
