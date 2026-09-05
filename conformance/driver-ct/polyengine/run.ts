@@ -142,7 +142,7 @@ async function main() {
 
   const artifacts = await loadArtifacts(cli.translator, cli.suite);
   const imports = {
-    ...wasi({ cli: { env, passthrough: false } }),
+    ...wasi({ cli: { env } }),
     ...webrtcImports(),
     ...mailboxImports(),
   };
